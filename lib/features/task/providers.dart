@@ -167,10 +167,17 @@ class TasksController extends StateNotifier<TasksState> {
   Future<Map<int, bool>> _loadInstanceDone(List<Task> tasks) async {
     final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
+    // P2-1：批量预取今日完成记录（此前逐任务查库）
+    final ids = tasks.where((t) => t.rrule.isNotEmpty).map((t) => t.id).toList();
+    final doneSet = await _db.getCompletedSetForTasks(
+      ids,
+      today,
+      today,
+    );
     final result = <int, bool>{};
     for (final t in tasks) {
       if (t.rrule.isEmpty) continue;
-      result[t.id] = await _db.isInstanceCompleted(t.id, today);
+      result[t.id] = doneSet.contains(_doneKey(t.id, today));
     }
     return result;
   }
@@ -179,10 +186,18 @@ class TasksController extends StateNotifier<TasksState> {
   Future<Map<int, bool>> _loadTodayHas(List<Task> tasks) async {
     final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
+    // P2-1：批量预取例外（此前逐任务查库）
+    final ids = tasks.where((t) => t.rrule.isNotEmpty).map((t) => t.id).toList();
+    final exMap = await _db.getExceptionsForTasks(ids);
     final result = <int, bool>{};
     for (final t in tasks) {
       if (t.rrule.isEmpty) continue;
-      result[t.id] = (await _db.expandTaskForDate(t, today)).isNotEmpty;
+      result[t.id] = (await _db.expandTaskForDateWith(
+        t,
+        today,
+        exMap[t.id] ?? const [],
+      ))
+          .isNotEmpty;
     }
     return result;
   }
@@ -191,15 +206,42 @@ class TasksController extends StateNotifier<TasksState> {
   Future<Map<int, DateTime?>> _loadNextInstances(List<Task> tasks) async {
     final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
+    // P2-1：批量预取例外 + 未来窗口完成记录（此前每个任务 2-3 次查库）；
+    // 窗口按所有重复任务中最大的 windowDaysFor 覆盖
+    final recTasks = tasks.where((t) => t.rrule.isNotEmpty).toList();
+    final ids = recTasks.map((t) => t.id).toList();
+    final exMap = await _db.getExceptionsForTasks(ids);
+    var maxWindow = 370;
+    for (final t in recTasks) {
+      final w = RruleService.windowDaysFor(t.rrule);
+      if (w > maxWindow) maxWindow = w;
+    }
+    final doneSet = await _db.getCompletedSetForTasks(
+      ids,
+      today,
+      today.add(Duration(days: maxWindow)),
+    );
     final result = <int, DateTime?>{};
-    for (final t in tasks) {
-      if (t.rrule.isEmpty) continue;
-      result[t.id] = await _nextInstanceDate(t, today);
+    for (final t in recTasks) {
+      result[t.id] = await _nextInstanceDate(
+        t,
+        today,
+        exMap[t.id] ?? const [],
+        doneSet,
+      );
     }
     return result;
   }
 
-  Future<DateTime?> _nextInstanceDate(Task t, DateTime today) async {
+  static String _doneKey(int taskId, DateTime d) =>
+      '${taskId}_${d.year}_${d.month}_${d.day}';
+
+  Future<DateTime?> _nextInstanceDate(
+    Task t,
+    DateTime today,
+    List<TaskException> exceptions,
+    Set<String> doneSet,
+  ) async {
     final base = t.planStart ?? t.createdAt;
     // P0-7：窗口至少覆盖一个完整周期（每 2 年任务不再被 370 天窗口
     // 误判为"无下次实例"）
@@ -211,8 +253,10 @@ class TasksController extends StateNotifier<TasksState> {
       limit: 400,
     );
     for (final inst in instances) {
-      if ((await _db.expandTaskForDate(t, inst)).isEmpty) continue;
-      if (await _db.isInstanceCompleted(t.id, inst)) continue;
+      if ((await _db.expandTaskForDateWith(t, inst, exceptions)).isEmpty) {
+        continue;
+      }
+      if (doneSet.contains(_doneKey(t.id, inst))) continue;
       return inst;
     }
     // P1-4.6：系列已结束或未来实例全部完成 → 无下次实例（不回落今天）

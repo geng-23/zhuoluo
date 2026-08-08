@@ -435,6 +435,11 @@ class AppDatabase extends _$AppDatabase {
                           t.planStart.isSmallerThanValue(end))),
             ))
             .get();
+    // P2-1：批量预取例外与完成记录（此前逐任务逐日查库 = N×D 次查询，
+    // 重复任务多时智能清单卡顿；与日历 getCalendarItems 预取模式一致）
+    final taskIds = rows.map((t) => t.id).toList();
+    final exMap = await getExceptionsForTasks(taskIds);
+    final doneSet = await getCompletedSetForTasks(taskIds, start, end);
     final result = <Task>[];
     for (final t in rows) {
       if (t.parentId != null) continue; // 子任务不进智能清单
@@ -442,8 +447,13 @@ class AppDatabase extends _$AppDatabase {
       if (t.rrule.isNotEmpty) {
         var day = start;
         while (day.isBefore(end)) {
-          final hit = await expandTaskForDate(t, day);
-          if (hit.isNotEmpty && !await isInstanceCompleted(t.id, day)) {
+          final hit = await expandTaskForDateWith(
+            t,
+            day,
+            exMap[t.id] ?? const [],
+          );
+          if (hit.isNotEmpty &&
+              !doneSet.contains(_doneKey(t.id, day))) {
             result.add(t);
             break;
           }
@@ -455,6 +465,55 @@ class AppDatabase extends _$AppDatabase {
     }
     return result;
   }
+
+  /// 批量预取例外：一次 IN 查询返回 {taskId: [例外]}。
+  /// P2-1：与 getCalendarItems 预取模式同源（例外表通常很小，全量预取）。
+  /// 防空：ids 为空直接返回空 map（drift isIn([]) 会生成非法 SQL）。
+  Future<Map<int, List<TaskException>>> getExceptionsForTasks(
+    List<int> ids,
+  ) async {
+    if (ids.isEmpty) return {};
+    final rows = await (select(
+      taskExceptions,
+    )..where((e) => e.taskId.isIn(ids))).get();
+    final map = <int, List<TaskException>>{};
+    for (final ex in rows) {
+      map.putIfAbsent(ex.taskId, () => []).add(ex);
+    }
+    return map;
+  }
+
+  /// 批量预取完成记录：一次 IN + 日期范围查询（[to] 排他，内部 +1 天），
+  /// 返回 'taskId_年_月_日' 集合（与 isInstanceCompleted 的 00:00 基准一致）。
+  /// P2-1：防空同 getExceptionsForTasks。
+  Future<Set<String>> getCompletedSetForTasks(
+    List<int> ids,
+    DateTime from,
+    DateTime to,
+  ) async {
+    if (ids.isEmpty) return {};
+    final start = DateTime(from.year, from.month, from.day);
+    final end = DateTime(
+      to.year,
+      to.month,
+      to.day,
+    ).add(const Duration(days: 1));
+    final rows = await (select(
+      taskCompletions,
+    )..where(
+          (c) =>
+              c.taskId.isIn(ids) &
+              c.instanceDate.isBiggerOrEqualValue(start) &
+              c.instanceDate.isSmallerThanValue(end),
+        )).get();
+    return {
+      for (final c in rows) _doneKey(c.taskId, c.instanceDate),
+    };
+  }
+
+  /// 完成记录集合的 key：与 getCalendarItems 的 doneSet 同格式
+  static String _doneKey(int taskId, DateTime d) =>
+      '${taskId}_${d.year}_${d.month}_${d.day}';
 
   /// 智能清单：全部（未完成，不含子任务；P1-4.6：排除已结束的有限重复系列）
   Future<List<Task>> getAllUncompleted() async {
@@ -506,8 +565,9 @@ class AppDatabase extends _$AppDatabase {
       if (t.rrule.isEmpty) {
         if (t.completedAt != null) done.add(t);
       } else {
-        // 重复任务：今天实例已完成 → 显示在已完成视图
-        if (await isInstanceCompleted(t.id, today)) done.add(t);
+        // P2-1：重复任务"今天已完成"直接用已预取的今日完成记录判断
+        //（此前逐任务 isInstanceCompleted 再查一次库）
+        if (completedAtByTask.containsKey(t.id)) done.add(t);
       }
     }
     done.sort(
@@ -894,6 +954,9 @@ class AppDatabase extends _$AppDatabase {
       to.day,
     ).add(const Duration(days: 1));
     final listIds = await getVisibleCalendarListIds();
+    // P2-1 防空：全部清单都从日历隐藏时 listIds 为空，
+    // isIn([]) 会生成非法 SQL（IN ()）——直接返回空
+    if (listIds.isEmpty) return const [];
     final tasksAll = await (select(
       tasks,
     )..where((t) => t.listId.isIn(listIds))).get();
@@ -1434,10 +1497,19 @@ class AppDatabase extends _$AppDatabase {
                   t.parentId.isNull(),
             ))
             .get();
+    // P2-1：批量预取例外（此前逐任务逐日查库 = N×D 次，统计月/年视图
+    // 在重复任务多时秒级假死）
+    final exMap = await getExceptionsForTasks(
+      recRows.map((t) => t.id).toList(),
+    );
     for (final t in recRows) {
       var day = start;
       while (day.isBefore(end)) {
-        final hit = await expandTaskForDate(t, day);
+        final hit = await expandTaskForDateWith(
+          t,
+          day,
+          exMap[t.id] ?? const [],
+        );
         if (hit.isNotEmpty) add(day);
         day = day.add(const Duration(days: 1));
       }

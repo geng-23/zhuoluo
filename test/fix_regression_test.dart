@@ -451,4 +451,78 @@ void main() {
       );
     });
   });
+
+  group('P2-1 N+1 批量预取', () {
+    test('批量预取方法：空 ids 防空返回空（不生成 IN () 非法 SQL）', () async {
+      expect(await db.getExceptionsForTasks([]), isEmpty);
+      expect(await db.getCompletedSetForTasks([], today, today), isEmpty);
+    });
+
+    test('清单全隐藏时 getCalendarItems 不崩（listIds 为空防空）', () async {
+      final id = await insertTask(
+        title: '任务A',
+        planStart: today,
+        isAllDay: true,
+      );
+      final list = await db.getListById((await db.getTask(id))!.listId);
+      await db.updateList(list!.id, showInCalendar: false);
+      final items = await db.getCalendarItems(today, today);
+      expect(items, isEmpty, reason: '全部清单隐藏后日历应为空而非崩溃');
+    });
+
+    test('智能清单：窗口外完成记录不影响"今天"视图（预取范围正确）', () async {
+      final start = today.subtract(const Duration(days: 30));
+      final id = await insertTask(
+        title: '每日任务',
+        rrule: 'FREQ=DAILY',
+        planStart: start,
+      );
+      // 30 天前的实例已完成（窗口外），今天的实例未完成
+      await db.completeInstance(id, start);
+      final todayList = await db.getTasksForDate(today);
+      expect(
+        todayList.any((t) => t.id == id),
+        isTrue,
+        reason: '窗口外完成记录不应让今天的任务消失',
+      );
+    });
+
+    test('智能清单：窗口内完成记录让任务从"今天"消失', () async {
+      final start = today.subtract(const Duration(days: 5));
+      final id = await insertTask(
+        title: '每日任务',
+        rrule: 'FREQ=DAILY',
+        planStart: start,
+      );
+      await db.completeInstance(id, today);
+      final todayList = await db.getTasksForDate(today);
+      expect(
+        todayList.any((t) => t.id == id),
+        isFalse,
+        reason: '今天实例已完成 → 不出现在"今天"视图',
+      );
+    });
+
+    test('统计计划数：预取后跳过/例外语义不变', () async {
+      final start = today.subtract(const Duration(days: 10));
+      final id = await insertTask(
+        title: '每日任务',
+        rrule: 'FREQ=DAILY',
+        planStart: start,
+      );
+      // 跳过今天
+      await db.updateTask(
+        id,
+        TasksCompanion(
+          skippedDates: Value(
+            jsonEncode([today.toIso8601String()]),
+          ),
+        ),
+      );
+      final planned = await db.getPlannedCountByDay(today, today);
+      expect(planned[today], isNull,
+          reason: '跳过今天的重复任务不计入今天的计划数');
+      expect(planned.values.fold<int>(0, (a, b) => a + b), 0);
+    });
+  });
 }

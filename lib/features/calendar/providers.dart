@@ -1,5 +1,5 @@
 ﻿import 'package:drift/drift.dart' show Value;
-import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/foundation.dart' show ValueNotifier, visibleForTesting;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
@@ -14,6 +14,9 @@ class CalendarState {
   final DateTime selectedDay; // 选中的日期
   final String view; // month / week / day
   final List<CalendarItem> items; // 当前加载的日历条目
+  /// P2-1/丝滑翻页：按天索引的日历条目（key = yyyymmdd 整数），
+  /// 视图层据此 O(1) 取当天数据（此前每页 build 全窗口扫描）
+  final Map<int, List<CalendarItem>> byDay;
   final bool loading;
 
   const CalendarState({
@@ -21,6 +24,7 @@ class CalendarState {
     required this.selectedDay,
     this.view = 'week',
     this.items = const [],
+    this.byDay = const {},
     this.loading = true,
   });
 
@@ -29,12 +33,14 @@ class CalendarState {
     DateTime? selectedDay,
     String? view,
     List<CalendarItem>? items,
+    Map<int, List<CalendarItem>>? byDay,
     bool? loading,
   }) => CalendarState(
     displayedMonth: displayedMonth ?? this.displayedMonth,
     selectedDay: selectedDay ?? this.selectedDay,
     view: view ?? this.view,
     items: items ?? this.items,
+    byDay: byDay ?? this.byDay,
     loading: loading ?? this.loading,
   );
 }
@@ -51,10 +57,11 @@ class CalendarController extends StateNotifier<CalendarState> {
           selectedDay: AppClock.now(),
         ),
       ) {
-    // I3：#23 实时同步——数据版本变化自动刷新
+    // I3：#23 实时同步——数据版本变化自动刷新（缓存失效重拉）
     _ref.listen<int>(dataVersionProvider, (prev, next) {
       if (prev != next) {
-        load();
+        _invalidateCache();
+        load(force: true);
       }
     });
     load();
@@ -109,18 +116,91 @@ class CalendarController extends StateNotifier<CalendarState> {
   /// 加载请求序号：快速翻页/切换时丢弃过期结果，避免旧数据覆盖新数据
   int _loadSeq = 0;
 
-  Future<void> load() async {
+  // ---------- 丝滑翻页：窗口缓存（翻页/切视图命中缓存 = 零 DB） ----------
+
+  /// 按天缓存：key = yyyymmdd 整数
+  final Map<int, List<CalendarItem>> _cache = {};
+  /// 缓存覆盖的天区间（闭区间，dayKey 整数）；null = 无缓存
+  int? _cacheFromKey;
+  int? _cacheToKey;
+
+  /// 测试用：实际 DB 查询次数（翻页命中缓存不增加）
+  @visibleForTesting
+  int loadCount = 0;
+
+  static int _dayKey(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
+
+  static Map<int, List<CalendarItem>> _byDayFor(List<CalendarItem> items) {
+    final map = <int, List<CalendarItem>>{};
+    for (final it in items) {
+      map.putIfAbsent(_dayKey(it.instanceDate), () => []).add(it);
+    }
+    return map;
+  }
+
+  bool _cacheCovers(DateTime from, DateTime to) {
+    final f = _cacheFromKey;
+    final t = _cacheToKey;
+    return f != null && t != null && _dayKey(from) >= f && _dayKey(to) <= t;
+  }
+
+  /// 缓存失效（数据版本变化/写操作后调用）：
+  /// 清空按天缓存与覆盖区间，下次 load 强制重查
+  void _invalidateCache() {
+    _cache.clear();
+    _cacheFromKey = null;
+    _cacheToKey = null;
+  }
+
+  /// 从缓存取出 [from, to] 范围内的条目（按天升序）
+  List<CalendarItem> _itemsInRange(DateTime from, DateTime to) {
+    final f = _dayKey(from);
+    final t = _dayKey(to);
+    final result = <CalendarItem>[];
+    for (final entry in _cache.entries) {
+      if (entry.key >= f && entry.key <= t) {
+        result.addAll(entry.value);
+      }
+    }
+    return result;
+  }
+
+  /// 加载/确保当前视图范围数据。
+  /// - 命中缓存（含 31 天扩展缓冲）→ 同步出数据，零 DB、无异步二次重建
+  /// - 未命中 → 查询 [范围 ± 31 天] 重建缓存（替换式，保证一致性）
+  /// [force]：数据版本变化/写操作后强制重查
+  Future<void> load({bool force = false}) async {
     final seq = ++_loadSeq;
     final (from, to) = _range;
     // A13：仅首次（items 为空）置 loading——翻页/切视图的重复 load 不再
-    // 触发 loading:true → items 两次状态变更（每次 ref.watch 全页重建，
-    // 中端机横滑翻页时明显卡顿）；日历页 spinner 本就只依赖首次空态
-    if (state.items.isEmpty) {
+    // 触发 loading:true → items 两次状态变更（每次 ref.watch 全页重建）
+    if (state.items.isEmpty && !force) {
       state = state.copyWith(loading: true);
     }
-    final items = await _db.getCalendarItems(from, to);
+    // 命中缓存（且未强制）：直接从缓存出数据，零 DB
+    if (!force && _cacheCovers(from, to)) {
+      final items = _itemsInRange(from, to);
+      state = state.copyWith(
+        items: items,
+        byDay: _byDayFor(items),
+        loading: false,
+      );
+      return;
+    }
+    loadCount++;
+    // 扩展缓冲：月视图 ±1 月、周/日视图覆盖前后多周/多日，
+    // 连续翻页在手势动画内零 DB
+    final bufFrom = from.subtract(const Duration(days: 31));
+    final bufTo = to.add(const Duration(days: 31));
+    final fetched = await _db.getCalendarItems(bufFrom, bufTo);
     if (!mounted || seq != _loadSeq) return; // 过期请求结果丢弃
-    state = state.copyWith(items: items, loading: false);
+    _cache
+      ..clear()
+      ..addAll(_byDayFor(fetched));
+    _cacheFromKey = _dayKey(bufFrom);
+    _cacheToKey = _dayKey(bufTo);
+    final items = _itemsInRange(from, to);
+    state = state.copyWith(items: items, byDay: _byDayFor(items), loading: false);
   }
 
   void setView(String view) {

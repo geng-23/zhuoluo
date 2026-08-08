@@ -80,12 +80,29 @@ void main() {
       listColor: '#4F8EF7',
     );
 
+    // P2-1：effectiveStartHourFor 改按天分组驱动（与 CalendarController.byDay 同口径）
+    Map<int, List<CalendarItem>> grouped(List<CalendarItem> items) {
+      final m = <int, List<CalendarItem>>{};
+      for (final it in items) {
+        m.putIfAbsent(
+          it.instanceDate.year * 10000 +
+              it.instanceDate.month * 100 +
+              it.instanceDate.day,
+          () => [],
+        ).add(it);
+      }
+      return m;
+    }
+
     test('无 06:00 前任务 → 保持默认 6', () {
       final t = task(
         planStart: DateTime(2026, 8, 8, 8, 0),
         planEnd: DateTime(2026, 8, 8, 9, 0),
       );
-      expect(effectiveStartHourFor(items: [item(t, days.first)], days: days), 6);
+      expect(
+        effectiveStartHourFor(byDay: grouped([item(t, days.first)]), days: days),
+        6,
+      );
     });
 
     test('05:00 任务 → 起始小时扩展到 5（任务不再隐形）', () {
@@ -93,7 +110,10 @@ void main() {
         planStart: DateTime(2026, 8, 8, 5, 30),
         planEnd: DateTime(2026, 8, 8, 6, 0),
       );
-      expect(effectiveStartHourFor(items: [item(t, days.first)], days: days), 5);
+      expect(
+        effectiveStartHourFor(byDay: grouped([item(t, days.first)]), days: days),
+        5,
+      );
     });
 
     test('全天任务不计入起始小时', () {
@@ -102,8 +122,11 @@ void main() {
         planEnd: DateTime(2026, 8, 8, 5, 0),
         isAllDay: true,
       );
-      expect(effectiveStartHourFor(items: [item(t, days.first)], days: days), 6,
-          reason: '全天任务在置顶区，不参与时间轴起始计算');
+      expect(
+        effectiveStartHourFor(byDay: grouped([item(t, days.first)]), days: days),
+        6,
+        reason: '全天任务在置顶区，不参与时间轴起始计算',
+      );
     });
 
     test('仅显示范围外的早任务不影响（其它日期 03:00 任务不拉低本周起点）', () {
@@ -113,11 +136,11 @@ void main() {
       );
       expect(
         effectiveStartHourFor(
-          items: [item(t, DateTime(2026, 8, 3))], // 实例日在显示范围外
+          byDay: grouped([item(t, DateTime(2026, 8, 3))]), // 实例日在显示范围外
           days: days,
         ),
         6,
-        reason: 'items 中非显示日的任务不参与计算',
+        reason: '显示范围外的任务不参与计算',
       );
     });
 
@@ -126,7 +149,10 @@ void main() {
         planStart: DateTime(2026, 8, 8, 22, 0),
         planEnd: DateTime(2026, 8, 9, 1, 0),
       );
-      expect(effectiveStartHourFor(items: [item(t, days.first)], days: days), 6);
+      expect(
+        effectiveStartHourFor(byDay: grouped([item(t, days.first)]), days: days),
+        6,
+      );
     });
 
     test('取最早任务小时', () {
@@ -142,7 +168,7 @@ void main() {
       );
       expect(
         effectiveStartHourFor(
-          items: [item(t1, days.first), item(t2, days.first)],
+          byDay: grouped([item(t1, days.first), item(t2, days.first)]),
           days: days,
         ),
         4,

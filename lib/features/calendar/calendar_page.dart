@@ -9,8 +9,24 @@ import 'package:zhuoluo/features/calendar/views.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 日历页（E12：视图切换/月份选择/今天/添加收进左侧侧边栏）
+/// 丝滑交互：左右边缘 24dp 区域滑动切换底部 tab（左缘右滑 → 上一个，
+/// 右缘左滑 → 下一个），中间区域滑动翻月/翻周/翻日。
+/// 实现：body 视图收窄 24dp×2，边缘为独立手势区——与 PageView 零手势竞争，
+/// 任务块点击/长按/拖动不受影响（拖动边缘翻周由 Draggable 全局坐标驱动）。
 class CalendarPage extends ConsumerWidget {
-  const CalendarPage({super.key});
+  const CalendarPage({
+    super.key,
+    this.onNavigateLeft,
+    this.onNavigateRight,
+  });
+
+  /// 屏幕左边缘向右滑（切到上一个 tab，如任务）
+  final VoidCallback? onNavigateLeft;
+  /// 屏幕右边缘向左滑（切到下一个 tab，如四象限）
+  final VoidCallback? onNavigateRight;
+
+  /// 边缘手势区宽度（dp）：视图整体收窄 2×edgeWidth
+  static const double edgeWidth = 24;
 
   static final GlobalKey<ScaffoldState> scaffoldKey =
       GlobalKey<ScaffoldState>();
@@ -21,6 +37,9 @@ class CalendarPage extends ConsumerWidget {
     final notifier = ref.read(calendarControllerProvider.notifier);
     return Scaffold(
       key: scaffoldKey,
+      // 丝滑交互：禁用抽屉边缘拖拽——右缘滑动让位给"切下一个 tab"手势
+      //（抽屉仍可通过 AppBar 菜单按钮打开）
+      drawerEdgeDragWidth: 0,
       appBar: AppBar(
         title: InkWell(
           onTap: () => _pickDate(context, notifier, state),
@@ -42,24 +61,30 @@ class CalendarPage extends ConsumerWidget {
         onAdd: () => _openQuickAdd(context, ref),
         onPickDate: (d) => notifier.setSelectedDay(d),
       ),
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(
-            // 修复：仅首次（无数据）显示 spinner；后续 load（改期/勾选/翻页）
-            // 不整页替换——否则视图 State 销毁、滚动位置/翻页位置全部重置
-            child: (state.loading && state.items.isEmpty)
-                ? const Center(child: CircularProgressIndicator())
-                // A14：月/周/日视图切换淡入过渡（此前瞬间硬切）
-                : AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 200),
-                    switchInCurve: Curves.easeOut,
-                    switchOutCurve: Curves.easeIn,
-                    transitionBuilder: (child, anim) =>
-                        FadeTransition(opacity: anim, child: child),
-                    child: switch (state.view) {
-                      'month' => MonthPager(
+          // 中间视图（收窄，边缘让位给手势区）
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: edgeWidth),
+              child: Column(
+                children: [
+                  Expanded(
+                    // 修复：仅首次（无数据）显示 spinner；后续 load（改期/勾选/翻页）
+                    // 不整页替换——否则视图 State 销毁、滚动位置/翻页位置全部重置
+                    child: (state.loading && state.items.isEmpty)
+                        ? const Center(child: CircularProgressIndicator())
+                        : AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            switchInCurve: Curves.easeOut,
+                            switchOutCurve: Curves.easeIn,
+                            transitionBuilder: (child, anim) =>
+                                FadeTransition(opacity: anim, child: child),
+                            child: switch (state.view) {
+                              'month' => MonthPager(
                         key: const ValueKey('view-month'),
                         items: state.items,
+                        byDay: state.byDay,
                         displayedMonth: state.displayedMonth,
                         selectedDay: state.selectedDay,
                         onMonthChanged: (m) => notifier.setDisplayedMonth(m),
@@ -78,6 +103,7 @@ class CalendarPage extends ConsumerWidget {
                       'week' => WeekView(
                         key: const ValueKey('view-week'),
                         items: state.items,
+                        byDay: state.byDay,
                         selectedDay: state.selectedDay,
                         // 周↔日切换共享滚动位置
                         sharedScrollOffset: notifier.globalScrollOffset,
@@ -88,6 +114,7 @@ class CalendarPage extends ConsumerWidget {
                       'day' => DayView(
                         key: const ValueKey('view-day'),
                         items: state.items,
+                        byDay: state.byDay,
                         selectedDay: state.selectedDay,
                         sharedScrollOffset: notifier.globalScrollOffset,
                         onDayChanged: (d) {
@@ -97,9 +124,33 @@ class CalendarPage extends ConsumerWidget {
                       _ => const SizedBox.shrink(),
                     },
                   ),
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
+        ),
+        // 左边缘手势区：右滑 → 上一个 tab（任务）
+        Positioned(
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: edgeWidth,
+          child: _EdgeSwipeStrip(
+            onSwipeRight: onNavigateLeft,
+          ),
+        ),
+        // 右边缘手势区：左滑 → 下一个 tab（四象限）
+        Positioned(
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: edgeWidth,
+          child: _EdgeSwipeStrip(
+            onSwipeLeft: onNavigateRight,
+          ),
+        ),
+      ],
+    ),
     );
   }
 
@@ -165,6 +216,34 @@ class CalendarPage extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       builder: (c) => DayPreviewSheet(day: day),
+    );
+  }
+}
+
+/// 边缘滑动切 tab 手势区（丝滑交互）：
+/// 覆盖屏幕左/右边缘 24dp 独立区域（视图已收窄，与其零手势竞争），
+/// 快速右滑 → [onSwipeRight]，快速左滑 → [onSwipeLeft]。
+/// 拖动任务到边缘翻周/日由 Draggable 全局坐标驱动（views.dart _handleDragGlobal），
+/// 与此手势区互不干扰（拖动起点在任务块上，本区 recognizer 不参与）。
+class _EdgeSwipeStrip extends StatelessWidget {
+  const _EdgeSwipeStrip({this.onSwipeRight, this.onSwipeLeft});
+
+  final VoidCallback? onSwipeRight;
+  final VoidCallback? onSwipeLeft;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragEnd: (details) {
+        final v = details.primaryVelocity ?? 0;
+        if (v > 400) {
+          onSwipeRight?.call();
+        } else if (v < -400) {
+          onSwipeLeft?.call();
+        }
+      },
+      child: const ColoredBox(color: Colors.transparent),
     );
   }
 }
@@ -273,6 +352,7 @@ class MonthPager extends ConsumerStatefulWidget {
   const MonthPager({
     super.key,
     required this.items,
+    required this.byDay,
     required this.displayedMonth,
     required this.selectedDay,
     required this.onMonthChanged,
@@ -281,6 +361,8 @@ class MonthPager extends ConsumerStatefulWidget {
   });
 
   final List<CalendarItem> items;
+  /// 按天分组索引（P2-1：月视图不再逐项遍历建分组）
+  final Map<int, List<CalendarItem>> byDay;
   final DateTime displayedMonth;
   final DateTime selectedDay;
   final ValueChanged<DateTime> onMonthChanged;
@@ -339,6 +421,7 @@ class _MonthPagerState extends ConsumerState<MonthPager> {
         final month = page % 12 + 1;
         return MonthView(
           items: widget.items,
+          byDay: widget.byDay,
           displayedMonth: DateTime(year, month, 1),
           selectedDay: widget.selectedDay,
           onDayTap: widget.onDayTap,
@@ -354,6 +437,7 @@ class MonthView extends ConsumerWidget {
   const MonthView({
     super.key,
     required this.items,
+    required this.byDay,
     required this.displayedMonth,
     required this.selectedDay,
     required this.onDayTap,
@@ -364,6 +448,8 @@ class MonthView extends ConsumerWidget {
   static const _monthMaxItems = 2;
 
   final List<CalendarItem> items;
+  /// 按天分组索引（key = yyyymmdd 整数）
+  final Map<int, List<CalendarItem>> byDay;
   final DateTime displayedMonth;
   final DateTime selectedDay;
   final ValueChanged<DateTime> onDayTap;
@@ -376,15 +462,7 @@ class MonthView extends ConsumerWidget {
     final leadingBlanks = first.weekday - 1; // 周一为起始
     final totalCells = ((leadingBlanks + daysInMonth + 6) ~/ 7) * 7;
 
-    final byDay = <DateTime, List<CalendarItem>>{};
-    for (final item in items) {
-      final key = DateTime(
-        item.instanceDate.year,
-        item.instanceDate.month,
-        item.instanceDate.day,
-      );
-      byDay.putIfAbsent(key, () => []).add(item);
-    }
+    final byDay = this.byDay;
 
     return Column(
       children: [
@@ -425,7 +503,8 @@ class MonthView extends ConsumerWidget {
               );
               final isToday = DateUtilsEx.sameDay(date, AppClock.now());
               final isSelected = DateUtilsEx.sameDay(date, selectedDay);
-              final dayItems = byDay[date] ?? [];
+              final dayItems = byDay[date.year * 10000 + date.month * 100 + date.day] ??
+                  const [];
               return InkWell(
                 onTap: () => onDayTap(date),
                 onLongPress: () => onDayLongPress(date),

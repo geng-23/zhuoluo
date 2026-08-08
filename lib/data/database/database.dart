@@ -127,18 +127,7 @@ class Settings extends Table {
   ],
 )
 class AppDatabase extends _$AppDatabase {
-  AppDatabase()
-    : super(
-        driftDatabase(
-          name: 'zhuoluo',
-          // Web 端：IndexedDB/OPFS 之上的 wasm sqlite（sqlite3.wasm、
-          // drift_worker.js 位于 web/ 目录）；native 端自动忽略 web 参数
-          web: DriftWebOptions(
-            sqlite3Wasm: Uri.parse('sqlite3.wasm'),
-            driftWorker: Uri.parse('drift_worker.js'),
-          ),
-        ),
-      );
+  AppDatabase() : super(driftDatabase(name: 'zhuoluo'));
 
   AppDatabase.forTesting(super.e);
 

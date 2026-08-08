@@ -5,10 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
-import 'package:zhuoluo/data/services/notification_web_platform.dart' as wn;
 
 /// 本地通知服务（flutter_local_notifications v22 封装）
-/// Web 端：基于浏览器 Notification API + 内存 Timer（页面存活期间生效）。
 class NotificationService {
   NotificationService._();
 
@@ -33,9 +31,8 @@ class NotificationService {
   /// 通知设置跳转 / 电池优化豁免查询与请求
   static const _systemChannel = MethodChannel('zhuoluo/notifications');
 
-  /// 通知是否已开启（Android 13+ 通知权限 / Web 浏览器授权）
+  /// 通知是否已开启（Android 13+ 通知权限）
   Future<bool> areNotificationsEnabled() async {
-    if (kIsWeb) return wn.WebNotificationBridge.instance.permissionGranted;
     try {
       final android = _plugin
           .resolvePlatformSpecificImplementation<
@@ -49,7 +46,6 @@ class NotificationService {
 
   /// 打开系统"应用通知设置"页（Android）
   Future<void> openNotificationSettings() async {
-    if (kIsWeb) return;
     try {
       await _systemChannel
           .invokeMethod<void>('openNotificationSettings')
@@ -60,7 +56,6 @@ class NotificationService {
 
   /// 是否已豁免电池优化（系统日历级准时提醒的前置条件）
   Future<bool> isIgnoringBatteryOptimizations() async {
-    if (kIsWeb) return true;
     try {
       final r = await _systemChannel
           .invokeMethod<bool>('isIgnoringBatteryOptimizations')
@@ -73,7 +68,6 @@ class NotificationService {
 
   /// 请求豁免电池优化（跳系统设置页）
   Future<void> requestBatteryOptimizationExemption() async {
-    if (kIsWeb) return;
     try {
       await _systemChannel
           .invokeMethod<void>('requestBatteryOptimizationExemption')
@@ -96,11 +90,6 @@ class NotificationService {
   /// 初始化（含显式创建通知 channel，避免首次调度时才创建的不确定性）
   Future<void> init() async {
     if (_initialized) return;
-    if (kIsWeb) {
-      // 浏览器无本地通知能力，跳过全部初始化
-      _initialized = true;
-      return;
-    }
     tzdata.initializeTimeZones();
     // P1-C：使用设备本地时区（此前硬编码 Asia/Shanghai，非中国时区用户
     // 通知时刻全部偏移；"回退本地时区"分支实为不可达死代码）
@@ -210,7 +199,6 @@ class NotificationService {
   }
 
   Future<bool> _fetchPermission() async {
-    if (kIsWeb) return wn.WebNotificationBridge.instance.requestPermission();
     final android = _plugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
@@ -220,9 +208,7 @@ class NotificationService {
   }
 
   /// 精确闹钟权限（Android 12+/小米等厂商默认拒绝；未授予时精确调度会失败）
-  /// Web = 浏览器通知是否已授权
   Future<bool> canScheduleExactAlarms() async {
-    if (kIsWeb) return wn.WebNotificationBridge.instance.permissionGranted;
     try {
       final android = _plugin
           .resolvePlatformSpecificImplementation<
@@ -235,12 +221,8 @@ class NotificationService {
     }
   }
 
-  /// 跳转系统"闹钟与提醒"权限设置页（Web = 请求浏览器通知权限）
+  /// 跳转系统"闹钟与提醒"权限设置页
   Future<void> requestExactAlarmPermission() async {
-    if (kIsWeb) {
-      await wn.WebNotificationBridge.instance.requestPermission();
-      return;
-    }
     try {
       final android = _plugin
           .resolvePlatformSpecificImplementation<
@@ -262,18 +244,6 @@ class NotificationService {
     // 可空：测试通知不带深链
     String? payload,
   }) async {
-    if (kIsWeb) {
-      // 浏览器通知：页面存活期间到点弹通知（点击聚焦页面）
-      wn.WebNotificationBridge.instance.scheduleWeb(
-        id,
-        title: title,
-        body: body,
-        when: when,
-        payload: payload ?? '',
-        onClick: () => _tapController.add(payload),
-      );
-      return true;
-    }
     if (!_initialized) await init();
     // Android 13+：确保通知权限已授予；未授予则不调度
     // P1-C：只在状态未知时请求一次（被拒后不再重复弹窗）
@@ -353,18 +323,6 @@ class NotificationService {
     required DateTime time,
     required String payload,
   }) async {
-    if (kIsWeb) {
-      // 习惯每日提醒：页面存活期间每日触发
-      wn.WebNotificationBridge.instance.scheduleDailyWeb(
-        id,
-        title: title,
-        body: body,
-        time: time,
-        payload: payload,
-        onClick: () => _tapController.add(payload),
-      );
-      return true;
-    }
     if (!_initialized) await init();
     // P1-C：权限状态未知时请求一次（与 schedule 一致，不重复弹窗）
     if (_permissionGranted == false) {
@@ -438,10 +396,6 @@ class NotificationService {
 
   /// 取消通知（失败静默：业务不依赖）
   Future<void> cancel(int id) async {
-    if (kIsWeb) {
-      wn.WebNotificationBridge.instance.cancel(id);
-      return;
-    }
     try {
       await _plugin.cancel(id: id);
     } catch (e) {
@@ -451,10 +405,6 @@ class NotificationService {
 
   /// 取消全部（失败静默）
   Future<void> cancelAll() async {
-    if (kIsWeb) {
-      wn.WebNotificationBridge.instance.cancelAll();
-      return;
-    }
     try {
       await _plugin.cancelAll();
     } catch (e) {

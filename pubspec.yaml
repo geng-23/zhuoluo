@@ -47,7 +47,6 @@ dependencies:
   timezone: ^0.11.1
   flutter_markdown: ^0.7.7+1
   audioplayers: ^6.8.1
-  web: ^1.1.1
   file_selector: ^1.1.0
 
 dev_dependencies:
@@ -72,11 +71,6 @@ flutter_launcher_icons:
   image_path: "assets/icon/icon.png"
   adaptive_icon_background: "#2A9456"
   adaptive_icon_foreground: "assets/icon/icon_foreground.png"
-  web:
-    generate: true
-    image_path: "assets/icon/icon.png"
-    background_color: "#4F8EF7"
-    theme_color: "#4F8EF7"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

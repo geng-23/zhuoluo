@@ -2,7 +2,6 @@
 import 'dart:convert';
 import 'package:drift/drift.dart' show Value;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
@@ -74,10 +73,7 @@ class ProfilePage extends ConsumerWidget {
               trailing: const Icon(Icons.chevron_right),
               onTap: () => _export(context, ref),
             ),
-            // 5.7：Web 端不支持本地备份文件列表（备份管理隐藏）；
-            // 导入备份走上传选择器（方案 A），Web 已开放
-            if (!kIsWeb) ...[
-              ListTile(
+            ListTile(
                 leading: Icon(
                   backupFail.isEmpty
                       ? Icons.folder_open
@@ -103,7 +99,6 @@ class ProfilePage extends ConsumerWidget {
                   }
                 },
               ),
-            ],
             ListTile(
               leading: const Icon(Icons.restore),
               title: const Text('导入备份'),

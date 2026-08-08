@@ -3,8 +3,10 @@ import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
+import 'package:zhuoluo/features/calendar/providers.dart';
 import 'package:zhuoluo/main.dart';
 
 /// 复现：重复任务在日历（周/月窗口）中是否可见
@@ -361,5 +363,42 @@ void main() {
         .map((i) => i.instanceDate.day)
         .toSet();
     expect(days, {8, 9}, reason: '未来开始的 COUNT 时段任务窗口内实例日期');
+  });
+
+  test('P1-16：全天系列拖动改期后撤销恢复 isAllDay', () async {
+    SoundService.enabled = false;
+    final container = ProviderContainer(
+      overrides: [dbProvider.overrideWithValue(db)],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(calendarControllerProvider.notifier);
+    await db.ensureDefaultList();
+    final list = await db.getDefaultList();
+    final id = await db.insertTask(TasksCompanion.insert(
+      listId: list.id,
+      title: '全天系列',
+      isAllDay: const Value(true),
+      planStart: Value(DateTime(2026, 8, 10)),
+      planEnd: Value(DateTime(2026, 8, 11)),
+      rrule: const Value('FREQ=WEEKLY;BYDAY=MO'),
+      createdAt: now,
+    ));
+
+    // 系列拖动改期到 8/12 09:00（拖动进时间轴 → 非全天；
+    // 全天任务时长 1 天，C5-1 回退：09:00+1天 > 23:00 → 8/11 23:00）
+    await notifier.moveTaskToDateTimeSeries(id, DateTime(2026, 8, 12, 9, 0));
+    var t = (await db.getTask(id))!;
+    expect(t.isAllDay, isFalse, reason: '拖动改期后为时段任务');
+    expect(t.planStart, DateTime(2026, 8, 11, 23, 0),
+        reason: 'C5-1：时长 1 天不跨午夜，回退到 23:00 前');
+
+    // 撤销 → 恢复原计划时间与全天状态
+    await notifier.undoMoveTaskSeries();
+    t = (await db.getTask(id))!;
+    expect(t.isAllDay, isTrue,
+        reason: 'P1-16：撤销系列改期必须恢复全天状态（此前变成时段任务）');
+    expect(t.planStart, DateTime(2026, 8, 10));
+    // drain：等待 dataVersion 监听触发的异步刷新完成（避免 db 关闭后仍在用）
+    await Future<void>.delayed(const Duration(milliseconds: 200));
   });
 }

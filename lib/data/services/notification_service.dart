@@ -455,8 +455,13 @@ class NotificationIds {
     return reminderId * _daySlotWidth + (dayIndex < 0 ? 0 : dayIndex);
   }
 
-  /// 习惯提醒 ID（独立区段，置于任务 ID 空间之上，互不干扰）
-  static int forHabit(int habitId) => 2100000000 - habitId;
+  /// 习惯提醒 ID（独立区段，置于任务 ID 空间之上，互不干扰）。
+  /// P1-10：逐日排期后需区分日期——每习惯占 65536 槽（约 179 年），
+  /// 上限约 3.2 万个习惯，仍低于 forTest（2147483646）。
+  static int forHabit(int habitId, DateTime day) {
+    final dayIndex = day.difference(_epoch).inDays;
+    return 2100000000 - habitId * 65536 - (dayIndex < 0 ? 0 : dayIndex);
+  }
 
   /// 通知测试 ID（独立区段，int32 上限附近，不与任务/习惯冲突；
   /// 旧值 2099999990 恰与第 10 个习惯提醒 ID 相同——P0-7）

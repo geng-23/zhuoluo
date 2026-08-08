@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/features/calendar/calendar_page.dart';
 import 'package:zhuoluo/features/profile/profile_page.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
@@ -15,7 +16,8 @@ class HomeShell extends ConsumerStatefulWidget {
   ConsumerState<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends ConsumerState<HomeShell> {
+class _HomeShellState extends ConsumerState<HomeShell>
+    with WidgetsBindingObserver {
   int _tab = 0;
   /// P2：用户是否已手动切换 Tab（_restoreTab 恢复结果不得覆盖手动选择）
   bool _tabChanged = false;
@@ -44,6 +46,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _restoreTab();
     // 通知点击深链定位：'t{taskId}' 任务详情 / 'h{habitId}' 习惯页
     _tapSub = ref.read(notificationServiceProvider).tapStream.listen((payload) {
@@ -84,9 +87,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // C3：取消通知点击订阅，避免状态销毁后回调
     _tapSub?.cancel();
     super.dispose();
+  }
+
+  /// P0-6：回到前台时检查 93 天排期窗口是否过期（>24h）——进程常驻
+  /// 期间窗口不自动前进，用户每天回前台即触发滚动重排
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(ref.read(reminderSchedulerProvider).rescheduleIfStale());
+    }
   }
 
   Future<void> _restoreTab() async {

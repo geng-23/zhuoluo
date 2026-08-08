@@ -220,20 +220,27 @@ class BackupService {
   }) async {
     await _db.transaction(() async {
       // 1) 清单：同名跳过，新清单插入并建 oldId→newId 映射
+      // P1-22：默认清单标记不能继承/复制——本地已有默认时强制 false
+      //（否则合并后 getDefaultList 抛 StateError，事务已提交却报"导入失败"）；
+      // 本地无默认（空库首次合并）时保留备份值并跟踪，最多产生 1 个默认，
+      // 保证导入后的 ensureDefaultList 不重复创建同名收件箱
       final listIdMap = <int, int>{};
+      var hasDefault = await _db.hasDefaultList();
       for (final l in listRows) {
         final existing = await _db.getListByName(l.name.value);
         if (existing != null) {
           listIdMap[l.id.value] = existing.id;
           continue;
         }
+        final insertDefault = !hasDefault && l.isDefault.value;
+        if (insertDefault) hasDefault = true;
         final newId = await _db.insertListFull(
           ListsCompanion(
             name: Value(l.name.value),
             color: Value(l.color.value),
             sortOrder: Value(l.sortOrder.value),
             showInCalendar: Value(l.showInCalendar.value),
-            isDefault: Value(l.isDefault.value),
+            isDefault: Value(insertDefault),
             createdAt: Value(l.createdAt.value),
           ),
         );

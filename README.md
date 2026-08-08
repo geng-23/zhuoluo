@@ -190,7 +190,7 @@
 
 ## 数据模型
 
-SQLite（Drift），9 张表，schemaVersion = 4：
+SQLite（Drift），9 张表，schemaVersion = 5：
 
 | 表 | 关键字段 | 说明 |
 |---|---|---|
@@ -200,7 +200,7 @@ SQLite（Drift），9 张表，schemaVersion = 4：
 | `task_completions` | taskId/instanceDate/completedAt，**唯一约束 (taskId, instanceDate)** | 重复任务实例级完成 |
 | `task_exceptions` | taskId/instanceDate/action(edit\|delete)/overrideScheduledDate | RRULE 例外 |
 | `habits` | name/frequency/reminderTime | 习惯 |
-| `habit_records` | habitId/date/completedAt | 习惯打卡 |
+| `habit_records` | habitId/date/completedAt，**唯一约束 (habitId, date)** | 习惯打卡（防双击并发重复） |
 | `pomodoro_records` | taskId(可空)/durationMinutes/startedAt/completedAt | 番茄专注 |
 | `settings` | key/value | KV 设置（主题/音效/自动备份时间等） |
 
@@ -250,7 +250,7 @@ flutter pub get
 # 运行（Android）
 flutter run
 
-# 测试：全量 183 个用例
+# 测试：全量 209 个用例
 flutter test
 
 # 只跑某个文件
@@ -263,7 +263,7 @@ flutter analyze
 flutter build apk --release
 ```
 
-**测试覆盖**（19 个测试文件，183 例全过）：
+**测试覆盖**（21 个测试文件，209 例全过）：
 
 - 中文解析器：日期/时间/时段/重复规则/跨午夜/中文数字/标题同步
 - 重复任务实例逻辑：锚点吸附、例外改期、COUNT 边界、撤销恢复
@@ -299,10 +299,10 @@ flutter build apk --release
 
 ## 质量保障
 
-- **183 个自动化测试用例**，任何改动须全量回归通过
+- **209 个自动化测试用例**，任何改动须全量回归通过
 - **定期 AI 代码审查**：按数据层/任务/日历/我的四模块并行审查，产出《着落项目总览》基线文档（漏洞清单 + 修复记录，标注 P0/P1/P2 优先级）
 - **修复可追溯**：代码注释中的 `P0-x`/`P1-x`/`P2-x`/`N1-x`/`A1x` 编号对应审查文档中的具体缺陷与修复记录
-- 审查历史：通知 ID 段位、冷启动深链、周视图翻周回弹、撤销体系等 P0 项已修复；现存待办以 P0 级"批量撤销外键顺序"、P1 级边界项为主（详见 docs/ 最新《着落项目总览》）
+- 审查历史：通知 ID 段位、冷启动深链、周视图翻周回弹、撤销体系（批量撤销外键/连带删除清单撤销）、改期孤儿收口、93 天窗口滚动、长间隔系列误判等 P0 项已修复；现存待办以 P0-8（空格解析）与 P1 级边界项为主（详见 docs/ 最新《着落项目总览》）
 
 ---
 
@@ -325,8 +325,8 @@ flutter build apk --release
 
 ## 已知边界
 
-- 通知排期为 93 天滚动窗口，超长间隔重复任务（如每 2 年）在窗口内可能不显示实例
 - 时间解析：带空格时段输入（`明天 下午 3点`）会被误解析为凌晨（P0-8 待修）；`到4:30` 格式原样保留标题（见上文"刻意不支持的输入"）
+- 习惯提醒为逐日排期（93 天窗口，已打卡日期自动跳过）；排期窗口随应用回到前台自动滚动（>24h 触发全量重排）
 
 ---
 

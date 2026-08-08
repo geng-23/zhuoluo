@@ -42,6 +42,15 @@ class DateUtilsEx {
     return '$hh:$mm';
   }
 
+  /// C5-1/P1-7：落点"时长不跨天"约束——起点 + 时长越过当天 23:00 时
+  /// 回退起点（23:00 - 时长），保证任务不跨午夜（跨天任务会跳进置顶区
+  /// 且无法拖回）。写入端与拖拽预览端（虚影/时间胶囊）必须统一使用，
+  /// 否则所见非所得（22:30 拖 2h 任务实际写入 21:00）。
+  static DateTime clampStartWithinDay(DateTime start, Duration dur) {
+    final endOfDay = DateTime(start.year, start.month, start.day, 23, 0);
+    return start.add(dur).isAfter(endOfDay) ? endOfDay.subtract(dur) : start;
+  }
+
   /// 某月第一天
   static DateTime firstOfMonth(DateTime d) => DateTime(d.year, d.month, 1);
 

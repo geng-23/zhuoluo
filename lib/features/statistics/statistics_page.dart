@@ -477,37 +477,65 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
               style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 11),
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              height: 100,
-              child: GridView.builder(
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 26,
-                  mainAxisSpacing: 3,
-                  crossAxisSpacing: 3,
-                ),
-                itemCount: daysInYear,
-                itemBuilder: (context, i) {
-                  final day = DateTime(now.year, 1, 1).add(Duration(days: i));
-                  if (day.isAfter(now)) {
-                    return Container(color: Colors.transparent);
-                  }
-                  final c = counts[DateTime(day.year, day.month, day.day)] ?? 0;
-                  final level = c == 0 ? 0.0 : (c / maxCount).clamp(0.0, 1.0);
-                  return Container(
-                    decoration: BoxDecoration(
-                      color: c == 0
-                          ? Theme.of(context).colorScheme.surfaceContainerHighest
-                          : Color.lerp(
-                              Theme.of(context).colorScheme.primaryContainer,
-                              Theme.of(context).colorScheme.primary,
-                              level,
-                            ),
-                      shape: BoxShape.circle,
-                    ),
-                  );
-                },
-              ),
+            // P1-26：高度自适应——26 列下全年 365/366 天需 14~15 行，
+            // 固定 100px 只装得下约一半（8 月起底部被裁剪不可见）；
+            // 按宽度计算格子尺寸与总行数，完整显示全年
+            LayoutBuilder(
+              builder: (context, constraints) {
+                const cols = 26;
+                const spacing = 3.0;
+                final cell = (constraints.maxWidth - spacing * (cols - 1)) /
+                    cols;
+                final rows = (daysInYear / cols).ceil();
+                final height = rows * cell + spacing * (rows - 1);
+                return SizedBox(
+                  height: height,
+                  child: GridView.builder(
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: cols,
+                          mainAxisSpacing: spacing,
+                          crossAxisSpacing: spacing,
+                        ),
+                    itemCount: daysInYear,
+                    itemBuilder: (context, i) {
+                      final day =
+                          DateTime(now.year, 1, 1).add(Duration(days: i));
+                      if (day.isAfter(now)) {
+                        return Container(color: Colors.transparent);
+                      }
+                      final c = counts[DateTime(
+                            day.year,
+                            day.month,
+                            day.day,
+                          )] ??
+                          0;
+                      final level = c == 0
+                          ? 0.0
+                          : (c / maxCount).clamp(0.0, 1.0);
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: c == 0
+                              ? Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest
+                              : Color.lerp(
+                                  Theme.of(
+                                    context,
+                                  ).colorScheme.primaryContainer,
+                                  Theme.of(
+                                    context,
+                                  ).colorScheme.primary,
+                                  level,
+                                ),
+                          shape: BoxShape.circle,
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
             ),
           ],
         ),

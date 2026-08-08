@@ -117,12 +117,16 @@ class TasksController extends StateNotifier<TasksState> {
     }
   }
 
+  /// P1-14：reload 请求序号——搜索逐键触发并发 reload 时，
+  /// 旧请求（慢查询）返回后不得覆盖新请求结果（列表短暂显示过期结果）
+  int _reloadSeq = 0;
+
   Future<void> _reloadTasks() async {
+    final seq = ++_reloadSeq;
     List<Task> tasks;
     final q = state.searchQuery;
     if (q.isNotEmpty) {
       tasks = await _db.searchTasks(q);
-      state = state.copyWith(smartView: 'search');
     } else if (state.smartView == 'today') {
       tasks = await _db.getTasksForDate(AppClock.now());
     } else if (state.smartView == 'week7') {
@@ -141,12 +145,23 @@ class TasksController extends StateNotifier<TasksState> {
     } else {
       tasks = await _db.getAllUncompleted();
     }
+    // P1-14：结果落地前仍是当前最新请求才写入（过期结果丢弃）。
+    // 辅助状态加载是异步的，每个 await 之后都要再检查序号——
+    // 否则旧请求在辅助加载期间被新请求覆盖后，仍会用它自己的
+    // 结果覆盖新状态（竞态仍存在）
+    if (seq != _reloadSeq) return;
+    final instanceDone = await _loadInstanceDone(tasks);
+    if (seq != _reloadSeq) return;
+    final nextInstance = await _loadNextInstances(tasks);
+    if (seq != _reloadSeq) return;
+    final todayHas = await _loadTodayHas(tasks);
+    if (seq != _reloadSeq) return;
     state = state.copyWith(
       tasks: _sort(tasks),
       loading: false,
-      instanceDone: await _loadInstanceDone(tasks),
-      nextInstance: await _loadNextInstances(tasks),
-      todayHas: await _loadTodayHas(tasks),
+      instanceDone: instanceDone,
+      nextInstance: nextInstance,
+      todayHas: todayHas,
     );
   }
 
@@ -188,11 +203,13 @@ class TasksController extends StateNotifier<TasksState> {
 
   Future<DateTime?> _nextInstanceDate(Task t, DateTime today) async {
     final base = t.planStart ?? t.createdAt;
+    // P0-7：窗口至少覆盖一个完整周期（每 2 年任务不再被 370 天窗口
+    // 误判为"无下次实例"）
     final instances = RruleService.instance.expand(
       base,
       t.rrule,
       from: today,
-      to: today.add(const Duration(days: 370)),
+      to: today.add(Duration(days: RruleService.windowDaysFor(t.rrule))),
       limit: 400,
     );
     for (final inst in instances) {
@@ -265,7 +282,9 @@ class TasksController extends StateNotifier<TasksState> {
   }
 
   void search(String q) {
-    state = state.copyWith(searchQuery: q);
+    // P1-14：smartView 在发起 reload 前写入（此前在 _reloadTasks 的
+    // 异步结果里写——旧请求返回会覆盖清空搜索后的 smartView）
+    state = state.copyWith(searchQuery: q, smartView: 'search');
     _reloadTasks();
   }
 
@@ -497,7 +516,11 @@ class TasksController extends StateNotifier<TasksState> {
         await _db.maybeAutoCompleteParent(parentId);
         // 父任务被联动完成/恢复时同步重排其提醒
         final parent = await _db.getTask(parentId);
-        if (parent != null && parent.rrule.isNotEmpty) {
+        if (parent != null) {
+          // P1-15：父任务被联动完成/恢复时同步重排其提醒——scheduleTask
+          // 内部先取消全部旧通知再判断 completedAt，非重复父任务被联动
+          // 完成后旧提醒随之取消（此前仅重复父任务重排，非重复父任务
+          // 已完成仍弹提醒）
           await _scheduler.scheduleTask(parent, AppClock.now());
         }
         await _reloadTasks();
@@ -660,16 +683,33 @@ class TasksController extends StateNotifier<TasksState> {
   /// 全部在同一事务内执行）
   /// [silent]：批量撤销时静默（批4-2：此前批量撤销逐条播音效+震动）
   Future<void> undoDelete(int id, {bool silent = false}) async {
-    final snap = _deletedCache.remove(id);
+    // P0-4：事务成功前不得移除快照——失败回滚后快照仍在，数据不永久丢失
+    final snap = _deletedCache[id];
     if (snap == null) return;
     if (!silent) {
       SoundService.instance.play(SoundKind.reopen);
       Haptics.light();
     }
     await _db.transaction(() async {
-      await _db.restoreTask(snap.task);
+      // P0-9 兜底：恢复任务时清单可能已被删除（连带删除撤销前清单未恢复等），
+      // 重映射到默认清单，避免外键约束失败导致任务永久丢失
+      var listId = snap.task.listId;
+      if (await _db.getListById(listId) == null) {
+        await _db.ensureDefaultList();
+        listId = (await _db.getDefaultList()).id;
+      }
+      await _db.restoreTask(snap.task.copyWith(listId: listId));
       for (final s in snap.subTasks) {
-        await _db.restoreTask(s);
+        // P0-9 兜底延伸：子任务清单同样可能已被删除（与父同清单时
+        // 直接沿用兜底值，不同清单单独检查），否则子任务恢复时
+        // listId 外键崩溃导致整个撤销回滚
+        var sListId = s.listId;
+        if (await _db.getListById(sListId) == null) {
+          sListId = listId;
+        }
+        await _db.restoreTask(
+          sListId == s.listId ? s : s.copyWith(listId: sListId),
+        );
       }
       for (final r in snap.reminders) {
         await _db.insertReminderRaw(
@@ -720,6 +760,8 @@ class TasksController extends StateNotifier<TasksState> {
         );
       }
     });
+    // P0-4：事务成功后才消费快照（失败保留，等待重试）
+    _deletedCache.remove(id);
     await _reloadTasks();
     // 整棵树恢复后重排全部提醒（含子任务）
     for (final tid in [snap.task.id, ...snap.subTasks.map((s) => s.id)]) {
@@ -797,9 +839,29 @@ class TasksController extends StateNotifier<TasksState> {
   }
 
   /// 批量撤销删除（恢复快照中的任务/子任务/提醒/完成记录）
+  /// P0-4：按父链拓扑排序（父快照先恢复）——乱序批量删除 [子,父] 时，
+  /// 父快照在子已删除后才收集子树、subTasks 为空，若先恢复子会因
+  /// parentId 引用缺失触发外键崩溃；父快照恢复后子快照即可安全恢复。
   /// 批4-2：逐条静默，完成后统一播放一次反馈
   Future<void> batchUndoDelete(List<int> ids) async {
-    for (final id in ids) {
+    final ordered = <int>[];
+    final pending = ids.toSet();
+    while (pending.isNotEmpty) {
+      final ready = pending.where((id) {
+        final snap = _deletedCache[id];
+        if (snap == null) return true;
+        final pid = snap.task.parentId;
+        return pid == null || !_deletedCache.containsKey(pid);
+      }).toList();
+      ordered.addAll(ready);
+      pending.removeAll(ready);
+      if (ready.isEmpty) {
+        // 防御：数据异常（父链缺失等）时按剩余顺序兜底，避免死循环
+        ordered.addAll(pending);
+        break;
+      }
+    }
+    for (final id in ordered) {
       await undoDelete(id, silent: true);
     }
     SoundService.instance.play(SoundKind.reopen);
@@ -908,6 +970,8 @@ class TasksController extends StateNotifier<TasksState> {
     for (final ex in existing) {
       if (DateUtilsEx.sameDay(ex.instanceDate, fromDate)) {
         await _db.updateException(ex.id, toDate);
+        // P1-25：更新既有例外同样迁移完成记录
+        await _migrateCompletionOnReschedule(id, fromDate, toDate);
         await _reloadTasks();
         // 更新既有例外同样需重排：新日期（及原日期取消）的提醒
         final fresh = await _db.getTask(id);
@@ -926,15 +990,49 @@ class TasksController extends StateNotifier<TasksState> {
         overrideScheduledDate: Value(toDate),
       ),
     );
+    // P1-25：实例已完成再"改期本次"→ 完成记录跟随到新日期
+    //（此前留在原日期成为孤儿，统计/已完成视图出现永不匹配的脏数据）
+    await _migrateCompletionOnReschedule(id, fromDate, toDate);
     await _reloadTasks();
     await _scheduler.scheduleTask(t, AppClock.now());
     _bump();
     return exId;
   }
 
+  /// P1-25：改期本次时把实例完成记录从原日期迁移到新日期
+  ///（保留原完成时间，统计不漂移；新日期无冲突时写入）
+  Future<void> _migrateCompletionOnReschedule(
+    int id,
+    DateTime fromDate,
+    DateTime toDate,
+  ) async {
+    final fromDay = DateUtilsEx.normalizeInstanceDate(fromDate);
+    final toDay = DateUtilsEx.normalizeInstanceDate(toDate);
+    final comp = await _db.getInstanceCompletion(id, fromDay);
+    if (comp == null) return;
+    await _db.uncompleteInstance(id, fromDay);
+    await _db.restoreInstanceCompletion(id, toDay, comp.completedAt);
+  }
+
   /// 撤销单次改期：删除该例外记录（原实例恢复到原日期，不新增反向例外）
   Future<void> undoEditException(int id, int exceptionId) async {
+    // P1-25：撤销改期前读取迁移信息——把完成记录从新日期迁回原日期
+    final ex = await _db.getException(exceptionId);
     await _db.deleteException(exceptionId);
+    if (ex != null) {
+      final toDay = DateUtilsEx.normalizeInstanceDate(
+        ex.overrideScheduledDate ?? ex.instanceDate,
+      );
+      final comp = await _db.getInstanceCompletion(id, toDay);
+      if (comp != null) {
+        await _db.uncompleteInstance(id, toDay);
+        await _db.restoreInstanceCompletion(
+          id,
+          ex.instanceDate,
+          comp.completedAt,
+        );
+      }
+    }
     await _reloadTasks();
     final t = await _db.getTask(id);
     if (t != null) {

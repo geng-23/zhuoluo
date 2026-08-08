@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:zhuoluo/data/database/database.dart';
+import 'package:zhuoluo/data/services/rrule_expander.dart';
 
 /// 重复任务一致性测试：
 /// - completeInstance 幂等（崩溃修复）
@@ -110,6 +111,56 @@ void main() {
     // 新系列日期完成不受影响
     await db.completeInstance(id, newStart);
     expect(await db.isInstanceCompleted(id, newStart), isTrue);
+  });
+
+  test('P0-7：长间隔重复任务（每 2 年）不误判系列结束', () async {
+    final db = await newDb();
+    addTearDown(db.close);
+    final list = await db.getDefaultList();
+    final id = await db.insertTask(TasksCompanion.insert(
+      listId: list.id,
+      title: '体检',
+      rrule: const Value('FREQ=YEARLY;INTERVAL=2'),
+      planStart: Value(DateTime(now.year, now.month, now.day, 9)),
+      createdAt: now,
+    ));
+    final t = (await db.getTask(id))!;
+    expect(
+      await db.hasFutureInstances(t),
+      isTrue,
+      reason: 'P0-7：每 2 年任务在 370 天窗口内无实例，此前被误判系列结束',
+    );
+    expect(RruleService.windowDaysFor('FREQ=YEARLY;INTERVAL=2'), 733,
+        reason: '窗口至少覆盖一个完整周期（2*366+1 天缓冲）');
+    expect(RruleService.windowDaysFor('FREQ=DAILY'), 370);
+    expect(RruleService.windowDaysFor('FREQ=WEEKLY;INTERVAL=4'), 370);
+  });
+
+  test('P1-20：并发打卡同一习惯同一天不产生重复记录', () async {
+    final db = await newDb();
+    addTearDown(db.close);
+    final habitId = await db.insertHabit('阅读', '⭐', null);
+    // 模拟双击/快速连点：三个并发 toggle
+    await Future.wait([
+      db.checkHabit(habitId, today),
+      db.checkHabit(habitId, today),
+      db.checkHabit(habitId, today),
+    ]);
+    final rows = await db.getHabitRecords(habitId);
+    expect(rows.length, lessThanOrEqualTo(1),
+        reason: 'P1-20：并发打卡不得产生重复记录（此前 isHabitDone 崩溃）');
+    // 唯一约束屏障：绕过幂等直接插入重复行应抛错
+    await expectLater(
+      db.insertHabitRecordFull(
+        HabitRecordsCompanion(
+          habitId: Value(habitId),
+          date: Value(today),
+          completedAt: Value(DateTime.now()),
+        ),
+      ),
+      throwsA(anything),
+      reason: 'habit_records 唯一索引应阻止同 (habit,date) 重复行',
+    );
   });
 
   test('v2 → v3/v4 迁移：去重重复完成记录并建立唯一索引', () async {

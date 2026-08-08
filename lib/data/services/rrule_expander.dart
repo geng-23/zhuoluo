@@ -30,8 +30,23 @@ class RruleService {
     );
   }
 
-  DateTime? _parseUntil(String s) {
-    if (s.contains('T')) {
+  /// P0-7：判断"系列是否还有未来实例"时使用的展开窗口天数——
+  /// 至少覆盖一个完整周期（按频率与 INTERVAL 计算，多 1 天缓冲避免
+  /// 窗口边缘因时分差漏掉实例），下限 370 天。
+  /// 长间隔任务（如每 2 年 = 732 天）若用固定 370 天窗口，
+  /// 窗口内无实例会被误判"系列结束"从视图/提醒中消失。
+  static int windowDaysFor(String rrule) {
+    final rule = RruleService.instance.parse(rrule);
+    final cycleDays = switch (rule.freq) {
+      'WEEKLY' => (rule.interval > 0 ? rule.interval : 1) * 7,
+      'MONTHLY' => (rule.interval > 0 ? rule.interval : 1) * 31,
+      'YEARLY' => (rule.interval > 0 ? rule.interval : 1) * 366,
+      _ => rule.interval > 0 ? rule.interval : 1,
+    };
+    return cycleDays > 370 ? cycleDays + 1 : 370;
+  }
+
+  DateTime? _parseUntil(String s) {    if (s.contains('T')) {
       return DateTime.tryParse(s);
     }
     // YYYYMMDD 格式：解析为当日结束（23:59:59.999）。

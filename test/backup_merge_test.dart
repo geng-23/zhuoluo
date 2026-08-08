@@ -186,6 +186,38 @@ void main() {
       await BackupService(target).importJson(backup, merge: true);
       expect(await target.getSetting('themeMode'), 'dark');
     });
+
+    test('P1-22：备份含多个默认清单时合并不产生新的默认清单', () async {
+      await db.ensureDefaultList();
+      final workId = await db.insertList('工作', '#FF0000', 1);
+      // 模拟旧版本/手工备份的脏数据：另一个清单也标记为默认
+      await (db.update(db.lists)..where((l) => l.id.equals(workId))).write(
+        const ListsCompanion(isDefault: Value(true)),
+      );
+      final backup = await BackupService(db).exportJson();
+
+      final target = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(target.close);
+      await target.ensureDefaultList();
+      final count = await BackupService(target).importJson(backup, merge: true);
+      expect(count, greaterThanOrEqualTo(0), reason: '导入事务本身成功');
+
+      // 修复前：合并插入的"工作"清单继承 isDefault=true → 两个默认清单
+      // → getDefaultList 抛 StateError（事务已提交却报"导入失败"）
+      final defaults = (await target.getAllLists())
+          .where((l) => l.isDefault)
+          .toList();
+      expect(defaults, hasLength(1),
+          reason: 'P1-22：合并导入后默认清单必须唯一');
+      final work = (await target.getAllLists())
+          .firstWhere((l) => l.name == '工作');
+      expect(work.isDefault, isFalse, reason: '新导入清单不继承默认标记');
+      await expectLater(
+        target.getDefaultList(),
+        completes,
+        reason: 'getDefaultList 不再抛 StateError',
+      );
+    });
   });
 
   group('自动备份', () {

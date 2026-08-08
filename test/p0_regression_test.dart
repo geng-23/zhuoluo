@@ -8,6 +8,7 @@ import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_service.dart';
+import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 
@@ -592,6 +593,314 @@ void main() {
       expect(t.skippedDates, isNot('{bad json'),
           reason: '操作后应写出合法 JSON');
       await drain();
+    });
+  });
+
+  group('P0-4 批量删除父+子撤销外键', () {
+    test('乱序 [子,父] 批量删除后批量撤销：父、子、关联数据全部恢复', () async {
+      final container = makeContainer();
+      await settle(container);
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final parentId = await insertTask(title: '父任务');
+      final childId = await insertTask(title: '子任务', parentId: parentId);
+      await db.insertReminder(
+        RemindersCompanion.insert(
+          taskId: childId,
+          remindMinutesBefore: const Value(15),
+        ),
+      );
+      await db.completeInstance(parentId, today);
+
+      await notifier.batchDelete([childId, parentId]);
+      expect(await db.getTask(parentId), isNull, reason: '删除后父任务不存在');
+      expect(await db.getTask(childId), isNull, reason: '删除后子任务不存在');
+
+      await notifier.batchUndoDelete([childId, parentId]);
+      await drain();
+
+      expect(await db.getTask(parentId), isNotNull,
+          reason: 'P0-4：撤销后父任务必须恢复（此前外键崩溃导致永久丢失）');
+      final restoredChild = await db.getTask(childId);
+      expect(restoredChild, isNotNull, reason: '子任务一并恢复');
+      expect(restoredChild!.parentId, parentId, reason: '子任务父引用恢复');
+      expect(
+        (await db.getReminders(childId)).single.remindMinutesBefore,
+        15,
+        reason: '子任务提醒随撤销恢复',
+      );
+      expect(
+        await db.getInstanceCompletion(parentId, today),
+        isNotNull,
+        reason: '父任务完成记录随撤销恢复',
+      );
+    });
+  });
+
+  group('P0-9 连带删除清单撤销外键', () {
+    test('删除清单连带任务后撤销：清单与任务全部恢复', () async {
+      final container = makeContainer();
+      await settle(container);
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final listId = await db.insertList('工作', '#FF0000', 1);
+      final parentId = await db.insertTask(
+        TasksCompanion.insert(
+          listId: listId,
+          title: '清单任务',
+          createdAt: now,
+        ),
+      );
+      await db.insertTask(
+        TasksCompanion.insert(
+          listId: listId,
+          parentId: Value(parentId),
+          title: '清单子任务',
+          createdAt: now,
+        ),
+      );
+
+      // 复现 task_page 连带删除流程
+      final l = await db.getListById(listId);
+      final topLevel =
+          (await db.getTasksByList(listId)).where((t) => t.parentId == null);
+      for (final t in topLevel) {
+        await notifier.deleteTaskWithUndo(t.id);
+      }
+      await notifier.deleteList(listId, deleteTasks: false);
+      expect(await db.getListById(listId), isNull, reason: '清单已删除');
+      expect(await db.getTask(parentId), isNull, reason: '任务已连带删除');
+
+      // 复现撤销回调：先恢复清单再恢复任务
+      await db.restoreList(l!);
+      for (final t in topLevel) {
+        await notifier.undoDelete(t.id);
+      }
+      await drain();
+
+      expect(await db.getListById(listId), isNotNull,
+          reason: 'P0-9：撤销后清单必须恢复');
+      final restoredParent = await db.getTask(parentId);
+      expect(restoredParent, isNotNull,
+          reason: 'P0-9：撤销后任务必须恢复（此前 listId 外键崩溃永久丢失）');
+      expect(restoredParent!.listId, listId, reason: '任务回到原清单');
+      expect(
+        (await db.getTasksByList(listId)).where((t) => t.parentId == parentId),
+        isNotEmpty,
+        reason: '子任务一并恢复且归属原清单',
+      );
+    });
+
+    test('兜底：清单未恢复时撤销任务映射默认清单（不崩溃）', () async {
+      final container = makeContainer();
+      await settle(container);
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final listId = await db.insertList('临时清单', '#00AA00', 1);
+      final taskId = await db.insertTask(
+        TasksCompanion.insert(
+          listId: listId,
+          title: '临时任务',
+          createdAt: now,
+        ),
+      );
+
+      await notifier.deleteTaskWithUndo(taskId);
+      await notifier.deleteList(listId, deleteTasks: false);
+
+      // 只撤销任务、不恢复清单 → 兜底应映射到默认清单
+      await notifier.undoDelete(taskId);
+      await drain();
+
+      final restored = await db.getTask(taskId);
+      expect(restored, isNotNull, reason: '兜底后任务不丢失');
+      final def = await db.getDefaultList();
+      expect(restored!.listId, def.id, reason: '任务映射到默认清单');
+    });
+
+    test('兜底延伸：子任务与父同清单被删时，撤销一并映射默认清单（不崩溃）', () async {
+      final container = makeContainer();
+      await settle(container);
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final listId = await db.insertList('临时清单2', '#00AA00', 1);
+      final parentId = await db.insertTask(
+        TasksCompanion.insert(
+          listId: listId,
+          title: '临时父任务',
+          createdAt: now,
+        ),
+      );
+      final childId = await db.insertTask(
+        TasksCompanion.insert(
+          listId: listId,
+          parentId: Value(parentId),
+          title: '临时子任务',
+          createdAt: now,
+        ),
+      );
+
+      await notifier.deleteTaskWithUndo(parentId);
+      await notifier.deleteList(listId, deleteTasks: false);
+
+      // 只撤销任务、不恢复清单 → 父与子都应兜底映射到默认清单
+      await notifier.undoDelete(parentId);
+      await drain();
+
+      final def = await db.getDefaultList();
+      final parent = await db.getTask(parentId);
+      expect(parent, isNotNull, reason: '父任务不丢失');
+      expect(parent!.listId, def.id, reason: '父任务映射到默认清单');
+      final child = await db.getTask(childId);
+      expect(child, isNotNull,
+          reason: '子任务必须一并恢复（此前子任务仍引用已删清单 → 外键崩溃）');
+      expect(child!.listId, def.id, reason: '子任务映射到默认清单');
+    });
+  });
+
+  group('P0-3/P1-24 系列改期收口', () {
+    test('每周一任务改到周二：旧锚点完成记录被清理（P0-3 孤儿收口）', () async {
+      final monday = today.subtract(Duration(days: today.weekday - 1));
+      final id = await insertTask(
+        title: '周例会',
+        rrule: 'FREQ=WEEKLY;BYDAY=MO',
+        planStart: DateTime(monday.year, monday.month, monday.day, 10),
+      );
+      // 周一实例已完成
+      await db.completeInstance(id, monday);
+      expect(await db.getInstanceCompletion(id, monday), isNotNull);
+
+      // 模拟任务页"修改重复时间"改到周二：applyRecurringChange 平移锚点
+      // 收口（此前直接 updateTaskFields，周一完成记录成孤儿）
+      final tuesday = monday.add(const Duration(days: 1));
+      final removed = await db.applyRecurringChange(
+        id,
+        oldRrule: 'FREQ=WEEKLY;BYDAY=MO',
+        newRrule: 'FREQ=WEEKLY;BYDAY=MO',
+        newStart: tuesday,
+      );
+      expect(removed, hasLength(1), reason: '不再匹配新锚点的完成记录被清理');
+      expect(await db.getInstanceCompletion(id, monday), isNull,
+          reason: 'P0-3：旧锚点完成记录不再残留为孤儿');
+    });
+
+    test('P1-24：锚点吸附到最近命中日（周二→回周一，规则日不变）', () async {
+      final tuesday = today.subtract(Duration(days: today.weekday - 2));
+      final hit = RruleService.instance.nearestHitOnOrNear(
+        tuesday,
+        'FREQ=WEEKLY;BYDAY=MO',
+      );
+      expect(hit, isNotNull);
+      expect(hit!.weekday, DateTime.monday,
+          reason: 'P1-24：每周一任务改到周二应吸附回最近的周一（否则系列消失）');
+    });
+  });
+
+  group('P1-25 改期本次迁移实例完成记录', () {
+    test('已完成实例"改期本次"：完成记录迁移到新日期并保留完成时间', () async {
+      final container = makeContainer();
+      await settle(container);
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final id = await insertTask(
+        title: '每日任务',
+        rrule: 'FREQ=DAILY',
+        planStart: DateTime(today.year, today.month, today.day, 9),
+      );
+      await db.completeInstance(id, today);
+      final comp = (await db.getInstanceCompletion(id, today))!;
+      final toDate = today.add(const Duration(days: 1));
+
+      final exId = await notifier.editException(id, today, toDate);
+      await drain();
+
+      expect(exId, greaterThan(0));
+      expect(await db.getInstanceCompletion(id, today), isNull,
+          reason: 'P1-25：原日期完成记录不再残留为孤儿');
+      final moved = await db.getInstanceCompletion(id, toDate);
+      expect(moved, isNotNull, reason: '完成记录迁移到新日期');
+      expect(moved!.completedAt, comp.completedAt, reason: '保留原完成时间');
+
+      // 撤销改期 → 完成记录迁回原日期
+      await notifier.undoEditException(id, exId);
+      await drain();
+      expect(await db.getInstanceCompletion(id, toDate), isNull,
+          reason: '撤销后新日期完成记录清除');
+      final back = await db.getInstanceCompletion(id, today);
+      expect(back, isNotNull, reason: '完成记录迁回原日期');
+      expect(back!.completedAt, comp.completedAt, reason: '完成时间不变');
+    });
+
+    test('更新既有例外同样迁移完成记录', () async {
+      final container = makeContainer();
+      await settle(container);
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final id = await insertTask(
+        title: '每日任务 2',
+        rrule: 'FREQ=DAILY',
+        planStart: DateTime(today.year, today.month, today.day, 9),
+      );
+      final day2 = today.add(const Duration(days: 2));
+      final exId = await notifier.editException(id, today, day2);
+      await db.completeInstance(id, today);
+
+      // 再次改期同一实例（更新既有例外）
+      final day3 = today.add(const Duration(days: 3));
+      await notifier.editException(id, today, day3);
+      await drain();
+
+      expect(await db.getInstanceCompletion(id, today), isNull,
+          reason: 'P1-25：更新例外分支同样迁移完成记录');
+      expect(await db.getInstanceCompletion(id, day3), isNotNull,
+          reason: '完成记录跟随到最新目标日期');
+      expect(await db.getException(exId), isNotNull);
+    });
+  });
+
+  group('P1-15 子任务联动完成父任务提醒', () {
+    test('重复子任务完成 → 非重复父任务联动完成且提醒重排不抛异常', () async {
+      final container = makeContainer();
+      await settle(container);
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final parentId = await insertTask(title: '父任务');
+      await db.insertReminder(
+        RemindersCompanion.insert(
+          taskId: parentId,
+          remindMinutesBefore: const Value(15),
+        ),
+      );
+      final childId = await insertTask(
+        title: '子任务',
+        rrule: 'FREQ=DAILY',
+        planStart: DateTime(today.year, today.month, today.day, 9),
+        parentId: parentId,
+      );
+
+      await notifier.completeTask(childId);
+      await drain();
+
+      final parent = await db.getTask(parentId);
+      expect(parent, isNotNull);
+      expect(parent!.completedAt, isNotNull,
+          reason: 'P1-15：子任务全部完成后父任务联动完成');
+      // 修复后 scheduleTask(父) 无条件执行：非重复父任务旧提醒被取消
+      //（测试环境通知平台不可用，调度内部吞异常不抛出）
+    });
+
+    test('非重复父任务被联动完成后，再次调度走取消分支（无异常）', () async {
+      final container = makeContainer();
+      await settle(container);
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final parentId = await insertTask(title: '父任务 2');
+      final childId = await insertTask(
+        title: '子任务 2',
+        rrule: 'FREQ=DAILY',
+        planStart: DateTime(today.year, today.month, today.day, 9),
+        parentId: parentId,
+      );
+      await notifier.completeTask(childId);
+      await drain();
+      // 直接对已完成的父任务调度（P1-15 路径：scheduleTask 取消旧提醒）
+      final parent = (await db.getTask(parentId))!;
+      final ok = await container
+          .read(reminderSchedulerProvider)
+          .scheduleTask(parent, DateTime.now());
+      expect(ok, isTrue, reason: '已完成任务调度 = 取消旧提醒，视为成功');
     });
   });
 }

@@ -27,6 +27,16 @@ void main() {
     expect(find.text('该时段无计划任务'), findsOneWidget);
     expect(find.text('专注时长'), findsOneWidget);
 
+    // P1-26：年热力图完整渲染全年天数（366/365），固定 100px 高度时
+    // 只装得下约一半（8 月起被裁剪）——自适应高度后不再裁剪
+    final now = DateTime.now();
+    final daysInYear =
+        DateTime(now.year + 1, 1, 1).difference(DateTime(now.year, 1, 1)).inDays;
+    final grid = tester.widget<GridView>(find.byType(GridView));
+    final delegate = grid.childrenDelegate as SliverChildBuilderDelegate;
+    expect(delegate.childCount, daysInYear,
+        reason: 'P1-26：热力图必须渲染全年 $daysInYear 天，不能裁剪');
+
     await db.close();
     container.dispose();
   });

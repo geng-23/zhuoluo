@@ -10,6 +10,7 @@ import 'package:zhuoluo/core/utils/task_ext.dart';
 import 'package:zhuoluo/core/utils/task_title.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart' hide TimeOfDay;
+import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
@@ -861,17 +862,60 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     final durationMinutes = t.isAllDay
         ? 60
         : (pe == null || ps == null ? 60 : pe.difference(ps).inMinutes);
-    final newEnd = newStart.add(Duration(minutes: durationMinutes));
+    // P1-24（A13-2 第四处遗漏）：重复任务"修改重复时间"= 平移系列锚点，
+    // 开始日期自动吸附到距其最近的规则命中日——否则锚点不命中规则
+    // （如每周一任务改到周二）时系列从日历/列表消失
+    var effectiveStart = newStart;
+    if (t.rrule.isNotEmpty) {
+      final hit = RruleService.instance.nearestHitOnOrNear(
+        DateTime(newStart.year, newStart.month, newStart.day),
+        t.rrule,
+      );
+      if (hit != null) {
+        effectiveStart = DateTime(
+          hit.year,
+          hit.month,
+          hit.day,
+          newStart.hour,
+          newStart.minute,
+        );
+      }
+    }
+    final newEnd = effectiveStart.add(Duration(minutes: durationMinutes));
+    // P0-3：重复任务改期（平移系列锚点）统一收口——清理不再匹配新锚点的
+    // 旧完成记录/例外（此前直接 updateTaskFields，旧记录成孤儿参与统计）
+    var removedCount = 0;
+    if (t.rrule.isNotEmpty &&
+        !DateUtilsEx.sameDay(t.planStart ?? effectiveStart, effectiveStart)) {
+      final db = ref.read(dbProvider);
+      final removed = await db.applyRecurringChange(
+        t.id,
+        oldRrule: t.rrule,
+        newRrule: t.rrule,
+        newStart: effectiveStart,
+      );
+      removedCount = removed.length;
+    }
     await notifier.updateTaskFields(
       t.id,
       TasksCompanion(
-        planStart: Value<DateTime?>(newStart),
+        planStart: Value<DateTime?>(effectiveStart),
         planEnd: Value<DateTime?>(newEnd),
       ),
     );
     if (mounted) {
+      // P1-24：吸附发生且有清理时合并提示（避免两条 Snackbar 互相覆盖）
+      final adjusted = !DateUtilsEx.sameDay(newStart, effectiveStart);
+      final msg = adjusted
+          ? '开始日期与重复规则不匹配，已自动调整到 '
+              '${DateUtilsEx.dateCn(effectiveStart)}'
+              '${removedCount > 0 ? '，已清理 $removedCount 条不再匹配的完成记录' : ''}'
+          : (removedCount > 0
+              ? '已清理 $removedCount 条不再匹配新日期的完成记录'
+              : '已改期到 ${DateUtilsEx.dateCn(effectiveStart)} '
+                  '${DateUtilsEx.timeCn(effectiveStart)}');
       _showUndo(
-        '已改期到 ${DateUtilsEx.dateCn(newStart)} ${DateUtilsEx.timeCn(newStart)}',
+        msg,
         () => notifier.updateTaskFields(
           t.id,
           TasksCompanion(
@@ -1735,9 +1779,12 @@ class _TaskDrawer extends ConsumerWidget {
           context,
           '已删除清单「${l.name}」及其 ${topLevel.length} 个任务',
           actionLabel: '撤销',
-          onAction: () {
+          onAction: () async {
+            // P0-9：撤销连带删除必须先恢复清单，否则任务恢复时
+            // listId 外键引用缺失导致崩溃、数据永久丢失
+            await db.restoreList(l);
             for (final t in topLevel) {
-              notifier.undoDelete(t.id);
+              await notifier.undoDelete(t.id);
             }
           },
           icon: Icons.delete_outline,

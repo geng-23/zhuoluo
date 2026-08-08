@@ -21,6 +21,26 @@ const _startHour = 6;
 const _endHour = 23;
 const _pixelPerHour = 64.0;
 
+/// P1-8：时间轴起始小时——显示范围内最早 timed 任务（非全天/非跨天/
+/// 有计划时间）的开始小时，与默认值取小：只扩展不收缩，多数情况保持
+/// 06:00 起点；有 06:00 前任务时起始点下移，任务不再隐形不可操作。
+int effectiveStartHourFor({
+  required List<CalendarItem> items,
+  required List<DateTime> days,
+  int defaultStart = _startHour,
+}) {
+  var earliest = defaultStart;
+  for (final d in days) {
+    for (final it in items) {
+      if (!DateUtilsEx.sameDay(it.instanceDate, d)) continue;
+      if (_AllDayBar.isTopArea(it)) continue;
+      final h = it.task.planStart?.hour ?? defaultStart;
+      if (h < earliest) earliest = h;
+    }
+  }
+  return earliest;
+}
+
 /// 周视图：多周横滚（PageView，E11 保留滑动）
 /// 支持拖拽/选时到屏幕边缘自动翻周（任务7）
 class WeekView extends ConsumerStatefulWidget {
@@ -450,7 +470,10 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
     // A7：表头"今天"高亮由 build 时实时计算（跨天时随页面重建自然更新），
     // 不再依赖每分钟 setState 的 _now
     final today = AppClock.now();
-    final totalHours = _endHour - _startHour;
+    // P1-8：时间轴起始小时动态化——显示范围内最早 timed 任务决定
+    //（默认 6；06:00 前任务存在时扩展起始点，任务不再隐形不可操作）
+    final startEff = _effectiveStartHour(days);
+    final totalHours = _endHour - startEff;
 
     return Column(
       children: [
@@ -520,14 +543,15 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
           ],
         ),
         const Divider(height: 1),
-        // 5.8：时间轴可见范围说明（06:00-23:00 外的夜间任务不会显示在时间轴上）
+        // 5.8/P1-8：时间轴可见范围说明（动态起始小时，06:00 前有任务时
+        // 起始点扩展；超出时间轴范围的夜间任务仍不显示）
         Padding(
           padding: const EdgeInsets.fromLTRB(48, 1, 12, 1),
           child: Align(
             alignment: Alignment.centerLeft,
             child: Text(
               // 截图②：明确"可滚动"——消除"标注 06-23 但屏内只看到部分"的困惑
-              '可滚动 · 时间轴 06:00-23:00',
+              '可滚动 · 时间轴 ${startEff.toString().padLeft(2, '0')}:00-23:00',
               style: TextStyle(
                 fontSize: 10,
                 color: Theme.of(context).colorScheme.outline,
@@ -562,7 +586,7 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
                         padding: const EdgeInsets.symmetric(vertical: 32),
                         itemCount: totalHours + 1,
                         itemBuilder: (context, i) {
-                          final hour = _startHour + i;
+                          final hour = startEff + i;
                           return SizedBox(
                             height: _pixelPerHour,
                             // 标签中心对齐小时线（文字上下各 5px，跨线居中）
@@ -627,6 +651,7 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
                                           day: days[i],
                                           items: _timedItems(days[i]),
                                           isWeek: widget.isWeek,
+                                          startHour: startEff,
                                           dragDay: widget.dragDay,
                                           edgeState: widget.edgeState,
                                           scrollController: _scrollController,
@@ -661,6 +686,7 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
                                       (MediaQuery.of(context).size.width -
                                           44) /
                                       days.length,
+                                  startHour: startEff,
                                 ),
                               ],
                             ),
@@ -681,6 +707,13 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
   /// 是否显示在顶部置顶区（全天 / 无计划时间 / 跨天任务）
   bool _isTopArea(CalendarItem i) => _AllDayBar.isTopArea(i);
 
+  /// P1-8：显示范围内（当周/当天）timed 任务的最早开始小时，
+  /// 与默认 6 取小——只扩展不收缩（多数情况保持 06:00 起点）。
+  int _effectiveStartHour(List<DateTime> days) => effectiveStartHourFor(
+    items: widget.items,
+    days: days,
+  );
+
   List<CalendarItem> _allDayItems(DateTime day) => widget.items
       .where((i) => DateUtilsEx.sameDay(i.instanceDate, day) && _isTopArea(i))
       .toList();
@@ -695,11 +728,17 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
 /// 自身 Timer 每秒检查分钟变化，跨分钟时用 55s 线性动画平滑移动
 /// （走秒效果），只重绘自身——不再触发整个时间轴每分钟重建。
 class _NowLine extends StatefulWidget {
-  const _NowLine({required this.todayIndex, required this.columnWidth});
+  const _NowLine({
+    required this.todayIndex,
+    required this.columnWidth,
+    required this.startHour,
+  });
 
   /// 今天列索引（-1 = 不在今天，不显示）
   final int todayIndex;
   final double columnWidth;
+  /// P1-8：时间轴起始小时（与 _TimeAxisView 动态起始一致，红线随之下移）
+  final int startHour;
 
   @override
   State<_NowLine> createState() => _NowLineState();
@@ -718,7 +757,7 @@ class _NowLineState extends State<_NowLine>
 
   double _topFor(DateTime t) {
     final minutes = t.hour * 60 + t.minute;
-    return (minutes - _startHour * 60) / 60 * _pixelPerHour;
+    return (minutes - widget.startHour * 60) / 60 * _pixelPerHour;
   }
 
   @override
@@ -763,7 +802,7 @@ class _NowLineState extends State<_NowLine>
       animation: _controller,
       builder: (context, _) {
         final top = _prevTop + (_nextTop - _prevTop) * _controller.value;
-        if (top < 0 || top > (_endHour - _startHour) * _pixelPerHour) {
+        if (top < 0 || top > (_endHour - widget.startHour) * _pixelPerHour) {
           return const SizedBox.shrink();
         }
         return Positioned(
@@ -860,6 +899,7 @@ class _DayColumn extends ConsumerStatefulWidget {
     required this.day,
     required this.items,
     required this.isWeek,
+    required this.startHour,
     this.dragDay,
     this.edgeState,
     this.scrollController,
@@ -870,6 +910,10 @@ class _DayColumn extends ConsumerStatefulWidget {
   final DateTime day;
   final List<CalendarItem> items;
   final bool isWeek;
+
+  /// P1-8：时间轴起始小时（动态——显示范围内最早 timed 任务决定，
+  /// 默认 6；有更早任务时扩展，保证 06:00 前任务可见可操作）
+  final int startHour;
 
   /// 拖动/选时跨页时的目标日期（边缘翻页时由上层更新）
   final ValueNotifier<DateTime>? dragDay;
@@ -1086,11 +1130,11 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
         if (box != null) {
           dy = box.globalToLocal(details.offset).dy;
         }
-        final minutes = (_startHour * 60 + dy / _pixelPerHour * 60)
+        final minutes = (widget.startHour * 60 + dy / _pixelPerHour * 60)
             .roundToDouble()
-            .clamp(_startHour * 60.0, _endHour * 60.0);
+            .clamp(widget.startHour * 60.0, _endHour * 60.0);
         final snapped = ((minutes / 10).round() * 10).clamp(
-          _startHour * 60,
+          widget.startHour * 60,
           _endHour * 60,
         );
         final d = widget.day; // 改期落点 = 落点所在列的真实日期（翻页后为新页列）
@@ -1203,16 +1247,16 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
           onTap: () {
             if (candidate.isNotEmpty) return;
             // 点空白创建：按点击位置预填 1 小时时段（吸附 10 分钟）
-            final minutes = _startHour * 60 + _tapY / _pixelPerHour * 60;
-            final snapped = ((minutes / 10).round() * 10)
-                .clamp(_startHour * 60, _endHour * 60 - 60)
+            final minutes = widget.startHour * 60 + _tapY / _pixelPerHour * 60;
+            final tapped = ((minutes / 10).round() * 10)
+                .clamp(widget.startHour * 60, _endHour * 60 - 60)
                 .toInt();
             final dayStart = DateTime(
               widget.day.year,
               widget.day.month,
               widget.day.day,
-              snapped ~/ 60,
-              snapped % 60,
+              tapped ~/ 60,
+              tapped % 60,
             );
             _openQuickAdd(
               context,
@@ -1285,7 +1329,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
             );
           },
           child: Container(
-            height: (_endHour - _startHour) * _pixelPerHour,
+            height: (_endHour - widget.startHour) * _pixelPerHour,
             // 拖入不整列变蓝（用户反馈太丑），仅保留顶部时间浮标与指示线
             child: Stack(
               // A13：胶囊浮层允许跨列绘制（周视图列宽约 50px，胶囊 78px）
@@ -1379,10 +1423,8 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                     return AnimatedPositioned(
                       duration: const Duration(milliseconds: 80),
                       curve: Curves.easeOut,
-                      top: (_snapMinutesForY(gy) - _startHour * 60) /
-                              60 *
-                              _pixelPerHour -
-                          1,
+                      // P1-7：虚影位置 = 实际写入（C5-1 回退后）的开始时间
+                      top: _ghostTopFor(gy),
                       left: 2,
                       right: 2,
                       height: (_dragGhostHeight()),
@@ -1401,15 +1443,18 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                     }
                     const capH = 28.0;
                     const capW = 78.0;
-                    final maxY = (_endHour - _startHour) * _pixelPerHour;
+                    final maxY = (_endHour - widget.startHour) * _pixelPerHour;
                     // A13：垂直锚点 = 选区/虚影上端（而非手指位置），
                     // 胶囊始终在任务块上方，不遮挡选区内容
                     final double anchorY;
                     if (_dragSelecting && _dragStartY != null) {
                       anchorY = _dragStartY!; // move 后已写回吸附后的选区上端
                     } else if (_dragTaskId != null && _dragY != null) {
-                      anchorY =
-                          (_snapMinutesForY(_dragY!) - _startHour * 60) /
+                      // P1-7：胶囊锚点 = 实际写入（回退后）的开始时间位置
+                      final gStart =
+                          _draggedStartForMinutes(_snapMinutesForY(_dragY!));
+                      anchorY = ((gStart.hour * 60 + gStart.minute) -
+                                  widget.startHour * 60) /
                               60 *
                               _pixelPerHour;
                     } else {
@@ -1502,13 +1547,8 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
         colorFromHex(dragged.listColor);
     final onColor = TaskColors.textOn(color);
     final snapped = _snapMinutesForY(dragY);
-    final start = DateTime(
-      widget.day.year,
-      widget.day.month,
-      widget.day.day,
-      snapped ~/ 60,
-      snapped % 60,
-    );
+    // P1-7：虚影显示实际写入的开始时间（C5-1 回退后），所见即所得
+    final start = _draggedStartForMinutes(snapped);
     final dur = dragged.task.durationMinutes;
     final end = start.add(Duration(minutes: dur));
     return IgnorePointer(
@@ -1558,11 +1598,11 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
 
   /// y 坐标吸附后的分钟数（10 分钟粒度）
   int _snapMinutesForY(double y) {
-    final minutes = (_startHour * 60 + y / _pixelPerHour * 60)
+    final minutes = (widget.startHour * 60 + y / _pixelPerHour * 60)
         .roundToDouble()
-        .clamp(_startHour * 60.0, _endHour * 60.0);
+        .clamp(widget.startHour * 60.0, _endHour * 60.0);
     return ((minutes / 10).round() * 10)
-        .clamp(_startHour * 60, _endHour * 60)
+        .clamp(widget.startHour * 60, _endHour * 60)
         .round();
   }
 
@@ -1580,22 +1620,58 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     return _pixelPerHour;
   }
 
+  /// P1-7：拖动改期虚影的实际开始时间——落点分钟经 C5-1"时长不跨天"
+  /// 回退后（22:30 拖 2h 任务实际写入 21:00），预览（虚影/胶囊）与
+  /// 写入端 moveTaskToDateTime 必须一致，否则所见非所得。
+  DateTime _draggedStartForMinutes(int minutes) {
+    final durMin = _draggedDurationMinutes() ?? 60;
+    return DateUtilsEx.clampStartWithinDay(
+      DateTime(
+        widget.day.year,
+        widget.day.month,
+        widget.day.day,
+        minutes ~/ 60,
+        minutes % 60,
+      ),
+      Duration(minutes: durMin),
+    );
+  }
+
+  int? _draggedDurationMinutes() {
+    final draggingId = _dragTaskId;
+    if (draggingId == null) return null;
+    final itemsAll = ref.read(calendarControllerProvider).items;
+    for (final it in itemsAll) {
+      if (it.task.id == draggingId) return it.task.durationMinutes;
+    }
+    return null;
+  }
+
+  /// P1-7：虚影在时间轴内的 top——基于实际写入（C5-1 回退后）的开始时间
+  double _ghostTopFor(double gy) {
+    final s = _draggedStartForMinutes(_snapMinutesForY(gy));
+    return ((s.hour * 60 + s.minute) - widget.startHour * 60) /
+            60 *
+            _pixelPerHour -
+        1;
+  }
+
   /// E7：将拖动范围吸附到 10 分钟粒度
   /// P2：与 _snappedYRange 一致 clamp 到 [06:00, 23:00]——
   /// 此前顶部/底部 padding 区拖动可得 5:30/23:30，预览与结果不一致
   /// C5-2：两端同 clamp 到 23:00 时保证至少 10 分钟跨度
   (DateTime, DateTime) _snapRange(double y1, double y2) {
-    final minutes1 = _startHour * 60 + (y1 < y2 ? y1 : y2) / _pixelPerHour * 60;
-    final minutes2 = _startHour * 60 + (y1 < y2 ? y2 : y1) / _pixelPerHour * 60;
+    final minutes1 = widget.startHour * 60 + (y1 < y2 ? y1 : y2) / _pixelPerHour * 60;
+    final minutes2 = widget.startHour * 60 + (y1 < y2 ? y2 : y1) / _pixelPerHour * 60;
     var snapped1 = ((minutes1 / 10).round() * 10)
-        .clamp(_startHour * 60, _endHour * 60)
+        .clamp(widget.startHour * 60, _endHour * 60)
         .toInt();
     final snapped2 = ((minutes2 / 10).round() * 10)
-        .clamp(_startHour * 60, _endHour * 60)
+        .clamp(widget.startHour * 60, _endHour * 60)
         .toInt();
     // 两端相等（拖到底部边界）→ 起点回退 10 分钟
     if (snapped2 <= snapped1) {
-      snapped1 = (snapped2 - 10).clamp(_startHour * 60, _endHour * 60);
+      snapped1 = (snapped2 - 10).clamp(widget.startHour * 60, _endHour * 60);
     }
     final d = _targetDay;
     return (
@@ -1607,12 +1683,12 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   /// 将 y 坐标区间吸附到 10 分钟粒度（预览高亮区用，与 _snapRange 一致）
   (double, double) _snappedYRange(double y1, double y2) {
     double snap(double y) {
-      final minutes = _startHour * 60 + y / _pixelPerHour * 60;
+      final minutes = widget.startHour * 60 + y / _pixelPerHour * 60;
       final snapped = ((minutes / 10).round() * 10).clamp(
-        _startHour * 60,
+        widget.startHour * 60,
         _endHour * 60,
       );
-      return (snapped - _startHour * 60) / 60 * _pixelPerHour;
+      return (snapped - widget.startHour * 60) / 60 * _pixelPerHour;
     }
 
     final s1 = snap(y1 < y2 ? y1 : y2);
@@ -1629,24 +1705,27 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   }
 
   /// A13：悬浮时间胶囊文本（单时间，防遮挡）：
-  /// - 拖动改期：虚影开始时间（手指吸附点）
+  /// - 拖动改期：实际写入的开始时间（C5-1 回退后，P1-7 与写入一致）
   /// - 长按拖选：手指所指的实时时间（_dragFingerY，向上/向下拖都指哪显示哪）
   String? _hintTimeText() {
-    final minutes = _dragSelecting && _dragFingerY != null
-        ? _snapMinutesForY(_dragFingerY!)
-        : (_dragTaskId != null && _dragY != null)
-            ? _snapMinutesForY(_dragY!)
-            : null;
-    if (minutes == null) return null;
-    return DateUtilsEx.timeCn(
-      DateTime(
-        widget.day.year,
-        widget.day.month,
-        widget.day.day,
-        minutes ~/ 60,
-        minutes % 60,
-      ),
-    );
+    if (_dragSelecting && _dragFingerY != null) {
+      final minutes = _snapMinutesForY(_dragFingerY!);
+      return DateUtilsEx.timeCn(
+        DateTime(
+          widget.day.year,
+          widget.day.month,
+          widget.day.day,
+          minutes ~/ 60,
+          minutes % 60,
+        ),
+      );
+    }
+    if (_dragTaskId != null && _dragY != null) {
+      return DateUtilsEx.timeCn(
+        _draggedStartForMinutes(_snapMinutesForY(_dragY!)),
+      );
+    }
+    return null;
   }
 
   /// C6-1：点空白位置（预填计划时刻用）
@@ -1691,7 +1770,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     final minutes = dt != null
         ? dt.hour * 60 + dt.minute
         : (ps?.hour ?? 0) * 60 + (ps?.minute ?? 0);
-    return (minutes - _startHour * 60) / 60 * _pixelPerHour;
+    return (minutes - widget.startHour * 60) / 60 * _pixelPerHour;
   }
 
   double _heightFor(CalendarItem item) {
@@ -1704,7 +1783,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   /// 组区间 y 坐标换算（+N 徽标定位用）
   double _topForSpan(DateTime s) {
     final minutes = s.hour * 60 + s.minute;
-    return (minutes - _startHour * 60) / 60 * _pixelPerHour;
+    return (minutes - widget.startHour * 60) / 60 * _pixelPerHour;
   }
 
   double _blockWidth(OverlapBlock b) {

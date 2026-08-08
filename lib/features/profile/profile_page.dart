@@ -1565,6 +1565,9 @@ class _HabitTile extends ConsumerStatefulWidget {
 
 class _HabitTileState extends ConsumerState<_HabitTile> {
   bool _doneToday = false;
+  /// P1-20：打卡操作进行中标志（双击/连点防抖——toggle 语义下连点
+  /// 会变成"打卡+取消"，且并发写入可致重复记录）
+  bool _toggling = false;
 
   @override
   void initState() {
@@ -1610,28 +1613,48 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
           _doneToday ? Icons.check_circle : Icons.radio_button_unchecked,
           color: _doneToday ? Theme.of(context).colorScheme.primary : null,
         ),
-        onPressed: () async {
-          // 批4-4：习惯打卡补触觉反馈（此前无）
-          Haptics.light();
-          // P2：打卡/取消打卡都是 toggle 语义，带撤销条（误触可恢复）
-          final willDone = !_doneToday;
-          await db.checkHabit(widget.habit.id, AppClock.now());
-          // P1-A：习惯打卡数据变更通知
-          bumpDataVersion(ref);
-          _load();
-          if (!context.mounted) return;
-          showAppSnackBar(
-            context,
-            willDone ? '已打卡「${widget.habit.name}」' : '已取消今日打卡',
-            actionLabel: '撤销',
-            onAction: () async {
-              await db.checkHabit(widget.habit.id, AppClock.now());
-              bumpDataVersion(ref);
-              _load();
-            },
-            icon: willDone ? Icons.check_circle_outline : Icons.undo,
-          );
-        },
+        onPressed: _toggling
+            ? null
+            : () async {
+                // P1-20：双击/连点防抖——toggle 语义下连点会变成
+                // "打卡+取消"；_toggling 置位未触发重建前，第二次点击
+                // 仍可能进入本闭包，故闭包内再守卫一次
+                if (_toggling) return;
+                // 批4-4：习惯打卡补触觉反馈（此前无）
+                Haptics.light();
+                _toggling = true;
+                if (mounted) setState(() {});
+                try {
+                  // P2：打卡/取消打卡都是 toggle 语义，带撤销条（误触可恢复）
+                  final willDone = !_doneToday;
+                  await db.checkHabit(widget.habit.id, AppClock.now());
+                  // P1-10：打卡/取消后重排习惯提醒——已打卡日期不再排
+                  //（取消打卡后当天提醒恢复）
+                  await ref
+                      .read(reminderSchedulerProvider)
+                      .scheduleHabitReminder(widget.habit);
+                  // P1-A：习惯打卡数据变更通知
+                  bumpDataVersion(ref);
+                  _load();
+                  if (!context.mounted) return;
+                  showAppSnackBar(
+                    context,
+                    willDone ? '已打卡「${widget.habit.name}」' : '已取消今日打卡',
+                    actionLabel: '撤销',
+                    onAction: () async {
+                      await db.checkHabit(widget.habit.id, AppClock.now());
+                      await ref
+                          .read(reminderSchedulerProvider)
+                          .scheduleHabitReminder(widget.habit);
+                      bumpDataVersion(ref);
+                      _load();
+                    },
+                    icon: willDone ? Icons.check_circle_outline : Icons.undo,
+                  );
+                } finally {
+                  _toggling = false;
+                }
+              },
       ),
       onLongPress: () => _showActions(),
     );

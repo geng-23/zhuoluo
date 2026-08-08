@@ -3,6 +3,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
+import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 
 /// 修复回归测试：
 /// - #1 通知 ID 含实例日期维度：同 (task, reminder) 不同实例互不覆盖
@@ -69,7 +70,7 @@ void main() {
         reminderId,
         DateTime(2050, 12, 31),
       );
-      final habitIdMin = NotificationIds.forHabit(1);
+      final habitIdMin = NotificationIds.forHabit(1, DateTime(2024, 1, 1));
       expect(
         reminderIdMax,
         lessThan(habitIdMin),
@@ -254,7 +255,7 @@ void main() {
   test('P0-7 测试通知 ID 不与第 10 个习惯提醒 ID 碰撞', () {
     expect(
       NotificationIds.forTest,
-      isNot(NotificationIds.forHabit(10)),
+      isNot(NotificationIds.forHabit(10, DateTime(2050, 12, 31))),
       reason: '旧公式 2099999990 与 forHabit(10) 相同，互相覆盖',
     );
     expect(NotificationIds.forTest, greaterThan(2100000000));
@@ -265,5 +266,32 @@ void main() {
     final granted = await svc.refreshPermissionCache();
     expect(granted, isTrue,
         reason: '测试环境无原生宿主，权限查询应兜底返回 true');
+  });
+
+  test('P1-10 习惯提醒 ID 含日期维度且段位不碰撞', () {
+    final day1 = DateTime(2026, 8, 10);
+    final day2 = DateTime(2026, 8, 11);
+    expect(
+      NotificationIds.forHabit(1, day1),
+      isNot(NotificationIds.forHabit(1, day2)),
+      reason: 'P1-10：逐日排期后同习惯不同日期 ID 必须不同（按天跳过打卡）',
+    );
+    expect(
+      NotificationIds.forHabit(1, day1),
+      isNot(NotificationIds.forHabit(2, day1)),
+      reason: '不同习惯不碰撞',
+    );
+    // 段位：远低于测试段（int32 上限），高于任务提醒段
+    final maxHabit = NotificationIds.forHabit(1, DateTime(2050, 12, 31));
+    expect(maxHabit, lessThan(NotificationIds.forTest));
+    expect(maxHabit, greaterThan(0));
+  });
+
+  test('P0-6 rescheduleIfStale 未过期时短路（冒烟，不重复全量重排）', () async {
+    final scheduler = ReminderScheduler(db);
+    await scheduler.rescheduleAll();
+    // 测试环境通知平台不可用：rescheduleAll 吞异常返回；
+    // 立即调用 rescheduleIfStale（<24h）应被门控短路，不抛
+    await scheduler.rescheduleIfStale();
   });
 }

@@ -13,6 +13,11 @@ class ReminderScheduler {
 
   final AppDatabase _db;
 
+  /// P0-6：上次全量重排时间（内存态，进程内有效）。
+  /// 用于"窗口滚动"门控：resumed 时距上次重排 >24h 才再排一次，
+  /// 避免每次回前台都 cancelAll+全量重排（93 天窗口随日期前进）。
+  DateTime? _lastFullReschedule;
+
   /// 计算任务在 [instanceDate] 实例的提醒绝对时间列表
   List<DateTime> computeReminderTimes(
     Task task,
@@ -256,42 +261,81 @@ class ReminderScheduler {
       for (final h in habits) {
         await scheduleHabitReminder(h);
       }
+      _lastFullReschedule = AppClock.now();
     } catch (e) {
       debugPrint('全量重排失败: $e');
+    }
+  }
+
+  /// P0-6：93 天排期窗口滚动——进程常驻期间窗口不会自动前进，
+  /// 距上次全量重排超过 24h 时补排一次（resumed 生命周期回调调用；
+  /// 用户每天回到前台即完成滚动，避免长期不重启设备重复任务
+  /// 提醒在窗口外静默消失）。
+  Future<void> rescheduleIfStale() async {
+    final last = _lastFullReschedule;
+    if (last == null) return;
+    final stale =
+        AppClock.now().difference(last) > const Duration(hours: 24);
+    if (stale) {
+      await rescheduleAll();
     }
   }
 
   // ---------- 习惯提醒 ----------
 
   /// 调度习惯每日提醒（无 reminderTime 则取消）。
-  /// 返回 false 表示未成功排入系统（权限被拒等）（P1-4.9）。
+  /// P1-10：逐日排期（93 天窗口，一次性通知，ID 含日期维度）——
+  /// 已打卡的日期跳过（此前 scheduleDaily 循环通知无法按天跳过，
+  /// 当天已打卡后仍弹"该打卡了"）；打卡/撤销打卡后调用本方法重排。
+  /// 返回 false 表示有提醒未成功排入系统（权限被拒等）（P1-4.9）。
   Future<bool> scheduleHabitReminder(Habit habit) async {
     try {
       final time = habit.reminderTime;
-      if (time == null) {
-        await NotificationService.instance.cancel(
-          NotificationIds.forHabit(habit.id),
+      // P1-10：无论是否取消提醒，先取消窗口内全部旧通知再重排——
+      // 打卡后重排时已排的"今天"通知必须取消，否则已打卡仍到点弹
+      await cancelHabitReminder(habit.id);
+      if (time == null) return true;
+      var ok = true;
+      final now = AppClock.now();
+      final start = DateTime(now.year, now.month, now.day);
+      for (var i = 0; i < 93; i++) {
+        final day = start.add(Duration(days: i));
+        // P1-10：已打卡的日期不排提醒（无效打扰）
+        if (await _db.isHabitDone(habit.id, day)) continue;
+        final when = DateTime(
+          day.year,
+          day.month,
+          day.day,
+          time.hour,
+          time.minute,
         );
-        return true;
+        // 已过去的提醒时刻（今天）跳过，从明天开始
+        if (when.isBefore(now)) continue;
+        ok = await NotificationService.instance.schedule(
+              NotificationIds.forHabit(habit.id, day),
+              title: '习惯提醒',
+              body: '该打卡「${habit.name}」了',
+              when: when,
+              payload: 'h${habit.id}',
+            ) &&
+            ok;
       }
-      return await NotificationService.instance.scheduleDaily(
-        NotificationIds.forHabit(habit.id),
-        title: '习惯提醒',
-        body: '该打卡「${habit.name}」了',
-        time: time,
-        payload: 'h${habit.id}',
-      );
+      return ok;
     } catch (e) {
       debugPrint('习惯提醒调度失败 habitId=${habit.id}: $e');
       return false;
     }
   }
 
-  /// 取消习惯提醒
+  /// 取消习惯提醒（未来 93 天窗口逐日取消，ID 含日期维度）
   Future<void> cancelHabitReminder(int habitId) async {
-    await NotificationService.instance.cancel(
-      NotificationIds.forHabit(habitId),
-    );
+    final now = AppClock.now();
+    final start = DateTime(now.year, now.month, now.day);
+    for (var i = 0; i < 93; i++) {
+      await NotificationService.instance.cancel(
+        NotificationIds.forHabit(habitId, start.add(Duration(days: i))),
+      );
+    }
   }
 }
 

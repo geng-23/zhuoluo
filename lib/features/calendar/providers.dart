@@ -187,18 +187,8 @@ class CalendarController extends StateNotifier<CalendarState> {
         : const Duration(hours: 1);
     // C5-1：落点吸附"时长不跨天"约束——拖到 23:00 且时长跨过午夜时
     // 回退起点（此前 1 小时任务拖到 23:00 变跨天、跳进置顶区且无法拖回）
-    var start = target;
-    if (start.add(dur).isAfter(
-      DateTime(start.year, start.month, start.day, 23, 0),
-    )) {
-      start = DateTime(
-        start.year,
-        start.month,
-        start.day,
-        23,
-        0,
-      ).subtract(dur);
-    }
+    // P1-7：与拖拽预览端（虚影/时间胶囊）统一用 clampStartWithinDay
+    final start = DateUtilsEx.clampStartWithinDay(target, dur);
     await _db.updateTask(
       taskId,
       TasksCompanion(
@@ -234,19 +224,8 @@ class CalendarController extends StateNotifier<CalendarState> {
     final dur = (oldEnd != null && oldStart != null)
         ? oldEnd.difference(oldStart)
         : const Duration(hours: 1);
-    // C5-1：系列改期同样应用"时长不跨天"约束
-    var start = target;
-    if (start.add(dur).isAfter(
-      DateTime(start.year, start.month, start.day, 23, 0),
-    )) {
-      start = DateTime(
-        start.year,
-        start.month,
-        start.day,
-        23,
-        0,
-      ).subtract(dur);
-    }
+    // C5-1：系列改期同样应用"时长不跨天"约束（P1-7：与预览端统一）
+    final start = DateUtilsEx.clampStartWithinDay(target, dur);
     await _db.updateTask(
       taskId,
       TasksCompanion(
@@ -261,6 +240,7 @@ class CalendarController extends StateNotifier<CalendarState> {
       taskId: taskId,
       oldStart: oldStart,
       oldEnd: oldEnd,
+      oldIsAllDay: t.isAllDay,
       removedCompletions: removed,
     );
     final updated = await _db.getTask(taskId);
@@ -283,6 +263,9 @@ class CalendarController extends StateNotifier<CalendarState> {
       TasksCompanion(
         planStart: s.oldStart == null ? const Value(null) : Value(s.oldStart),
         planEnd: s.oldEnd == null ? const Value(null) : Value(s.oldEnd),
+        // P1-16：撤销恢复全天状态——此前快照缺 isAllDay，全天系列
+        // 拖动改期后撤销变成时段任务
+        isAllDay: Value(s.oldIsAllDay),
       ),
     );
     for (final c in s.removedCompletions) {
@@ -397,17 +380,19 @@ final calendarControllerProvider =
       );
     });
 
-/// 系列改期撤销快照（原计划时间 + 被清理的完成记录）
+/// 系列改期撤销快照（原计划时间 + 全天状态 + 被清理的完成记录）
 class _SeriesReschedule {
   final int taskId;
   final DateTime? oldStart;
   final DateTime? oldEnd;
+  final bool oldIsAllDay;
   final List<TaskCompletion> removedCompletions;
 
   _SeriesReschedule({
     required this.taskId,
     required this.oldStart,
     required this.oldEnd,
+    required this.oldIsAllDay,
     required this.removedCompletions,
   });
 }

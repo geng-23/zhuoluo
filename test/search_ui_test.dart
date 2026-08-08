@@ -108,7 +108,7 @@ void main() {
   group('通知测试 ID 区段', () {
     test('测试通知 ID 不与任务/习惯区段重叠', () {
       final testId = NotificationIds.forTest;
-      final habitId = NotificationIds.forHabit(1);
+      final habitId = NotificationIds.forHabit(1, DateTime(2050, 12, 31));
       final taskId = NotificationIds.forReminder(1, DateTime(2026, 8, 10));
       expect(testId, isNot(equals(habitId)));
       expect(testId, isNot(equals(taskId)));

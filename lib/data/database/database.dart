@@ -95,6 +95,14 @@ class HabitRecords extends Table {
   IntColumn get habitId => integer().references(Habits, #id)();
   DateTimeColumn get date => dateTime()();
   DateTimeColumn get completedAt => dateTime()();
+
+  // P1-20：同一习惯同一天只能有一条记录——双击打卡竞态并发插入
+  // 多条会导致 isHabitDone 的 getSingleOrNull 抛 "Too many elements"
+  // 习惯列表加载崩溃（旧库由 v5 迁移去重并建索引）
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {habitId, date},
+  ];
 }
 
 /// 番茄专注记录
@@ -133,7 +141,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -143,8 +151,28 @@ class AppDatabase extends _$AppDatabase {
       if (details.versionBefore != null && details.versionBefore! < 3) {
         await _dedupeCompletionsAndIndex();
       }
+      // v5：旧库补习惯打卡唯一索引（新库由表定义 uniqueKeys 自动生成）；
+      // 容错：不完整旧库可能无该表
+      if (details.versionBefore != null && details.versionBefore! < 5) {
+        try {
+          await _dedupeHabitRecordsAndIndex();
+        } catch (e) {
+          // ignore: avoid_print
+          print('v5 启动补索引跳过（habit_records 表缺失）: $e');
+        }
+      }
     },
     onUpgrade: (m, from, to) async {
+      if (from < 5) {
+        // v5：habit_records 加唯一约束，先清理重复行（双击竞态崩溃修复）。
+        // 容错：极旧/不完整库可能无该表（迁移测试手工构造的部分表库），跳过
+        try {
+          await _dedupeHabitRecordsAndIndex();
+        } catch (e) {
+          // ignore: avoid_print
+          print('v5 迁移跳过（habit_records 表缺失）: $e');
+        }
+      }
       if (from < 4) {
         // v4：reminders 增加全天任务提醒时刻字段
         await m.addColumn(reminders, reminders.remindAtMinutes);
@@ -224,6 +252,19 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  /// v5 迁移（P1-20）：删除 habit_records 中同一 (habit_id, date) 的
+  /// 重复行（双击打卡竞态历史残留），再建唯一索引
+  Future<void> _dedupeHabitRecordsAndIndex() async {
+    await customStatement(
+      'DELETE FROM habit_records WHERE id NOT IN '
+      '(SELECT MIN(id) FROM habit_records GROUP BY habit_id, date)',
+    );
+    await customStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_habit_records_unique '
+      'ON habit_records(habit_id, date)',
+    );
+  }
+
   // ---------- 初始化：预置默认清单 ----------
   Future<void> ensureDefaultList() async {
     final existing = await (select(
@@ -248,6 +289,15 @@ class AppDatabase extends _$AppDatabase {
 
   Future<TaskList> getDefaultList() =>
       (select(lists)..where((l) => l.isDefault.equals(true))).getSingle();
+
+  /// P1-22：是否存在默认清单（合并导入判断是否可继承备份的默认标记）
+  Future<bool> hasDefaultList() async {
+    final rows = await (select(lists)
+          ..where((l) => l.isDefault.equals(true))
+          ..limit(1))
+        .get();
+    return rows.isNotEmpty;
+  }
 
   /// 按 id 查清单（不存在返回 null）。默认清单设置读取时校验用。
   Future<TaskList?> getListById(int id) =>
@@ -301,6 +351,19 @@ class AppDatabase extends _$AppDatabase {
     }
     await (delete(lists)..where((l) => l.id.equals(listId))).go();
   }
+
+  /// 撤销删除清单：按原 ID 恢复清单行（连带删除撤销用，P0-9）
+  Future<void> restoreList(TaskList l) => into(lists).insertOnConflictUpdate(
+    ListsCompanion(
+      id: Value(l.id),
+      name: Value(l.name),
+      color: Value(l.color),
+      sortOrder: Value(l.sortOrder),
+      showInCalendar: Value(l.showInCalendar),
+      isDefault: Value(l.isDefault),
+      createdAt: Value(l.createdAt),
+    ),
+  );
 
   Future<void> _deleteTaskRecursive(int taskId) async {
     // P0-3.4：整棵子树在同一事务内删除，中途失败自动回滚（避免部分删除）
@@ -411,11 +474,13 @@ class AppDatabase extends _$AppDatabase {
     if (t.rrule.isEmpty) return true;
     final base = t.planStart ?? t.createdAt;
     final now = AppClock.now();
+    // P0-7：窗口至少覆盖一个完整周期——长间隔任务（如每 2 年）
+    // 固定 370 天窗口内无实例会被误判"系列结束"，数据从视图消失
     final hits = RruleService.instance.expand(
       base,
       t.rrule,
       from: now,
-      to: now.add(const Duration(days: 370)),
+      to: now.add(Duration(days: RruleService.windowDaysFor(t.rrule))),
       limit: 1,
     );
     return hits.isNotEmpty;
@@ -1101,6 +1166,10 @@ class AppDatabase extends _$AppDatabase {
   Future<void> deleteException(int id) =>
       (delete(taskExceptions)..where((t) => t.id.equals(id))).go();
 
+  /// P1-25：按 id 查单条例外（撤销改期时读取迁移信息）
+  Future<TaskException?> getException(int id) =>
+      (select(taskExceptions)..where((t) => t.id.equals(id))).getSingleOrNull();
+
   Future<void> updateException(int id, DateTime toDate) =>
       (update(taskExceptions)..where((t) => t.id.equals(id))).write(
         TaskExceptionsCompanion(overrideScheduledDate: Value(toDate)),
@@ -1156,23 +1225,30 @@ class AppDatabase extends _$AppDatabase {
     return found != null;
   }
 
+  /// 打卡/取消（toggle 语义）。P1-20：事务化——双击并发时串行执行，
+  /// 第二次调用看到第一次的提交结果（查→删/插），不会并发插入重复记录
+  ///（配合 habit_records 唯一索引双保险）
   Future<void> checkHabit(int habitId, DateTime date) async {
     final d = DateTime(date.year, date.month, date.day);
-    final existing =
-        await (select(habitRecords)
-              ..where((h) => h.habitId.equals(habitId) & h.date.equals(d)))
-            .getSingleOrNull();
-    if (existing == null) {
-      await into(habitRecords).insert(
-        HabitRecordsCompanion.insert(
-          habitId: habitId,
-          date: d,
-          completedAt: AppClock.now(),
-        ),
-      );
-    } else {
-      await (delete(habitRecords)..where((h) => h.id.equals(existing.id))).go();
-    }
+    await transaction(() async {
+      final existing =
+          await (select(habitRecords)
+                ..where((h) => h.habitId.equals(habitId) & h.date.equals(d)))
+              .getSingleOrNull();
+      if (existing == null) {
+        await into(habitRecords).insert(
+          HabitRecordsCompanion.insert(
+            habitId: habitId,
+            date: d,
+            completedAt: AppClock.now(),
+          ),
+        );
+      } else {
+        await (delete(habitRecords)
+              ..where((h) => h.id.equals(existing.id)))
+            .go();
+      }
+    });
   }
 
   Future<List<HabitRecord>> getHabitRecords(int habitId) =>

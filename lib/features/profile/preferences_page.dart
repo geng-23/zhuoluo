@@ -241,6 +241,11 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
     final picked = await showModalBottomSheet<String?>(
       context: context,
       isScrollControlled: true,
+      // C-2026-08-08：限制最大高度（85% 屏高），内容多时整体滚动、
+      // 内容少时收缩到内容高度；避免此前顶到状态栏 / 搜索态大空白
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+      ),
       builder: (c) => _TimezonePickerSheet(current: AppClock.timezoneName),
     );
     if (picked == null) return; // 取消
@@ -250,6 +255,9 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
     await settings.set(SettingsController.keyAppTimezone, name ?? '');
     // 时区口径变化：全量重排 93 天窗口内所有提醒
     await ref.read(reminderSchedulerProvider).rescheduleAll();
+    // 时区口径变化：bump 数据版本，触发任务页/日历/统计立即刷新
+    // （今天/明天判定、红线列位、周基准、统计范围按新时区重算）
+    bumpDataVersion(ref);
     if (mounted) await _load();
   }
 }
@@ -324,28 +332,33 @@ class _TimezonePickerSheetState extends State<_TimezonePickerSheet> {
     final filtered = searching
         ? _all.where((z) => z.toLowerCase().contains(q)).toList()
         : _commonZones;
+    // C-2026-08-08：整体滚动布局（SingleChildScrollView + shrinkWrap ListView，
+    // 无 Flexible）——内容多时在弹层 maxHeight（85% 屏高）内滚动，
+    // 内容少时弹层收缩到内容高度；SafeArea 保留顶部安全区，搜索框不再
+    // 被状态栏遮挡；分组标题标明"常用时区"，避免用户误以为时区只有这些。
     return SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: TextField(
-              autofocus: false,
-              decoration: InputDecoration(
-                hintText: '搜索时区（如 Asia/Shanghai、Beijing）',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: TextField(
+                autofocus: false,
+                decoration: InputDecoration(
+                  hintText: '搜索时区（如 Asia/Shanghai、Beijing）',
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  isDense: true,
                 ),
-                isDense: true,
+                onChanged: (v) => setState(() => _query = v),
               ),
-              onChanged: (v) => setState(() => _query = v),
             ),
-          ),
-          Flexible(
-            child: ListView(
+            ListView(
               shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
               children: [
                 if (!searching)
                   ListTile(
@@ -356,6 +369,11 @@ class _TimezonePickerSheetState extends State<_TimezonePickerSheet> {
                         : null,
                     onTap: () => Navigator.pop(context, ''),
                   ),
+                if (!searching)
+                  _GroupLabel(
+                    '常用时区（共 ${_commonZones.length} 个，支持搜索全部）',
+                  ),
+                if (searching) const _GroupLabel('搜索结果'),
                 for (final z in filtered)
                   ListTile(
                     title: Text(z),
@@ -367,11 +385,28 @@ class _TimezonePickerSheetState extends State<_TimezonePickerSheet> {
                     title: Text('未找到匹配的时区'),
                     enabled: false,
                   ),
+                const SizedBox(height: 8),
               ],
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
+}
+
+/// 时区弹层内的小分组标题
+class _GroupLabel extends StatelessWidget {
+  const _GroupLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+    child: Text(
+      text,
+      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+    ),
+  );
 }

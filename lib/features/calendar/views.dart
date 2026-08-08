@@ -731,9 +731,19 @@ class _NowLineState extends State<_NowLine>
       final t = AppClock.now();
       final top = _topFor(t);
       if ((top - _nextTop).abs() > 0.01) {
-        _prevTop = _nextTop;
-        _nextTop = top;
-        _controller.forward(from: 0);
+        final delta = (top - _nextTop).abs();
+        // C-2026-08-08：位移超过 1 小时跨度 = 异常跳变（应用时区切换 /
+        // 系统时钟调整）——立即到位，不走 55s 走秒动画（否则红线会
+        // 用 55 秒慢慢挪到目标位置）
+        if (delta > _pixelPerHour) {
+          _prevTop = top;
+          _nextTop = top;
+          _controller.value = 1.0;
+        } else {
+          _prevTop = _nextTop;
+          _nextTop = top;
+          _controller.forward(from: 0);
+        }
       }
     });
   }

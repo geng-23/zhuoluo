@@ -12,6 +12,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart' hide TimeOfDay;
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 任务页：抽屉侧栏 + 任务列表
 class TaskPage extends ConsumerStatefulWidget {
@@ -100,7 +101,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
         if (t.rrule.isNotEmpty && doneDay != null) {
           final isFuture = DateUtilsEx.sameDay(
                 doneDay,
-                DateTime.now(),
+                AppClock.now(),
               ) ==
               false;
           _showUndo(
@@ -822,7 +823,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
 
   /// 改期（日期 + 时间两步，保持时长；带撤销）
   Future<void> _pickDate(Task t) async {
-    final now = DateTime.now();
+    final now = AppClock.now();
     final initial = t.planStart ?? now;
     // P1-7：initialDate 钳制到 [firstDate, lastDate]（长期任务的 planStart
     // 可早于一年前，超界触发 debug 断言崩溃 / release 月份错乱）
@@ -886,7 +887,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
   /// 重复任务：改期本次实例（日期 + 时间，写例外）
   Future<void> _rescheduleInstance(Task t) async {
     final instDay = TasksController.currentInstanceDate(t);
-    final now = DateTime.now();
+    final now = AppClock.now();
     // 默认时间 = 原计划时分
     final ps = t.planStart;
     final picked = await showDatePicker(
@@ -1339,7 +1340,7 @@ class _TaskTile extends StatelessWidget {
       if (task.isAllDay) {
         parts.add(dayText);
       } else {
-        final base = ps ?? next ?? DateTime.now();
+        final base = ps ?? next ?? AppClock.now();
         final pe = task.planEnd;
         parts.add(
           '$dayText '

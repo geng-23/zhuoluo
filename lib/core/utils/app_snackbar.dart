@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 统一提示条（撤销条/结果提示）：**新条替换旧条**，避免多个撤销条排队堆积。
 /// 批量操作、频繁操作时只保留最新一条提示。
@@ -12,7 +13,7 @@ void showAppSnackBar(
 }) {
   // A17：去抖——同一消息 400ms 内不重复弹出（连续勾选任务时旧条滑出
   // 又滑入造成闪烁）
-  final now = DateTime.now();
+  final now = AppClock.now();
   if (message == _lastMessage &&
       now.difference(_lastShownAt) < const Duration(milliseconds: 400)) {
     return;

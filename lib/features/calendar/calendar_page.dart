@@ -6,6 +6,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/features/calendar/providers.dart';
 import 'package:zhuoluo/features/calendar/quick_add_sheets.dart';
 import 'package:zhuoluo/features/calendar/views.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 日历页（E12：视图切换/月份选择/今天/添加收进左侧侧边栏）
 class CalendarPage extends ConsumerWidget {
@@ -129,7 +130,7 @@ class CalendarPage extends ConsumerWidget {
     CalendarController notifier,
     CalendarState state,
   ) async {
-    final now = DateTime.now();
+    final now = AppClock.now();
     final picked = await showDatePicker(
       context: context,
       initialDate: state.selectedDay,
@@ -143,7 +144,7 @@ class CalendarPage extends ConsumerWidget {
   }
 
   void _openQuickAdd(BuildContext context, WidgetRef ref, {DateTime? initialDay}) {
-    final day = initialDay ?? DateTime.now();
+    final day = initialDay ?? AppClock.now();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -414,7 +415,7 @@ class MonthView extends ConsumerWidget {
                 displayedMonth.month,
                 dayNum,
               );
-              final isToday = DateUtilsEx.sameDay(date, DateTime.now());
+              final isToday = DateUtilsEx.sameDay(date, AppClock.now());
               final isSelected = DateUtilsEx.sameDay(date, selectedDay);
               final dayItems = byDay[date] ?? [];
               return InkWell(

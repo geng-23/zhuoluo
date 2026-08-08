@@ -1,3 +1,4 @@
+﻿import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 解析结果
 ///
 /// [date] 命中日期（可能为 null）
@@ -68,7 +69,7 @@ class ChineseDateParser {
 
   /// 解析输入文本
   ParseResult parse(String input, {DateTime? now}) {
-    final base = now ?? DateTime.now();
+    final base = now ?? AppClock.now();
     final today = DateTime(base.year, base.month, base.day);
     String rrule = '';
     DateTime? date;

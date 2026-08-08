@@ -1,8 +1,9 @@
-import 'package:flutter/foundation.dart';
+﻿import 'package:flutter/foundation.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 提醒调度引擎
 ///
@@ -85,7 +86,7 @@ class ReminderScheduler {
       }
     } else {
       // 重复任务：调度未来 3 个月内的实例
-      final today = DateTime.now();
+      final today = AppClock.now();
       final start = task.planStart ?? today;
       // 从 start 展开并截取未来窗口（老任务不再因前 100 个实例全在过去而漏排）
       final instances = RruleService.instance.expand(
@@ -141,7 +142,7 @@ class ReminderScheduler {
         day,
         r,
       ).subtract(Duration(minutes: r.remindMinutesBefore));
-      if (when.isBefore(DateTime.now())) continue; // 已过时间：不算失败
+      if (when.isBefore(AppClock.now())) continue; // 已过时间：不算失败
       // ID 含实例日期：同一 (task, reminder) 的不同实例通知互不覆盖
       final id = NotificationIds.forReminder(task.id, r.id, day);
       final scheduled = await NotificationService.instance.schedule(
@@ -174,7 +175,7 @@ class ReminderScheduler {
       if (ps == null) return const [];
       return [DateTime(ps.year, ps.month, ps.day)];
     }
-    final today = DateTime.now();
+    final today = AppClock.now();
     final start = t.planStart ?? today;
     final instances = RruleService.instance.expand(
       start,
@@ -243,7 +244,7 @@ class ReminderScheduler {
     try {
       await NotificationService.instance.cancelAll();
       final allTasks = await _db.getAllUncompleted();
-      final today = DateTime.now();
+      final today = AppClock.now();
       for (final t in allTasks) {
         final ps = t.planStart;
         // P0-13：仅截止时间（dueTime）的任务同样纳入全量重排
@@ -306,7 +307,7 @@ DateTime? reminderTriggerAt(
 }) {
   final ps = task.planStart;
   if (ps == null) return null;
-  final now = DateTime.now();
+  final now = AppClock.now();
   final today = DateTime(now.year, now.month, now.day);
   final day = task.rrule.isNotEmpty
       ? today

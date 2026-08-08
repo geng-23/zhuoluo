@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
@@ -13,6 +13,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/task/providers.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 任务详情页（7 区块，自动保存）
 class TaskDetailPage extends ConsumerStatefulWidget {
@@ -124,7 +125,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       if (!mounted || seq != _loadSeq) return;
       // P1-4.3：子任务完成状态——重复子任务按今日实例完成记录判断
       // （此前一律用 completedAt，重复子任务今天已完成仍显示未完成）
-      final now = DateTime.now();
+      final now = AppClock.now();
       final today = DateTime(now.year, now.month, now.day);
       for (final s in _subTasks) {
         _subTasksDone[s.id] = s.rrule.isNotEmpty
@@ -239,7 +240,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                     if (mounted &&
                         t.rrule.isNotEmpty &&
                         doneDay != null &&
-                        !DateUtilsEx.sameDay(doneDay, DateTime.now())) {
+                        !DateUtilsEx.sameDay(doneDay, AppClock.now())) {
                       showAppSnackBar(
                         context,
                         '已提前完成 ${DateUtilsEx.dateCn(doneDay)} 的实例',
@@ -877,7 +878,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
   Future<void> _pickDueTime(Task t) async {
     // A13：打开选项面板前收起键盘，避免选完回来仍是编辑态
     FocusScope.of(context).unfocus();
-    final now = DateTime.now();
+    final now = AppClock.now();
     final initial = t.dueTime ?? now;
     // P1-7：initialDate 钳制到 [firstDate, lastDate]
     final first = DateTime(now.year - 1);
@@ -913,6 +914,8 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
   Future<void> _addReminder() async {
     // A13：打开选项面板前收起键盘，避免选完回来仍是编辑态
     FocusScope.of(context).unfocus();
+    // 偏好设置组：命中默认提醒提前量时标记"（默认）"并高亮
+    final defaultMin = await ref.read(settingsProvider).getDefaultRemindMinutes();
     final choice = await _showSheet<int>(
       // 8 个选项可能超出默认最大高度，允许滚动/自适应
       isScrollControlled: true,
@@ -934,6 +937,21 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
               ])
                 ListTile(
                   title: Text(e.$2),
+                  titleTextStyle: e.$1 == defaultMin
+                      ? TextStyle(
+                          color: Theme.of(c).colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        )
+                      : null,
+                  trailing: e.$1 == defaultMin
+                      ? Text(
+                          '默认',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(c).colorScheme.primary,
+                          ),
+                        )
+                      : null,
                   onTap: () {
                     if (e.$1 == -1) {
                       Navigator.pop(c);
@@ -995,7 +1013,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       );
       return false;
     }
-    if (!triggerAt.isBefore(DateTime.now())) return true;
+    if (!triggerAt.isBefore(AppClock.now())) return true;
     if (t.rrule.isEmpty) {
       showAppSnackBar(
         context,
@@ -1014,7 +1032,12 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
 
   /// 全天任务提醒时刻选择（当天 0 点起分钟数；null = 取消）
   Future<int?> _pickRemindAt(int? current) async {
-    final initial = current ?? 540; // 默认 09:00
+    // 偏好设置组：全天任务默认提醒时刻（默认 540 = 09:00）
+    final defAt = await ref
+        .read(settingsProvider)
+        .getDefaultAllDayRemindAt();
+    if (!mounted) return null;
+    final initial = current ?? defAt;
     final picked = await showTimePicker(
       context: context,
       initialTime: TimeOfDay(hour: initial ~/ 60, minute: initial % 60),
@@ -1044,7 +1067,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     if (t != null) {
       await ref
           .read(reminderSchedulerProvider)
-          .scheduleTask(t, DateTime.now());
+          .scheduleTask(t, AppClock.now());
     }
     _load();
   }
@@ -1190,7 +1213,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       final db = ref.read(dbProvider);
       if (rrule.isNotEmpty) {
         // 开始日期：用户选的开始日期优先，否则任务原计划开始日（保持时分）
-        final now = DateTime.now();
+        final now = AppClock.now();
         final base = t.planStart ?? now;
         final anchor = startDate ?? base;
         // 锚点吸附：开始日期自动对齐到距锚点最近的规则命中日
@@ -1292,7 +1315,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
   /// 重复任务：改期本次实例（写例外，原时间保持不变）
   Future<void> _rescheduleInstance(Task t) async {
     final instDay = TasksController.currentInstanceDate(t);
-    final now = DateTime.now();
+    final now = AppClock.now();
     final ps = t.planStart;
     final picked = await showDatePicker(
       context: context,
@@ -1502,7 +1525,7 @@ class _PlanTimeSheetState extends State<_PlanTimeSheet> {
     super.initState();
     final ps = widget.initialStart;
     final pe = widget.initialEnd;
-    _startDate = ps ?? DateTime.now();
+    _startDate = ps ?? AppClock.now();
     _startTime = (ps != null && !widget.initialAllDay)
         ? TimeOfDay(hour: ps.hour, minute: ps.minute)
         : null;
@@ -1517,7 +1540,7 @@ class _PlanTimeSheetState extends State<_PlanTimeSheet> {
     ValueChanged<DateTime> onPicked, {
     String? help,
   }) async {
-    final now = DateTime.now();
+    final now = AppClock.now();
     // P1-7：initialDate 钳制到 [firstDate, lastDate]（长期任务的一年
     // 前计划时间/结束时间会超界触发断言崩溃）
     final first = DateTime(now.year - 1);
@@ -1616,7 +1639,7 @@ class _PlanTimeSheetState extends State<_PlanTimeSheet> {
               onTap: () {
                 // 默认预设当前系统时间（此前固定 9:00）
                 final initial =
-                    _startTime ?? TimeOfDay.fromDateTime(DateTime.now());
+                    _startTime ?? TimeOfDay.fromDateTime(AppClock.now());
                 _pickTime(
                   initial,
                   (t) => setState(() => _startTime = t),
@@ -1878,7 +1901,7 @@ class _RepeatRuleSheetState extends State<RepeatRuleSheet> {
 
   /// 当前生效的开始日期（用户选择优先，否则任务原计划开始日，再否则今天）
   DateTime get _effectiveStart =>
-      _startDate ?? widget.initialStart ?? DateTime.now();
+      _startDate ?? widget.initialStart ?? AppClock.now();
 
   @override
   Widget build(BuildContext context) {
@@ -1919,7 +1942,7 @@ class _RepeatRuleSheetState extends State<RepeatRuleSheet> {
               // 开始日期
               InkWell(
                 onTap: () async {
-                  final now = DateTime.now();
+                  final now = AppClock.now();
                   // P1-7：长期系列的开始日期可早于一年前，钳制防断言崩溃
                   final first = DateTime(now.year - 1);
                   final last = DateTime(now.year + 5);
@@ -2074,7 +2097,7 @@ class _RepeatRuleSheetState extends State<RepeatRuleSheet> {
                     selected: _endMode == 'date',
                     onSelected: (v) async {
                       if (!v) return;
-                      final now = DateTime.now();
+                      final now = AppClock.now();
                       // P1-7：过期 UNTIL 早于 firstDate 会触发断言崩溃，钳制到今天
                       final until = _until;
                       final last = DateTime(now.year + 5);

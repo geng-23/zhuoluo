@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +14,7 @@ import 'package:zhuoluo/features/calendar/providers.dart';
 import 'package:zhuoluo/features/calendar/quick_add_sheets.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 时间轴基础参数
 const _startHour = 6;
@@ -46,7 +47,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
 
   /// 拖动/选时跨页时的目标日期（随翻页更新；初始=当前显示周的周一）
   final ValueNotifier<DateTime> _dragDay = ValueNotifier<DateTime>(
-    DateTime.now(),
+    AppClock.now(),
   );
 
   /// 共享边缘滞回状态（贯穿所有页，不随翻页重建丢失）：
@@ -65,21 +66,34 @@ class _WeekViewState extends ConsumerState<WeekView> {
   /// 不回写 selectedDay（否则点"今天"后选中日被回归为周一）。
   int? _pendingExternalPage;
 
+  /// P0-1：固定周基准（initState 时刻的当前周周一），state 生命周期内
+  /// 不再变化，与 DayView 固定日基准（2000-01-01）同一模式。此前以
+  /// mondayOf(widget.selectedDay) 为基准，而 didUpdateWidget 中
+  /// widget.selectedDay 已是新值 → 差恒为 0 → 目标页恒为 500：
+  /// 手动翻周必触发 280ms 弹回动画、跨周外部跳转恒落回 App 打开时
+  /// 那一周（上版误判 P0-15 已修复，本轮翻案）。
+  late final DateTime _epochMonday;
+
   int _pageForMonday(DateTime monday) =>
-      500 +
-      monday.difference(DateUtilsEx.mondayOf(widget.selectedDay)).inDays ~/ 7;
+      500 + monday.difference(_epochMonday).inDays ~/ 7;
 
   @override
   void initState() {
     super.initState();
+    _epochMonday = DateUtilsEx.mondayOf(AppClock.now());
     _sharedScrollOffset =
         widget.sharedScrollOffset ?? (_ownScroll = ValueNotifier<double>(0));
     _dragDay.value = DateUtilsEx.mondayOf(widget.selectedDay);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _controller.hasClients) {
-        _controller.jumpToPage(
-          _pageForMonday(DateUtilsEx.mondayOf(widget.selectedDay)),
+        final target = _pageForMonday(
+          DateUtilsEx.mondayOf(widget.selectedDay),
         );
+        // P0-1：固定基准下初始页可能远离 500，jump 会触发
+        // onPageChanged——用 _pendingExternalPage 拦截回写
+        // selectedDay（与 didUpdateWidget 外部跳转同机制）
+        _pendingExternalPage = target;
+        _controller.jumpToPage(target);
       }
     });
   }
@@ -122,7 +136,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
 
   /// 边缘翻页（双节流：同方向 2 秒内不重复；翻页后手指需回中间才能再翻）
   void _edgeTurn(double dx) {
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final nowMs = AppClock.now().millisecondsSinceEpoch;
     final dir = dx > 0 ? 1 : -1;
     if (dir == _lastTurnDir && nowMs - _lastTurnMs < 2000) return;
     _lastTurnDir = dir;
@@ -142,21 +156,21 @@ class _WeekViewState extends ConsumerState<WeekView> {
     }
     // 同步目标日
     final offset = page - 500 + (dx > 0 ? 1 : -1);
-    final monday = DateUtilsEx.mondayOf(widget.selectedDay);
-    _dragDay.value = monday.add(Duration(days: offset * 7));
+    _dragDay.value = _epochMonday.add(Duration(days: offset * 7));
   }
 
   @override
   Widget build(BuildContext context) {
-    final monday = DateUtilsEx.mondayOf(widget.selectedDay);
     return PageView.builder(
       controller: _controller,
-      itemCount: 1000,
+      // P0-1：itemCount 随固定基准同步扩大（自 _epochMonday 起每周一页，
+      // 与 DayView 的 40000 对称，前后各覆盖约 380 年）
+      itemCount: 40000,
       // A13：allowImplicitScrolling 预构建页在 widget 测试 teardown 时
       // 触发 deactivate 时序问题（_NowLine Timer pending），暂不启用
       onPageChanged: (page) {
         final offset = page - 500;
-        final weekMonday = monday.add(Duration(days: offset * 7));
+        final weekMonday = _epochMonday.add(Duration(days: offset * 7));
         // P1-D：外部跳页（今天按钮/日期选择）→ 只同步 _dragDay，
         // 不回写 selectedDay（否则选中日被覆盖为周一）
         if (_pendingExternalPage != null && page == _pendingExternalPage) {
@@ -172,7 +186,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
       },
       itemBuilder: (context, page) {
         final offset = page - 500;
-        final weekStart = monday.add(Duration(days: offset * 7));
+        final weekStart = _epochMonday.add(Duration(days: offset * 7));
         return _KeepAlive(
           child: _TimeAxisView(
             items: widget.items,
@@ -213,7 +227,7 @@ class DayView extends ConsumerStatefulWidget {
 class _DayViewState extends ConsumerState<DayView> {
   late final PageController _controller;
   final ValueNotifier<DateTime> _dragDay = ValueNotifier<DateTime>(
-    DateTime.now(),
+    AppClock.now(),
   );
   /// 共享边缘滞回状态（同 WeekView）
   final ValueNotifier<int> _edgeState = ValueNotifier<int>(0);
@@ -263,7 +277,7 @@ class _DayViewState extends ConsumerState<DayView> {
   }
 
   void _edgeTurn(double dx) {
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final nowMs = AppClock.now().millisecondsSinceEpoch;
     final dir = dx > 0 ? 1 : -1;
     if (dir == _lastTurnDir && nowMs - _lastTurnMs < 2000) return;
     _lastTurnDir = dir;
@@ -435,7 +449,7 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
     final notifier = ref.read(calendarControllerProvider.notifier);
     // A7：表头"今天"高亮由 build 时实时计算（跨天时随页面重建自然更新），
     // 不再依赖每分钟 setState 的 _now
-    final today = DateTime.now();
+    final today = AppClock.now();
     final totalHours = _endHour - _startHour;
 
     return Column(
@@ -452,7 +466,7 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
                       ? () => notifier.setSelectedDayWithView(d, 'day')
                       // P2：日视图头部可点击跳转其他日期（此前点击无反应）
                       : () async {
-                          final now = DateTime.now();
+                          final now = AppClock.now();
                           final picked = await showDatePicker(
                             context: context,
                             initialDate: widget.start,
@@ -710,11 +724,11 @@ class _NowLineState extends State<_NowLine>
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
+    final now = AppClock.now();
     _prevTop = _topFor(now);
     _nextTop = _prevTop;
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      final t = DateTime.now();
+      final t = AppClock.now();
       final top = _topFor(t);
       if ((top - _nextTop).abs() > 0.01) {
         _prevTop = _nextTop;
@@ -2138,7 +2152,7 @@ class _InstanceActionSheetState extends ConsumerState<InstanceActionSheet> {
 
   /// 改期本次（日期 + 时间；撤销=删除例外恢复原日期）
   Future<void> _pickReschedule(WidgetRef ref, CalendarItem item) async {
-    final now = DateTime.now();
+    final now = AppClock.now();
     final ps = item.task.planStart;
     // P1-7：日视图可翻到百年前，实例日期超界会触发 DatePicker 断言崩溃
     final first = DateTime(now.year - 1);
@@ -2342,7 +2356,7 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
       return;
     }
     if (action == 'reschedule') {
-      final now = DateTime.now();
+      final now = AppClock.now();
       final ps = item.task.planStart;
       // P1-7：月视图可翻到很久以前，实例日期超界会触发 DatePicker 断言崩溃
       final first = DateTime(now.year - 1);

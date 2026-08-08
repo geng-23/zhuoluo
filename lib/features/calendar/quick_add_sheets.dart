@@ -8,9 +8,12 @@ import 'package:zhuoluo/data/services/chinese_date_parser.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
 
-/// C6-2：日历添加固定进收件箱（此前静默进入任务页当前选中的清单）
+/// C6-2：日历添加固定进收件箱（此前静默进入任务页当前选中的清单）。
+/// 偏好设置组：设置了默认清单时优先用默认清单，否则回落收件箱。
 Future<int> _defaultListId(WidgetRef ref) async {
   final db = ref.read(dbProvider);
+  final preferred = await ref.read(settingsProvider).getDefaultListId();
+  if (preferred != null) return preferred;
   final list = await db.getDefaultList();
   return list.id;
 }

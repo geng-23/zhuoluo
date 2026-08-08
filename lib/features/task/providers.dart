@@ -10,6 +10,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 class TasksState {
   final List<TaskList> lists;
@@ -123,9 +124,9 @@ class TasksController extends StateNotifier<TasksState> {
       tasks = await _db.searchTasks(q);
       state = state.copyWith(smartView: 'search');
     } else if (state.smartView == 'today') {
-      tasks = await _db.getTasksForDate(DateTime.now());
+      tasks = await _db.getTasksForDate(AppClock.now());
     } else if (state.smartView == 'week7') {
-      tasks = await _db.getTasksNext7Days(DateTime.now());
+      tasks = await _db.getTasksNext7Days(AppClock.now());
     } else if (state.smartView == 'all') {
       tasks = await _db.getAllUncompleted();
     } else if (state.smartView == 'done') {
@@ -151,7 +152,7 @@ class TasksController extends StateNotifier<TasksState> {
 
   /// 重复任务"今天实例"完成状态
   Future<Map<int, bool>> _loadInstanceDone(List<Task> tasks) async {
-    final now = DateTime.now();
+    final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
     final result = <int, bool>{};
     for (final t in tasks) {
@@ -163,7 +164,7 @@ class TasksController extends StateNotifier<TasksState> {
 
   /// 重复任务"今天是否命中规则"
   Future<Map<int, bool>> _loadTodayHas(List<Task> tasks) async {
-    final now = DateTime.now();
+    final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
     final result = <int, bool>{};
     for (final t in tasks) {
@@ -175,7 +176,7 @@ class TasksController extends StateNotifier<TasksState> {
 
   /// 重复任务"下一个未完成实例"（今天起向后找；系列已结束/全部完成 → null）
   Future<Map<int, DateTime?>> _loadNextInstances(List<Task> tasks) async {
-    final now = DateTime.now();
+    final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
     final result = <int, DateTime?>{};
     for (final t in tasks) {
@@ -310,8 +311,16 @@ class TasksController extends StateNotifier<TasksState> {
         pe = dur == null ? ps.add(const Duration(hours: 1)) : ps.add(dur);
       }
     }
+    // 偏好设置组：显式 listId > 默认清单设置 > 任务页当前清单 > 收件箱兜底。
+    // 默认清单设置读取时已校验存在性（清单删除/备份恢复失效自动回落 null）。
+    final preferredListId = await _ref
+        .read(settingsProvider)
+        .getDefaultListId();
     final targetList =
-        listId ?? state.currentListId ?? (await _db.getDefaultList()).id;
+        listId ??
+        preferredListId ??
+        state.currentListId ??
+        (await _db.getDefaultList()).id;
     final id = await _db.insertTask(
       TasksCompanion.insert(
         listId: targetList,
@@ -327,7 +336,7 @@ class TasksController extends StateNotifier<TasksState> {
         hasNote: Value(note.isNotEmpty),
         parentId: Value(parentId),
         sortOrder: Value(0),
-        createdAt: DateTime.now(),
+        createdAt: AppClock.now(),
       ),
     );
     // 新任务排顶部：把现有同清单任务 sortOrder +1，新任务保持 0
@@ -336,7 +345,7 @@ class TasksController extends StateNotifier<TasksState> {
     await _reloadTasks();
     final t = await _db.getTask(id);
     if (t != null && (t.planStart != null || t.rrule.isNotEmpty)) {
-      await _scheduler.scheduleTask(t, DateTime.now());
+      await _scheduler.scheduleTask(t, AppClock.now());
     }
     _bump();
     return id;
@@ -364,7 +373,7 @@ class TasksController extends StateNotifier<TasksState> {
     ParseResult parsed, {
     int? listId,
   }) async {
-    final now = DateTime.now();
+    final now = AppClock.now();
     DateTime? ps;
     DateTime? pe;
     var isAllDay = false;
@@ -423,7 +432,7 @@ class TasksController extends StateNotifier<TasksState> {
     final t = await _db.getTask(id);
     var ok = true;
     if (t != null) {
-      ok = await _scheduler.scheduleTask(t, DateTime.now());
+      ok = await _scheduler.scheduleTask(t, AppClock.now());
     }
     _bump();
     return ok;
@@ -451,7 +460,7 @@ class TasksController extends StateNotifier<TasksState> {
       // 完成/撤销实例后重排：取消该实例已排提醒，其余未完成实例保留
       final fresh = await _db.getTask(id);
       if (fresh != null) {
-        await _scheduler.scheduleTask(fresh, DateTime.now());
+        await _scheduler.scheduleTask(fresh, AppClock.now());
       }
       await _reloadTasks();
       // C2：子任务全完成时自动完成父任务（含重复子任务的今日实例对齐）
@@ -461,7 +470,7 @@ class TasksController extends StateNotifier<TasksState> {
         // 父任务被联动完成/恢复时同步重排其提醒
         final parent = await _db.getTask(parentId);
         if (parent != null && parent.rrule.isNotEmpty) {
-          await _scheduler.scheduleTask(parent, DateTime.now());
+          await _scheduler.scheduleTask(parent, AppClock.now());
         }
         await _reloadTasks();
       }
@@ -486,7 +495,7 @@ class TasksController extends StateNotifier<TasksState> {
       // 完成实例后重排：取消该实例已排提醒，其余未完成实例保留
       final fresh = await _db.getTask(id);
       if (fresh != null) {
-        await _scheduler.scheduleTask(fresh, DateTime.now());
+        await _scheduler.scheduleTask(fresh, AppClock.now());
       }
     } else {
       await _db.completeTask(id);
@@ -497,7 +506,7 @@ class TasksController extends StateNotifier<TasksState> {
   }
 
   DateTime _currentInstanceDate(Task t) {
-    final now = DateTime.now();
+    final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
     final ps = t.planStart;
     if (ps == null) return today;
@@ -530,14 +539,14 @@ class TasksController extends StateNotifier<TasksState> {
       final parent = await _db.getTask(parentId);
       if (parent != null) {
         // 父任务仍完成（其他子任务未完成）时 scheduleTask 内部会取消提醒
-        await _scheduler.scheduleTask(parent, DateTime.now());
+        await _scheduler.scheduleTask(parent, AppClock.now());
       }
       await _reloadTasks();
     }
     // 重新取任务：旧快照 completedAt 非空会让重排直接跳过
     final fresh = await _db.getTask(id);
     if (fresh != null) {
-      await _scheduler.scheduleTask(fresh, DateTime.now());
+      await _scheduler.scheduleTask(fresh, AppClock.now());
     }
     _bump();
   }
@@ -688,7 +697,7 @@ class TasksController extends StateNotifier<TasksState> {
     for (final tid in [snap.task.id, ...snap.subTasks.map((s) => s.id)]) {
       final restored = await _db.getTask(tid);
       if (restored != null) {
-        await _scheduler.scheduleTask(restored, DateTime.now());
+        await _scheduler.scheduleTask(restored, AppClock.now());
       }
     }
     _bump();
@@ -718,7 +727,7 @@ class TasksController extends StateNotifier<TasksState> {
     // P2：逐条静默执行，完成后统一播放一次反馈（此前 20 条响 20 次）
     // C8-2：跳过"今天已完成"的重复任务——completeTask 是切换语义，
     // 批量完成会把它们反过来"撤销完成"（与用户意图相反）
-    final now = DateTime.now();
+    final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
     final acted = <int>[];
     for (final id in ids) {
@@ -808,7 +817,7 @@ class TasksController extends StateNotifier<TasksState> {
     // 重新取任务：旧快照的 skippedDates 不含本次跳过，会让重排重新排上该实例
     final fresh = await _db.getTask(id);
     if (fresh != null) {
-      await _scheduler.scheduleTask(fresh, DateTime.now());
+      await _scheduler.scheduleTask(fresh, AppClock.now());
     }
     _bump();
   }
@@ -833,7 +842,7 @@ class TasksController extends StateNotifier<TasksState> {
     // 重新取任务：旧快照仍含被移除的跳过日期，会让重排漏排该实例
     final fresh = await _db.getTask(id);
     if (fresh != null) {
-      await _scheduler.scheduleTask(fresh, DateTime.now());
+      await _scheduler.scheduleTask(fresh, AppClock.now());
     }
     _bump();
   }
@@ -854,7 +863,7 @@ class TasksController extends StateNotifier<TasksState> {
 
   /// 列表页操作用的"当前实例日期"（供 UI 显示/删除选择框）
   static DateTime currentInstanceDate(Task t) {
-    final now = DateTime.now();
+    final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
     final ps = t.planStart;
     if (ps == null) return today;
@@ -875,7 +884,7 @@ class TasksController extends StateNotifier<TasksState> {
         // 更新既有例外同样需重排：新日期（及原日期取消）的提醒
         final fresh = await _db.getTask(id);
         if (fresh != null) {
-          await _scheduler.scheduleTask(fresh, DateTime.now());
+          await _scheduler.scheduleTask(fresh, AppClock.now());
         }
         _bump();
         return ex.id;
@@ -890,7 +899,7 @@ class TasksController extends StateNotifier<TasksState> {
       ),
     );
     await _reloadTasks();
-    await _scheduler.scheduleTask(t, DateTime.now());
+    await _scheduler.scheduleTask(t, AppClock.now());
     _bump();
     return exId;
   }
@@ -901,7 +910,7 @@ class TasksController extends StateNotifier<TasksState> {
     await _reloadTasks();
     final t = await _db.getTask(id);
     if (t != null) {
-      await _scheduler.scheduleTask(t, DateTime.now());
+      await _scheduler.scheduleTask(t, AppClock.now());
     }
     _bump();
   }

@@ -1,9 +1,10 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_platform.dart';
 import 'package:zhuoluo/data/services/backup_types.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 备份/恢复服务（JSON 格式，设计文档 §9）
 /// 文件系统操作按平台实现：native=真实文件，web=浏览器下载导出。
@@ -33,7 +34,7 @@ class BackupService {
 
     final data = {
       'version': 1,
-      'exportedAt': DateTime.now().toIso8601String(),
+      'exportedAt': AppClock.now().toIso8601String(),
       'lists': lists.map((e) => _listToJson(e)).toList(),
       'tasks': tasks.map((e) => _taskToJson(e)).toList(),
       'reminders': reminders.map((e) => _reminderToJson(e)).toList(),
@@ -108,7 +109,7 @@ class BackupService {
     final last = await _db.getSetting(keyLastAutoBackupAt);
     if (last != null && last.isNotEmpty) {
       final t = DateTime.tryParse(last);
-      if (t != null && DateTime.now().difference(t).inHours < 24) return true;
+      if (t != null && AppClock.now().difference(t).inHours < 24) return true;
     }
     try {
       final json = await exportJson();
@@ -119,7 +120,7 @@ class BackupService {
           infos.skip(keepBackupCount).map((f) => f.path).toList(),
         );
       }
-      await _db.setSetting(keyLastAutoBackupAt, DateTime.now().toIso8601String());
+      await _db.setSetting(keyLastAutoBackupAt, AppClock.now().toIso8601String());
       await _db.setSetting(keyAutoBackupFailed, '');
       return true;
     } catch (e) {
@@ -127,7 +128,7 @@ class BackupService {
         await _db.setSetting(
           keyAutoBackupFailed,
           jsonEncode({
-            'time': DateTime.now().toIso8601String(),
+            'time': AppClock.now().toIso8601String(),
             'error': '$e',
           }),
         );

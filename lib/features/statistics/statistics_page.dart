@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 统计页：完成率趋势 / 完成分布 / 专注时长 / 习惯热力图 / 年视图热力图
 class StatisticsPage extends ConsumerStatefulWidget {
@@ -46,7 +47,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
   Future<void> _load() async {
     final seq = ++_loadSeq;
     final db = ref.read(dbProvider);
-    final now = DateTime.now();
+    final now = AppClock.now();
     DateTime from;
     DateTime to;
     switch (_range) {
@@ -390,7 +391,7 @@ class _HabitHeatmap extends StatelessWidget {
                 itemCount: keys.length,
                 itemBuilder: (context, i) {
                   final done = heat[keys[i]] ?? false;
-                  final isToday = DateUtilsEx.sameDay(keys[i], DateTime.now());
+                  final isToday = DateUtilsEx.sameDay(keys[i], AppClock.now());
                   return Container(
                     decoration: BoxDecoration(
                       color: done
@@ -437,7 +438,7 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
   }
 
   Future<void> _load() async {
-    final now = DateTime.now();
+    final now = AppClock.now();
     final from = DateTime(now.year, 1, 1);
     final to = DateTime(now.year, 12, 31);
     final counts = await widget.db.getCompletedCountByDay(from, to);
@@ -448,7 +449,7 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
   Widget build(BuildContext context) {
     final counts = _counts;
     if (counts == null) return const SizedBox.shrink();
-    final now = DateTime.now();
+    final now = AppClock.now();
     final maxCount = counts.values
         .fold<int>(0, (a, b) => b > a ? b : a)
         .clamp(1, 10)

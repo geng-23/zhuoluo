@@ -9,6 +9,7 @@ import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 class CalendarState {
   final DateTime displayedMonth; // 顶栏显示的年月
@@ -45,11 +46,11 @@ class CalendarController extends StateNotifier<CalendarState> {
     : super(
         CalendarState(
           displayedMonth: DateTime(
-            DateTime.now().year,
-            DateTime.now().month,
+            AppClock.now().year,
+            AppClock.now().month,
             1,
           ),
-          selectedDay: DateTime.now(),
+          selectedDay: AppClock.now(),
         ),
       ) {
     // I3：#23 实时同步——数据版本变化自动刷新
@@ -104,7 +105,7 @@ class CalendarController extends StateNotifier<CalendarState> {
         );
         return (d, d);
     }
-    return (DateTime.now(), DateTime.now());
+    return (AppClock.now(), AppClock.now());
   }
 
   /// 加载请求序号：快速翻页/切换时丢弃过期结果，避免旧数据覆盖新数据
@@ -163,7 +164,7 @@ class CalendarController extends StateNotifier<CalendarState> {
   }
 
   void goToToday() {
-    final now = DateTime.now();
+    final now = AppClock.now();
     state = state.copyWith(
       displayedMonth: DateTime(now.year, now.month, 1),
       selectedDay: now,
@@ -208,7 +209,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     );
     final updated = await _db.getTask(taskId);
     if (updated != null) {
-      await _scheduler.scheduleTask(updated, DateTime.now());
+      await _scheduler.scheduleTask(updated, AppClock.now());
     }
     _bump();
     load();
@@ -264,7 +265,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     );
     final updated = await _db.getTask(taskId);
     if (updated != null) {
-      await _scheduler.scheduleTask(updated, DateTime.now());
+      await _scheduler.scheduleTask(updated, AppClock.now());
     }
     _bump();
     load();
@@ -296,7 +297,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     }
     final updated = await _db.getTask(s.taskId);
     if (updated != null) {
-      await _scheduler.scheduleTask(updated, DateTime.now());
+      await _scheduler.scheduleTask(updated, AppClock.now());
     }
     _bump();
     load();
@@ -310,7 +311,7 @@ class CalendarController extends StateNotifier<CalendarState> {
         // 恢复实例后重排：该实例提醒重新排上
         final fresh = await _db.getTask(item.task.id);
         if (fresh != null) {
-          await _scheduler.scheduleTask(fresh, DateTime.now());
+          await _scheduler.scheduleTask(fresh, AppClock.now());
         }
       } else {
         await _db.reopenTask(item.task.id);
@@ -323,7 +324,7 @@ class CalendarController extends StateNotifier<CalendarState> {
         // 完成实例后重排：取消该实例已排提醒，其余未完成实例保留
         final fresh = await _db.getTask(item.task.id);
         if (fresh != null) {
-          await _scheduler.scheduleTask(fresh, DateTime.now());
+          await _scheduler.scheduleTask(fresh, AppClock.now());
         }
       } else {
         await _db.completeTask(item.task.id);
@@ -357,7 +358,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     // 重新取任务：旧快照 skippedDates 不含本次跳过，重排会重新排上该实例
     final fresh = await _db.getTask(taskId);
     if (fresh != null) {
-      await _scheduler.scheduleTask(fresh, DateTime.now());
+      await _scheduler.scheduleTask(fresh, AppClock.now());
     }
     _bump();
     load();
@@ -380,7 +381,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     );
     final fresh = await _db.getTask(taskId);
     if (fresh != null) {
-      await _scheduler.scheduleTask(fresh, DateTime.now());
+      await _scheduler.scheduleTask(fresh, AppClock.now());
     }
     _bump();
     load();

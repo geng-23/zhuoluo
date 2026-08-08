@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -6,9 +6,10 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'backup_types.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 备份文件名（时间戳 + 随机后缀，防同秒覆盖，设计文档 3.1）
-String _backupFileName() => backupFileName(DateTime.now());
+String _backupFileName() => backupFileName(AppClock.now());
 
 /// 安卓备份通道（MainActivity 原生实现：MediaStore 写公共下载目录）
 const _androidBackupChannel = MethodChannel('zhuoluo/notifications');
@@ -81,7 +82,7 @@ Future<String> exportToFileImpl(
       ? await _exportBase()
       : await getApplicationDocumentsDirectory();
   await base.create(recursive: true);
-  final name = backupFileName(DateTime.now());
+  final name = backupFileName(AppClock.now());
   final file = File('${base.path}/$name');
   await file.writeAsString(json);
   return file.path;

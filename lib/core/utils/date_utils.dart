@@ -1,3 +1,4 @@
+﻿import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 日期工具（周一为一周开始，中文格式化）
 class DateUtilsEx {
   DateUtilsEx._();
@@ -22,7 +23,7 @@ class DateUtilsEx {
 
   /// 日期中文："今天"/"明天"/"昨天"/"8月10日 周一"
   static String dateCn(DateTime d, {DateTime? now}) {
-    final base = now ?? DateTime.now();
+    final base = now ?? AppClock.now();
     final today = day(base);
     final target = day(d);
     if (sameDay(target, today)) return '今天';
@@ -50,13 +51,13 @@ class DateUtilsEx {
   /// 过期判断（有计划日且早于今天且未完成）
   static bool isOverdue(DateTime? scheduledDate, {DateTime? now}) {
     if (scheduledDate == null) return false;
-    final today = day(now ?? DateTime.now());
+    final today = day(now ?? AppClock.now());
     return day(scheduledDate).isBefore(today);
   }
 
   /// 倒计时天数（正数=还有几天，负数=已过几天，0=今天）
   static int daysUntil(DateTime d, {DateTime? now}) {
-    final today = day(now ?? DateTime.now());
+    final today = day(now ?? AppClock.now());
     return day(d).difference(today).inDays;
   }
 

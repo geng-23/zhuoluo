@@ -1,10 +1,11 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 本地通知服务（flutter_local_notifications v22 封装）
 class NotificationService {
@@ -82,7 +83,7 @@ class NotificationService {
       NotificationIds.forTest,
       title: '通知测试',
       body: '通知正常工作：即使应用未运行，也会按时提醒',
-      when: DateTime.now().add(const Duration(seconds: 1)),
+      when: AppClock.now().add(const Duration(seconds: 1)),
       payload: null,
     );
   }
@@ -258,11 +259,11 @@ class NotificationService {
         return false;
       }
     }
-    if (when.isBefore(DateTime.now())) {
+    if (when.isBefore(AppClock.now())) {
       debugPrint('通知：时间已过（$when），跳过 $id');
       return false;
     }
-    final tzWhen = tz.TZDateTime.from(when, tz.local);
+    final tzWhen = tz.TZDateTime.from(when, AppClock.location);
     // 精确闹钟失败（如厂商默认拒绝 SCHEDULE_EXACT_ALARM）时降级为 inexact，
     // 保证通知仍能触发（时间可能延迟）
     try {
@@ -338,10 +339,10 @@ class NotificationService {
     }
     // 若时间已过，顺延到明天，保证下一次立刻生效
     var next = time;
-    if (next.isBefore(DateTime.now())) {
+    if (next.isBefore(AppClock.now())) {
       next = next.add(const Duration(days: 1));
     }
-    final tzWhen = tz.TZDateTime.from(next, tz.local);
+    final tzWhen = tz.TZDateTime.from(next, AppClock.location);
     try {
       await _plugin.zonedSchedule(
         id: id,

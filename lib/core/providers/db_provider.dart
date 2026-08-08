@@ -35,6 +35,15 @@ class SettingsController {
   static const keyLastTab = 'lastTab';
   static const keySound = 'soundEnabled'; // 'true'/'false'
   static const keyHaptics = 'hapticsEnabled'; // 'true'/'false'
+  // ---------- 偏好设置（偏好设置组，2026-08-08） ----------
+  /// 默认清单 id；null = 跟随任务页当前清单（日历快建回落收件箱）
+  static const keyDefaultListId = 'defaultListId';
+  /// 默认提醒提前分钟数；null = 不预选（用户必须手动选择）
+  static const keyDefaultRemindMinutes = 'defaultRemindMinutes';
+  /// 全天任务默认提醒时刻（当天 0 点起分钟数），默认 540 = 09:00
+  static const keyDefaultAllDayRemindAt = 'defaultAllDayRemindAt';
+  /// 应用时区（IANA 名称，如 Asia/Shanghai）；null/空 = 跟随系统时区
+  static const keyAppTimezone = 'appTimezone';
 
   Future<String?> get(String key) => _db.getSetting(key);
 
@@ -42,6 +51,37 @@ class SettingsController {
 
   Future<int> getLastTab() async =>
       int.tryParse(await get(keyLastTab) ?? '') ?? 0;
+
+  // ---------- 偏好设置 ----------
+  /// 默认清单：null = 跟随当前清单；清单已删除/失效时回落 null
+  Future<int?> getDefaultListId() async {
+    final raw = await get(keyDefaultListId);
+    final id = int.tryParse(raw ?? '');
+    if (id == null || id <= 0) return null;
+    // 清单可能被删除或备份恢复后失效（P1-22 家族）：读取时校验存在性
+    final list = await _db.getListById(id);
+    return list == null ? null : id;
+  }
+
+  /// 默认提醒提前分钟数：null = 不预选
+  Future<int?> getDefaultRemindMinutes() async {
+    final raw = await get(keyDefaultRemindMinutes);
+    final m = int.tryParse(raw ?? '');
+    return (m == null || m < 0) ? null : m;
+  }
+
+  /// 全天任务默认提醒时刻（分钟），默认 540 = 09:00
+  Future<int> getDefaultAllDayRemindAt() async {
+    final raw = await get(keyDefaultAllDayRemindAt);
+    final m = int.tryParse(raw ?? '');
+    return (m == null || m < 0 || m > 1439) ? 540 : m;
+  }
+
+  /// 应用时区 IANA 名称；null = 跟随系统时区
+  Future<String?> getAppTimezone() async {
+    final raw = await get(keyAppTimezone);
+    return (raw == null || raw.isEmpty) ? null : raw;
+  }
 
   // ---------- 音效 / 震动开关 ----------
   Future<bool> getSoundEnabled() async => (await get(keySound)) != 'false';

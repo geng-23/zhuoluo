@@ -5,6 +5,7 @@ import 'package:drift_flutter/drift_flutter.dart';
 
 import '../../core/utils/date_utils.dart' as du;
 import '../services/rrule_expander.dart';
+import '../../core/utils/app_clock.dart';
 
 part 'database.g.dart';
 
@@ -233,7 +234,7 @@ class AppDatabase extends _$AppDatabase {
         ListsCompanion.insert(
           name: '收件箱',
           isDefault: const Value(true),
-          createdAt: DateTime.now(),
+          createdAt: AppClock.now(),
         ),
       );
     }
@@ -248,13 +249,17 @@ class AppDatabase extends _$AppDatabase {
   Future<TaskList> getDefaultList() =>
       (select(lists)..where((l) => l.isDefault.equals(true))).getSingle();
 
+  /// 按 id 查清单（不存在返回 null）。默认清单设置读取时校验用。
+  Future<TaskList?> getListById(int id) =>
+      (select(lists)..where((l) => l.id.equals(id))).getSingleOrNull();
+
   Future<int> insertList(String name, String color, int sortOrder) =>
       into(lists).insert(
         ListsCompanion.insert(
           name: name,
           color: Value(color),
           sortOrder: Value(sortOrder),
-          createdAt: DateTime.now(),
+          createdAt: AppClock.now(),
         ),
       );
 
@@ -405,7 +410,7 @@ class AppDatabase extends _$AppDatabase {
   Future<bool> hasFutureInstances(Task t) async {
     if (t.rrule.isEmpty) return true;
     final base = t.planStart ?? t.createdAt;
-    final now = DateTime.now();
+    final now = AppClock.now();
     final hits = RruleService.instance.expand(
       base,
       t.rrule,
@@ -421,7 +426,7 @@ class AppDatabase extends _$AppDatabase {
   /// 排序按实际完成时间（预取今日实例完成记录）
   Future<List<Task>> getCompletedTasks({int limit = 200}) async {
     final rows = await select(tasks).get();
-    final now = DateTime.now();
+    final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
     // 预取今日重复实例完成时间（排序用）
     final todayCompletions = await (select(
@@ -480,13 +485,13 @@ class AppDatabase extends _$AppDatabase {
             .getSingleOrNull();
     if (existing != null) {
       await (update(taskCompletions)..where((t) => t.id.equals(existing.id)))
-          .write(TaskCompletionsCompanion(completedAt: Value(DateTime.now())));
+          .write(TaskCompletionsCompanion(completedAt: Value(AppClock.now())));
     } else {
       await into(taskCompletions).insert(
         TaskCompletionsCompanion.insert(
           taskId: taskId,
           instanceDate: day,
-          completedAt: DateTime.now(),
+          completedAt: AppClock.now(),
         ),
       );
     }
@@ -546,7 +551,7 @@ class AppDatabase extends _$AppDatabase {
     String rrule,
   ) async {
     if (rrule.isEmpty) return const [];
-    final now = DateTime.now();
+    final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
     // 从 newStart 全量展开（含过去）：过去命中新规则的日期保留完成记录
     final instances = RruleService.instance.expand(
@@ -671,7 +676,7 @@ class AppDatabase extends _$AppDatabase {
   /// 完成任务（非重复）
   Future<void> completeTask(int id) =>
       (update(tasks)..where((t) => t.id.equals(id))).write(
-        TasksCompanion(completedAt: Value(DateTime.now())),
+        TasksCompanion(completedAt: Value(AppClock.now())),
       );
 
   /// 恢复任务（非重复）
@@ -682,7 +687,7 @@ class AppDatabase extends _$AppDatabase {
 
   /// 子任务"今天完成"？（重复任务看今日实例，非重复看 completedAt）
   Future<bool> _childDoneToday(Task c) async {
-    final now = DateTime.now();
+    final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
     if (c.rrule.isNotEmpty) return isInstanceCompleted(c.id, today);
     return c.completedAt != null;
@@ -698,7 +703,7 @@ class AppDatabase extends _$AppDatabase {
     for (final c in children) {
       if (!await _childDoneToday(c)) return;
     }
-    final now = DateTime.now();
+    final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
     if (parent.rrule.isNotEmpty) {
       if (!await isInstanceCompleted(parentId, today)) {
@@ -714,7 +719,7 @@ class AppDatabase extends _$AppDatabase {
   Future<void> maybeReopenParent(int parentId) async {
     final parent = await getTask(parentId);
     if (parent == null) return;
-    final now = DateTime.now();
+    final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
     final parentDone = parent.rrule.isNotEmpty
         ? await isInstanceCompleted(parentId, today)
@@ -1124,7 +1129,7 @@ class AppDatabase extends _$AppDatabase {
           name: name,
           icon: Value(icon),
           reminderTime: Value(reminderTime),
-          createdAt: DateTime.now(),
+          createdAt: AppClock.now(),
         ),
       );
 
@@ -1162,7 +1167,7 @@ class AppDatabase extends _$AppDatabase {
         HabitRecordsCompanion.insert(
           habitId: habitId,
           date: d,
-          completedAt: DateTime.now(),
+          completedAt: AppClock.now(),
         ),
       );
     } else {
@@ -1185,7 +1190,7 @@ class AppDatabase extends _$AppDatabase {
       taskId: Value(taskId),
       durationMinutes: durationMinutes,
       startedAt: startedAt,
-      completedAt: DateTime.now(),
+      completedAt: AppClock.now(),
     ),
   );
 

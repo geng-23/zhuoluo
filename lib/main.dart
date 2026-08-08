@@ -6,6 +6,7 @@ import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/shell/home_shell.dart';
 
 Future<void> main() async {
@@ -28,6 +29,9 @@ Future<void> main() async {
   final settings = container.read(settingsProvider);
   SoundService.soundsEnabled = await settings.getSoundEnabled();
   Haptics.hapticsEnabled = await settings.getHapticsEnabled();
+  // 恢复应用时区（偏好设置组：出差/旅行保持家乡时间）。
+  // 时区数据已由 notificationService.init() 初始化；未设置 = 跟随系统。
+  AppClock.setTimezone(await settings.getAppTimezone());
   runApp(
     UncontrolledProviderScope(container: container, child: const ZhuoluoApp()),
   );

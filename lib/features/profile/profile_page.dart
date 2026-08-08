@@ -8,11 +8,13 @@ import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_service.dart';
 import 'package:zhuoluo/data/services/backup_types.dart';
+import 'package:zhuoluo/features/profile/preferences_page.dart';
 import 'package:zhuoluo/features/statistics/statistics_page.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
@@ -134,6 +136,18 @@ class ProfilePage extends ConsumerWidget {
               settingKey: SettingsController.keyHaptics,
               loadValue: _loadHaptics,
               applyValue: _applyHaptics,
+            ),
+            const Divider(),
+            const _SectionHeader('偏好设置'),
+            ListTile(
+              leading: const Icon(Icons.tune),
+              title: const Text('偏好设置'),
+              subtitle: Text(
+                '默认清单 · 默认提醒 · 时区',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _push(context, const PreferencesPage()),
             ),
             const Divider(),
             const _SectionHeader('关于'),
@@ -529,7 +543,7 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
   }
 
   String _fmtTime(DateTime t) {
-    final now = DateTime.now();
+    final now = AppClock.now();
     if (DateUtilsEx.sameDay(t, now)) {
       return '今天 ${DateUtilsEx.timeCn(t)}';
     }
@@ -945,8 +959,8 @@ class _ThemeTileState extends ConsumerState<_ThemeTile> {
 
 // ================= 番茄专注 =================
 
-/// P1-A：备份恢复后重载内存态设置（主题/音效/震动）
-/// 恢复导入的 settings 含 themeMode/soundEnabled/hapticsEnabled，
+/// P1-A：备份恢复后重载内存态设置（主题/音效/震动/应用时区）
+/// 恢复导入的 settings 含 themeMode/soundEnabled/hapticsEnabled/appTimezone，
 /// 此前只在启动时加载，恢复后需重启才生效。
 Future<void> _reloadRuntimeSettings(AppDatabase db, WidgetRef ref) async {
   final savedTheme = await db.getSetting('themeMode');
@@ -956,6 +970,9 @@ Future<void> _reloadRuntimeSettings(AppDatabase db, WidgetRef ref) async {
   final settings = ref.read(settingsProvider);
   SoundService.soundsEnabled = await settings.getSoundEnabled();
   Haptics.hapticsEnabled = await settings.getHapticsEnabled();
+  // 偏好设置组：恢复备份后同步应用时区（内存态）。
+  // 全量重排由调用方（导入/恢复流程）在 _reloadRuntimeSettings 之后执行
+  AppClock.setTimezone(await settings.getAppTimezone());
 }
 
 /// 番茄钟状态：未开始 / 计时中 / 已暂停
@@ -1046,7 +1063,7 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
       await ref.read(dbProvider).insertPomodoro(
         _taskId,
         elapsedMin,
-        DateTime.now().subtract(Duration(minutes: elapsedMin)),
+        AppClock.now().subtract(Duration(minutes: elapsedMin)),
       );
       // P1-A：番茄记录写库后通知统计等依赖方
       bumpDataVersion(ref);
@@ -1425,9 +1442,9 @@ class _HabitPageState extends ConsumerState<HabitPage> {
     final controller = TextEditingController();
     var remind = false;
     var time = DateTime(
-      DateTime.now().year,
-      DateTime.now().month,
-      DateTime.now().day,
+      AppClock.now().year,
+      AppClock.now().month,
+      AppClock.now().day,
       9,
       0,
     );
@@ -1557,7 +1574,7 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
 
   Future<void> _load() async {
     final db = ref.read(dbProvider);
-    final done = await db.isHabitDone(widget.habit.id, DateTime.now());
+    final done = await db.isHabitDone(widget.habit.id, AppClock.now());
     if (mounted) setState(() => _doneToday = done);
   }
 
@@ -1598,7 +1615,7 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
           Haptics.light();
           // P2：打卡/取消打卡都是 toggle 语义，带撤销条（误触可恢复）
           final willDone = !_doneToday;
-          await db.checkHabit(widget.habit.id, DateTime.now());
+          await db.checkHabit(widget.habit.id, AppClock.now());
           // P1-A：习惯打卡数据变更通知
           bumpDataVersion(ref);
           _load();
@@ -1608,7 +1625,7 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
             willDone ? '已打卡「${widget.habit.name}」' : '已取消今日打卡',
             actionLabel: '撤销',
             onAction: () async {
-              await db.checkHabit(widget.habit.id, DateTime.now());
+              await db.checkHabit(widget.habit.id, AppClock.now());
               bumpDataVersion(ref);
               _load();
             },
@@ -1656,9 +1673,9 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
     var time =
         habit.reminderTime ??
         DateTime(
-          DateTime.now().year,
-          DateTime.now().month,
-          DateTime.now().day,
+          AppClock.now().year,
+          AppClock.now().month,
+          AppClock.now().day,
           9,
           0,
         );

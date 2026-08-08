@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3BB06A"/>
+      <stop offset="1" stop-color="#2A9456"/>
+    </linearGradient>
+  </defs>
+  <!-- 底座：绿色渐变圆角方块 -->
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#bg)"/>
+  <!-- 日历图形整体放大 1.2（围绕画布中心），此前偏小 -->
+  <g transform="translate(512 512) scale(1.2) translate(-512 -512)">
+    <!-- 日历系环 -->
+    <rect x="356" y="286" width="48" height="76" rx="24" fill="#FFFFFF"/>
+    <rect x="620" y="286" width="48" height="76" rx="24" fill="#FFFFFF"/>
+    <!-- 日历面 -->
+    <rect x="276" y="330" width="472" height="364" rx="64" fill="#FFFFFF"/>
+    <!-- 页眉分隔线 -->
+    <rect x="308" y="444" width="408" height="14" rx="7" fill="#8FC9A8"/>
+    <!-- 日期格线 -->
+    <rect x="380" y="472" width="10" height="190" rx="5" fill="#8FC9A8"/>
+    <rect x="634" y="472" width="10" height="190" rx="5" fill="#8FC9A8"/>
+    <rect x="308" y="536" width="408" height="10" rx="5" fill="#8FC9A8"/>
+    <!-- 对勾 -->
+    <path d="M 380 558 L 470 632 L 634 460"
+          fill="none" stroke="#1B6E43" stroke-width="72"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

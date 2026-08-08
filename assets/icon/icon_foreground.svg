@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- 自适应前景：仅图形（无背景），整体放大 1.2 居中，安全区 66% 内 -->
+  <g transform="translate(512 512) scale(1.2) translate(-512 -512)">
+    <!-- 日历系环 -->
+    <rect x="356" y="286" width="48" height="76" rx="24" fill="#FFFFFF"/>
+    <rect x="620" y="286" width="48" height="76" rx="24" fill="#FFFFFF"/>
+    <!-- 日历面 -->
+    <rect x="276" y="330" width="472" height="364" rx="64" fill="#FFFFFF"/>
+    <!-- 页眉分隔线 -->
+    <rect x="308" y="444" width="408" height="14" rx="7" fill="#8FC9A8"/>
+    <!-- 日期格线 -->
+    <rect x="380" y="472" width="10" height="190" rx="5" fill="#8FC9A8"/>
+    <rect x="634" y="472" width="10" height="190" rx="5" fill="#8FC9A8"/>
+    <rect x="308" y="536" width="408" height="10" rx="5" fill="#8FC9A8"/>
+    <!-- 对勾 -->
+    <path d="M 380 558 L 470 632 L 634 460"
+          fill="none" stroke="#1B6E43" stroke-width="72"
+          stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

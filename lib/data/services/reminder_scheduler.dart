@@ -1,0 +1,327 @@
+import 'package:flutter/foundation.dart';
+import 'package:zhuoluo/core/utils/date_utils.dart';
+import 'package:zhuoluo/data/database/database.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
+import 'package:zhuoluo/data/services/rrule_expander.dart';
+
+/// 提醒调度引擎
+///
+/// 设计文档 §8：增量重排（任务变更时）+ 全量重排（开机/备份恢复）
+class ReminderScheduler {
+  ReminderScheduler(this._db);
+
+  final AppDatabase _db;
+
+  /// 计算任务在 [instanceDate] 实例的提醒绝对时间列表
+  List<DateTime> computeReminderTimes(
+    Task task,
+    DateTime instanceDate,
+    List<Reminder> reminders,
+  ) {
+    return reminders.map((r) {
+      final t = _reminderBase(task, instanceDate, r)
+          .subtract(Duration(minutes: r.remindMinutesBefore));
+      return t;
+    }).toList();
+  }
+
+  /// 任务在实例日期的"提醒基准时间"：
+  /// - 全天任务：当天 [Reminder.remindAtMinutes] 时刻（null = 默认 09:00）
+  /// - 定时任务：实例时间（例外改期带时分时用实例时分），否则 planStart 的时分
+  DateTime _reminderBase(Task task, DateTime instanceDate, Reminder r) {
+    final d = DateTime(instanceDate.year, instanceDate.month, instanceDate.day);
+    final ps = task.planStart;
+    if (task.isAllDay || ps == null) {
+      final remindAt = r.remindAtMinutes ?? 540; // 默认 09:00
+      return d.add(Duration(minutes: remindAt));
+    }
+    // 例外改期到带时分的目标（如改期本次选了具体时间）
+    if (instanceDate.hour != 0 || instanceDate.minute != 0) {
+      return DateTime(
+        d.year,
+        d.month,
+        d.day,
+        instanceDate.hour,
+        instanceDate.minute,
+      );
+    }
+    return DateTime(d.year, d.month, d.day, ps.hour, ps.minute);
+  }
+
+  /// 调度单个任务的提醒（增量重排：先取消旧通知再排新）。
+  /// 返回 false 表示有提醒未成功排入系统（通知权限被拒/精确闹钟缺失等），
+  /// 供 UI 向用户提示（P1-4.9）；通知平台调用失败不影响业务，吞掉异常避免
+  /// 破坏调用方（如任务详情页刷新）的数据流程。
+  Future<bool> scheduleTask(Task task, DateTime referenceDay) async {
+    try {
+      return await _scheduleTaskInner(task, referenceDay);
+    } catch (e) {
+      debugPrint('提醒调度失败 taskId=${task.id}: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _scheduleTaskInner(Task task, DateTime referenceDay) async {
+    // 取消该任务的全部旧通知
+    await cancelTask(task.id);
+    if (task.completedAt != null) return true;
+    final reminders = await _db.getReminders(task.id);
+    if (reminders.isEmpty) return true;
+
+    var ok = true;
+    if (task.rrule.isEmpty) {
+      final ps = task.planStart;
+      if (ps == null) {
+        // P0-13：仅截止时间的任务（备份兼容路径）——按截止日当天 +
+        // 提醒时刻排期（_reminderBase 对 ps==null 已按全天式 remindAtMinutes
+        // 处理，默认 09:00）。此前调度器直接跳过，提醒静默失效。
+        final due = task.dueTime;
+        if (due == null) return true;
+        final day = DateTime(due.year, due.month, due.day);
+        ok = await _scheduleDay(task, day, reminders) && ok;
+      } else {
+        final day = DateTime(ps.year, ps.month, ps.day);
+        ok = await _scheduleDay(task, day, reminders) && ok;
+      }
+    } else {
+      // 重复任务：调度未来 3 个月内的实例
+      final today = DateTime.now();
+      final start = task.planStart ?? today;
+      // 从 start 展开并截取未来窗口（老任务不再因前 100 个实例全在过去而漏排）
+      final instances = RruleService.instance.expand(
+        start,
+        task.rrule,
+        from: today.subtract(const Duration(days: 1)),
+        to: today.add(const Duration(days: 93)),
+        limit: 500,
+      );
+      for (final inst in instances) {
+        // P0-3.1：实例日期归一化到当天 00:00，与完成记录存储基准一致，
+        // 避免 RRULE 展开保留的时分（如 09:00）与完成记录（00:00）互相不识别
+        final day = DateUtilsEx.normalizeInstanceDate(inst);
+        final skipped = await _isSkipped(task, day);
+        if (skipped) continue;
+        final done = await _db.isInstanceCompleted(task.id, day);
+        if (done) continue;
+        ok = await _scheduleDay(task, day, reminders) && ok;
+      }
+      // 例外改期：原日期已被 expandTaskForDate 判为移走（_isSkipped 短路），
+      // 改期到的新日期不在规则展开里，需单独在窗口内排提醒
+      final windowStart = today.subtract(const Duration(days: 1));
+      final windowEnd = today.add(const Duration(days: 93));
+      final exceptions = await _db.getExceptions(task.id);
+      for (final ex in exceptions) {
+        final od = ex.overrideScheduledDate;
+        if (ex.action != 'edit' || od == null) continue;
+        if (od.isBefore(windowStart) || od.isAfter(windowEnd)) continue;
+        final done = await _db.isInstanceCompleted(task.id, od);
+        if (done) continue;
+        ok = await _scheduleDay(task, od, reminders) && ok;
+      }
+    }
+    return ok;
+  }
+
+  Future<bool> _isSkipped(Task task, DateTime day) async {
+    final skipped = _db.expandTaskForDate(task, day);
+    // expandTaskForDate 返回空列表说明被跳过或规则不命中
+    return (await skipped).isEmpty;
+  }
+
+  /// 返回 false 表示该天存在未成功排入系统的提醒（P1-4.9）
+  Future<bool> _scheduleDay(
+    Task task,
+    DateTime day,
+    List<Reminder> reminders,
+  ) async {
+    var ok = true;
+    for (final r in reminders) {
+      final when = _reminderBase(
+        task,
+        day,
+        r,
+      ).subtract(Duration(minutes: r.remindMinutesBefore));
+      if (when.isBefore(DateTime.now())) continue; // 已过时间：不算失败
+      // ID 含实例日期：同一 (task, reminder) 的不同实例通知互不覆盖
+      final id = NotificationIds.forReminder(task.id, r.id, day);
+      final scheduled = await NotificationService.instance.schedule(
+        id,
+        title: task.title,
+        body: _bodyText(task, day, r),
+        when: when,
+        payload: 't${task.id}',
+      );
+      if (!scheduled) ok = false;
+    }
+    if (!task.hasReminder) {
+      await _db.updateTaskHasReminder(task.id, true);
+    }
+    return ok;
+  }
+
+  String _bodyText(Task task, DateTime day, Reminder r) {
+    final t = _reminderBase(task, day, r);
+    final hh = t.hour.toString().padLeft(2, '0');
+    final mm = t.minute.toString().padLeft(2, '0');
+    return '${task.title} · $hh:$mm';
+  }
+
+  /// 任务在"排期窗口"内的全部提醒日期（规则实例 + 例外改期日期）。
+  /// 取消用超集：多取消不存在的 ID 无副作用，保证排过的都能被取消。
+  Future<List<DateTime>> _cancelDatesFor(Task t) async {
+    if (t.rrule.isEmpty) {
+      final ps = t.planStart;
+      if (ps == null) return const [];
+      return [DateTime(ps.year, ps.month, ps.day)];
+    }
+    final today = DateTime.now();
+    final start = t.planStart ?? today;
+    final instances = RruleService.instance.expand(
+      start,
+      t.rrule,
+      from: today.subtract(const Duration(days: 1)),
+      to: today.add(const Duration(days: 93)),
+      limit: 500,
+    );
+    final dates = instances
+        .map((d) => DateTime(d.year, d.month, d.day))
+        .toList();
+    final exceptions = await _db.getExceptions(t.id);
+    for (final ex in exceptions) {
+      final od = ex.overrideScheduledDate;
+      if (ex.action == 'edit' && od != null) {
+        dates.add(DateTime(od.year, od.month, od.day));
+      }
+    }
+    return dates;
+  }
+
+  /// 取消任务全部通知
+  /// 通知平台失败不影响业务（如插件异常/权限问题），吞掉异常保证
+  /// 删除/改期等流程不因通知问题中断（小米等厂商机插件稳定性差异）
+  Future<void> cancelTask(int taskId) async {
+    try {
+      final t = await _db.getTask(taskId);
+      if (t == null) return;
+      final reminders = await _db.getReminders(taskId);
+      final dates = await _cancelDatesFor(t);
+      for (final d in dates) {
+        for (final r in reminders) {
+          try {
+            await NotificationService.instance.cancel(
+              NotificationIds.forReminder(taskId, r.id, d),
+            );
+          } catch (e) {
+            debugPrint('通知取消失败 taskId=$taskId reminderId=${r.id}: $e');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('取消任务通知失败 taskId=$taskId: $e');
+    }
+  }
+
+  /// 取消单条提醒的全部通知（删除某条提醒时调用；ID 含实例维度需按日期枚举）
+  Future<void> cancelReminder(int taskId, int reminderId) async {
+    try {
+      final t = await _db.getTask(taskId);
+      if (t == null) return;
+      final dates = await _cancelDatesFor(t);
+      for (final d in dates) {
+        await NotificationService.instance.cancel(
+          NotificationIds.forReminder(taskId, reminderId, d),
+        );
+      }
+    } catch (e) {
+      debugPrint('取消提醒通知失败 taskId=$taskId reminderId=$reminderId: $e');
+    }
+  }
+
+  /// 全量重排（开机恢复 / 备份恢复后 / 时区变化）
+  /// 单条失败不影响整体（通知平台异常被吞掉，保证启动不崩溃）
+  Future<void> rescheduleAll() async {
+    try {
+      await NotificationService.instance.cancelAll();
+      final allTasks = await _db.getAllUncompleted();
+      final today = DateTime.now();
+      for (final t in allTasks) {
+        final ps = t.planStart;
+        // P0-13：仅截止时间（dueTime）的任务同样纳入全量重排
+        if (ps == null && t.rrule.isEmpty && t.dueTime == null) continue;
+        await scheduleTask(t, today);
+      }
+      // 习惯提醒：每日固定时刻重复
+      final habits = await _db.getHabits();
+      for (final h in habits) {
+        await scheduleHabitReminder(h);
+      }
+    } catch (e) {
+      debugPrint('全量重排失败: $e');
+    }
+  }
+
+  // ---------- 习惯提醒 ----------
+
+  /// 调度习惯每日提醒（无 reminderTime 则取消）。
+  /// 返回 false 表示未成功排入系统（权限被拒等）（P1-4.9）。
+  Future<bool> scheduleHabitReminder(Habit habit) async {
+    try {
+      final time = habit.reminderTime;
+      if (time == null) {
+        await NotificationService.instance.cancel(
+          NotificationIds.forHabit(habit.id),
+        );
+        return true;
+      }
+      return await NotificationService.instance.scheduleDaily(
+        NotificationIds.forHabit(habit.id),
+        title: '习惯提醒',
+        body: '该打卡「${habit.name}」了',
+        time: time,
+        payload: 'h${habit.id}',
+      );
+    } catch (e) {
+      debugPrint('习惯提醒调度失败 habitId=${habit.id}: $e');
+      return false;
+    }
+  }
+
+  /// 取消习惯提醒
+  Future<void> cancelHabitReminder(int habitId) async {
+    await NotificationService.instance.cancel(
+      NotificationIds.forHabit(habitId),
+    );
+  }
+}
+
+/// 计算某条提醒在"目标实例日"的触发时间：
+/// - 全天任务：实例日 00:00 + [remindAtMinutes]（null = 默认 09:00）− 提前量
+/// - 定时任务：实例日 + planStart 时分 − 提前量
+/// 实例日：重复任务 = 今天；非重复 = planStart 当天。
+/// 返回 null 表示任务没有计划时间（无法判断）。
+DateTime? reminderTriggerAt(
+  Task task,
+  int remindMinutesBefore, {
+  int? remindAtMinutes,
+}) {
+  final ps = task.planStart;
+  if (ps == null) return null;
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final day = task.rrule.isNotEmpty
+      ? today
+      : DateTime(ps.year, ps.month, ps.day);
+  if (task.isAllDay) {
+    final min = remindAtMinutes ?? 540; // 默认 09:00
+    return day
+        .add(Duration(minutes: min))
+        .subtract(Duration(minutes: remindMinutesBefore));
+  }
+  return DateTime(
+    day.year,
+    day.month,
+    day.day,
+    ps.hour,
+    ps.minute,
+  ).subtract(Duration(minutes: remindMinutesBefore));
+}

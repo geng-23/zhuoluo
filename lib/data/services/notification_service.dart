@@ -237,6 +237,9 @@ class NotificationService {
 
   /// 调度通知。返回 false 表示未调度（时间已过/无权限），供调用方提示用户
   /// [payload] 深链载荷：'t{taskId}' 定位任务 / 'h{habitId}' 打开习惯页
+  /// [channel] 通知渠道：任务提醒默认 task_reminder_v4；习惯提醒传
+  /// habit_reminder_v3（P2-51：P1-10 逐日排期后习惯提醒改走本方法，
+  /// 此前硬编码任务渠道导致习惯提醒声音/开关无法单独控制）
   Future<bool> schedule(
     int id, {
     required String title,
@@ -244,6 +247,7 @@ class NotificationService {
     required DateTime when,
     // 可空：测试通知不带深链
     String? payload,
+    String channel = 'task_reminder_v4',
   }) async {
     if (!_initialized) await init();
     // Android 13+：确保通知权限已授予；未授予则不调度
@@ -264,6 +268,27 @@ class NotificationService {
       return false;
     }
     final tzWhen = tz.TZDateTime.from(when, AppClock.location);
+    final details = channel == 'habit_reminder_v3'
+        ? const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'habit_reminder_v3',
+              '习惯提醒',
+              channelDescription: '习惯打卡每日提醒',
+              visibility: NotificationVisibility.public,
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
+          )
+        : const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'task_reminder_v4',
+              '任务提醒',
+              channelDescription: '任务到点提醒',
+              visibility: NotificationVisibility.public,
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
+          );
     // 精确闹钟失败（如厂商默认拒绝 SCHEDULE_EXACT_ALARM）时降级为 inexact，
     // 保证通知仍能触发（时间可能延迟）
     try {
@@ -272,16 +297,7 @@ class NotificationService {
         title: title,
         body: body,
         scheduledDate: tzWhen,
-        notificationDetails: const NotificationDetails(
-          android: AndroidNotificationDetails(
-            'task_reminder_v4',
-            '任务提醒',
-            channelDescription: '任务到点提醒',
-            visibility: NotificationVisibility.public,
-            importance: Importance.high,
-            priority: Priority.high,
-          ),
-        ),
+        notificationDetails: details,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         payload: payload,
       );
@@ -294,101 +310,13 @@ class NotificationService {
           title: title,
           body: body,
           scheduledDate: tzWhen,
-          notificationDetails: const NotificationDetails(
-            android: AndroidNotificationDetails(
-              'task_reminder_v4',
-              '任务提醒',
-              channelDescription: '任务到点提醒',
-              visibility: NotificationVisibility.public,
-              importance: Importance.high,
-              priority: Priority.high,
-            ),
-          ),
+          notificationDetails: details,
           androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
           payload: payload,
         );
         debugPrint('通知：已降级调度 $id @ $tzWhen');
       } catch (e2) {
         debugPrint('通知：降级调度也失败 $id: $e2');
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /// 调度每日固定时刻重复通知（习惯提醒用）
-  Future<bool> scheduleDaily(
-    int id, {
-    required String title,
-    required String body,
-    required DateTime time,
-    required String payload,
-  }) async {
-    if (!_initialized) await init();
-    // P1-C：权限状态未知时请求一次（与 schedule 一致，不重复弹窗）
-    if (_permissionGranted == false) {
-      debugPrint('通知：权限被拒，跳过习惯提醒 $id');
-      return false;
-    }
-    if (_permissionGranted == null) {
-      final granted = await requestPermission();
-      if (!granted) {
-        debugPrint('通知：权限未授予，跳过习惯提醒 $id');
-        return false;
-      }
-    }
-    // 若时间已过，顺延到明天，保证下一次立刻生效
-    var next = time;
-    if (next.isBefore(AppClock.now())) {
-      next = next.add(const Duration(days: 1));
-    }
-    final tzWhen = tz.TZDateTime.from(next, AppClock.location);
-    try {
-      await _plugin.zonedSchedule(
-        id: id,
-        title: title,
-        body: body,
-        scheduledDate: tzWhen,
-        matchDateTimeComponents: DateTimeComponents.time,
-        notificationDetails: const NotificationDetails(
-          android: AndroidNotificationDetails(
-            'habit_reminder_v3',
-            '习惯提醒',
-            channelDescription: '习惯打卡每日提醒',
-            visibility: NotificationVisibility.public,
-            importance: Importance.high,
-            priority: Priority.high,
-          ),
-        ),
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        payload: payload,
-      );
-      debugPrint('通知：已调度习惯提醒 $id @ $tzWhen');
-    } catch (e) {
-      debugPrint('通知：习惯提醒精确调度失败（$e），降级 inexact');
-      try {
-        await _plugin.zonedSchedule(
-          id: id,
-          title: title,
-          body: body,
-          scheduledDate: tzWhen,
-          matchDateTimeComponents: DateTimeComponents.time,
-          notificationDetails: const NotificationDetails(
-            android: AndroidNotificationDetails(
-              'habit_reminder_v3',
-              '习惯提醒',
-              channelDescription: '习惯打卡每日提醒',
-              visibility: NotificationVisibility.public,
-              importance: Importance.high,
-              priority: Priority.high,
-            ),
-          ),
-          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-          payload: payload,
-        );
-        debugPrint('通知：习惯提醒已降级调度 $id @ $tzWhen');
-      } catch (e2) {
-        debugPrint('通知：习惯提醒降级调度也失败 $id: $e2');
         return false;
       }
     }

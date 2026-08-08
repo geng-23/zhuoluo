@@ -852,17 +852,17 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     if (t.rrule.isNotEmpty &&
         !DateUtilsEx.sameDay(t.planStart ?? start, start)) {
       final db = ref.read(dbProvider);
-      final removed = await db.applyRecurringChange(
+      final result = await db.applyRecurringChange(
         t.id,
         oldRrule: t.rrule,
         newRrule: t.rrule,
         newStart: start,
       );
       // C8-5：清理发生时有提示（此前静默删除历史完成记录）
-      if (removed.isNotEmpty && mounted) {
+      if (result.removedCompletions.isNotEmpty && mounted) {
         showAppSnackBar(
           context,
-          '已清理 ${removed.length} 条不再匹配新日期的完成记录',
+          '已清理 ${result.removedCompletions.length} 条不再匹配新日期的完成记录',
           icon: Icons.info_outline,
         );
       }

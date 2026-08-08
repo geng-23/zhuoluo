@@ -664,32 +664,40 @@ class AppDatabase extends _$AppDatabase {
   ///   避免旧完成记录继续参与统计、旧例外继续影响展开）
   /// - 更换规则：清理不再匹配新系列的完成记录（过去仍命中新规则的实例保留），
   ///   并移除例外实例日不再命中新规则的例外记录
-  /// 返回被删除的完成记录（供撤销恢复）。
-  Future<List<TaskCompletion>> applyRecurringChange(
+  /// 返回被删除的完成记录与例外（供撤销恢复，P2-52：任务页改期撤销时
+  /// 恢复原锚点数据，与日历系列改期撤销 undoMoveTaskSeries 行为一致）。
+  Future<RecurringChangeResult> applyRecurringChange(
     int taskId, {
     required String oldRrule,
     required String newRrule,
     DateTime? newStart,
   }) async {
     if (newRrule.isEmpty) {
-      if (oldRrule.isEmpty) return const [];
+      if (oldRrule.isEmpty) return const RecurringChangeResult();
       final removed = await (select(
         taskCompletions,
       )..where((c) => c.taskId.equals(taskId))).get();
+      final removedEx = await (select(
+        taskExceptions,
+      )..where((e) => e.taskId.equals(taskId))).get();
       await (delete(taskCompletions)..where((c) => c.taskId.equals(taskId)))
           .go();
       await (delete(taskExceptions)..where((e) => e.taskId.equals(taskId)))
           .go();
-      return removed;
+      return RecurringChangeResult(
+        removedCompletions: removed,
+        removedExceptions: removedEx,
+      );
     }
-    if (oldRrule.isEmpty) return const [];
+    if (oldRrule.isEmpty) return const RecurringChangeResult();
     final t = await getTask(taskId);
     final start = newStart ?? t?.planStart;
-    if (start == null) return const [];
+    if (start == null) return const RecurringChangeResult();
     final removed = await pruneCompletionsForTask(taskId, start, newRrule);
     final exceptions = await (select(
       taskExceptions,
     )..where((e) => e.taskId.equals(taskId))).get();
+    final removedEx = <TaskException>[];
     for (final ex in exceptions) {
       final hit = RruleService.instance.hitsOn(
         newRrule,
@@ -697,10 +705,14 @@ class AppDatabase extends _$AppDatabase {
         du.DateUtilsEx.normalizeInstanceDate(ex.instanceDate),
       );
       if (!hit) {
+        removedEx.add(ex);
         await (delete(taskExceptions)..where((x) => x.id.equals(ex.id))).go();
       }
     }
-    return removed;
+    return RecurringChangeResult(
+      removedCompletions: removed,
+      removedExceptions: removedEx,
+    );
   }
 
   Future<void> updateTask(int id, TasksCompanion t) =>
@@ -1613,6 +1625,17 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> insertPomodoroRaw(PomodoroRecordsCompanion p) =>
       into(pomodoroRecords).insert(p, mode: InsertMode.insertOrReplace);
+}
+
+/// 重复规则变更结果：被清理的完成记录与例外（撤销恢复用，P2-52）
+class RecurringChangeResult {
+  final List<TaskCompletion> removedCompletions;
+  final List<TaskException> removedExceptions;
+
+  const RecurringChangeResult({
+    this.removedCompletions = const [],
+    this.removedExceptions = const [],
+  });
 }
 
 /// 日历条目（任务 + 实例日期 + 完成状态 + 清单色）

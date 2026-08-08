@@ -1,4 +1,7 @@
-﻿import 'package:flutter/foundation.dart';
+﻿import 'dart:convert';
+
+import 'package:drift/drift.dart' show Value;
+import 'package:flutter/foundation.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
@@ -317,6 +320,8 @@ class ReminderScheduler {
               body: '该打卡「${habit.name}」了',
               when: when,
               payload: 'h${habit.id}',
+              // P2-51：习惯提醒走独立渠道（声音/开关可与任务提醒分开控制）
+              channel: 'habit_reminder_v3',
             ) &&
             ok;
       }
@@ -336,6 +341,82 @@ class ReminderScheduler {
         NotificationIds.forHabit(habitId, start.add(Duration(days: i))),
       );
     }
+  }
+
+  // ---------- 跳过实例（任务页/日历页共用，P0-2/P1-9/P2-40 统一收口） ----------
+
+  /// P0-2：跳过实例时被删除的完成记录暂存（撤销跳过时恢复原完成时间）。
+  /// 撤销条 3 秒内有效，同限容策略防止内存增长。
+  final Map<String, DateTime> _skippedCompletionCache = {};
+  static const int _skippedCompletionCacheLimit = 50;
+
+  static String _skipCompletionKey(int taskId, DateTime day) =>
+      '$taskId:${day.toIso8601String()}';
+
+  /// 跳过实例：写入 skippedDates、清理当天完成记录（暂存原完成时间）、重排提醒。
+  /// 返回 false 表示任务不存在（调用方据此跳过反馈）。
+  /// 与撤销跳过成对使用，任务页与日历页统一走本方法（此前日历侧不暂存
+  /// 完成记录，撤销后统计/已完成视图数据漂移）。
+  Future<bool> skipInstance(int taskId, DateTime instanceDate) async {
+    final t = await _db.getTask(taskId);
+    if (t == null) return false;
+    // P0-3.1：跳过日期归一化到当天 00:00（与规则展开/例外基准一致）
+    final day = DateUtilsEx.normalizeInstanceDate(instanceDate);
+    final skipped = DateUtilsEx.parseSkippedDates(t.skippedDates);
+    if (!skipped.contains(day.toIso8601String())) {
+      skipped.add(day.toIso8601String());
+    }
+    // C1-1/P0-2：清理当天完成记录前暂存完成时间——否则"删除本次"后
+    // 列表/已完成视图/统计仍认为今天已完成；撤销跳过时恢复原记录
+    if (await _db.isInstanceCompleted(taskId, day)) {
+      final comp = await _db.getInstanceCompletion(taskId, day);
+      if (comp != null) {
+        _skippedCompletionCache[_skipCompletionKey(taskId, day)] =
+            comp.completedAt;
+        while (_skippedCompletionCache.length >
+            _skippedCompletionCacheLimit) {
+          _skippedCompletionCache.remove(_skippedCompletionCache.keys.first);
+        }
+      }
+    }
+    await _db.uncompleteInstance(taskId, day);
+    await _db.updateTask(
+      taskId,
+      TasksCompanion(skippedDates: Value(jsonEncode(skipped))),
+    );
+    // 重新取任务：旧快照的 skippedDates 不含本次跳过，会让重排重新排上该实例
+    final fresh = await _db.getTask(taskId);
+    if (fresh != null) {
+      await scheduleTask(fresh, AppClock.now());
+    }
+    return true;
+  }
+
+  /// 撤销跳过：从 skippedDates 移除指定日期，并恢复被删除的完成记录
+  ///（保留原完成时间，统计不漂移）。返回 false 表示任务不存在。
+  Future<bool> unskipInstance(int taskId, DateTime instanceDate) async {
+    final t = await _db.getTask(taskId);
+    if (t == null) return false;
+    final day = DateUtilsEx.normalizeInstanceDate(instanceDate);
+    final skipped = DateUtilsEx.parseSkippedDates(t.skippedDates);
+    skipped.remove(day.toIso8601String());
+    // P0-2：撤销跳过恢复被删除的完成记录（保留原完成时间，统计不漂移）
+    final cachedAt = _skippedCompletionCache.remove(
+      _skipCompletionKey(taskId, day),
+    );
+    if (cachedAt != null) {
+      await _db.restoreInstanceCompletion(taskId, day, cachedAt);
+    }
+    await _db.updateTask(
+      taskId,
+      TasksCompanion(skippedDates: Value(jsonEncode(skipped))),
+    );
+    // 重新取任务：旧快照仍含被移除的跳过日期，会让重排漏排该实例
+    final fresh = await _db.getTask(taskId);
+    if (fresh != null) {
+      await scheduleTask(fresh, AppClock.now());
+    }
+    return true;
   }
 }
 

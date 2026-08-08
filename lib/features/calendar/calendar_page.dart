@@ -131,11 +131,19 @@ class CalendarPage extends ConsumerWidget {
     CalendarState state,
   ) async {
     final now = AppClock.now();
+    final first = DateTime(now.year - 5);
+    final last = DateTime(now.year + 5);
+    // P1-27：周/日视图可翻数百年前，selectedDay 超界会触发 DatePicker
+    // 断言崩溃，钳制到 [firstDate, lastDate]
+    final initial = state.selectedDay;
+    final clamped = initial.isBefore(first)
+        ? first
+        : (initial.isAfter(last) ? last : initial);
     final picked = await showDatePicker(
       context: context,
-      initialDate: state.selectedDay,
-      firstDate: DateTime(now.year - 5),
-      lastDate: DateTime(now.year + 5),
+      initialDate: clamped,
+      firstDate: first,
+      lastDate: last,
       helpText: '选择日期',
     );
     if (picked != null) {

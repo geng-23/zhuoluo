@@ -487,7 +487,10 @@ void main() {
         newRrule: 'FREQ=DAILY;INTERVAL=2',
         newStart: start,
       );
-      expect(removed.map((c) => c.instanceDate), contains(start.add(const Duration(days: 1))));
+      expect(
+        removed.removedCompletions.map((c) => c.instanceDate),
+        contains(start.add(const Duration(days: 1))),
+      );
       expect(
         await db.isInstanceCompleted(
           id,
@@ -775,7 +778,11 @@ void main() {
         newRrule: 'FREQ=WEEKLY;BYDAY=MO',
         newStart: tuesday,
       );
-      expect(removed, hasLength(1), reason: '不再匹配新锚点的完成记录被清理');
+      expect(
+        removed.removedCompletions,
+        hasLength(1),
+        reason: '不再匹配新锚点的完成记录被清理',
+      );
       expect(await db.getInstanceCompletion(id, monday), isNull,
           reason: 'P0-3：旧锚点完成记录不再残留为孤儿');
     });

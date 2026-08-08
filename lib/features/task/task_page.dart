@@ -888,13 +888,14 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     if (t.rrule.isNotEmpty &&
         !DateUtilsEx.sameDay(t.planStart ?? effectiveStart, effectiveStart)) {
       final db = ref.read(dbProvider);
-      final removed = await db.applyRecurringChange(
+      final result = await db.applyRecurringChange(
         t.id,
         oldRrule: t.rrule,
         newRrule: t.rrule,
         newStart: effectiveStart,
       );
-      removedCount = removed.length;
+      removedCount = result.removedCompletions.length;
+      _lastRescheduleUndo = _RescheduleUndo(t, ps, pe, result);
     }
     await notifier.updateTaskFields(
       t.id,
@@ -916,14 +917,53 @@ class _TaskPageState extends ConsumerState<TaskPage> {
                   '${DateUtilsEx.timeCn(effectiveStart)}');
       _showUndo(
         msg,
-        () => notifier.updateTaskFields(
-          t.id,
-          TasksCompanion(
-            planStart: Value<DateTime?>(ps),
-            planEnd: Value<DateTime?>(pe),
-          ),
-        ),
+        // P2-52：撤销恢复原锚点 + 被清理的完成记录/例外（与日历系列改期
+        // 撤销 undoMoveTaskSeries 一致；此前只恢复日期，历史数据永久缺失）
+        () async {
+          await _undoReschedule();
+        },
         icon: Icons.event,
+      );
+    }
+  }
+
+  /// P2-52：任务页改期撤销快照（恢复被清理的完成记录与例外）
+  _RescheduleUndo? _lastRescheduleUndo;
+
+  Future<void> _undoReschedule() async {
+    final u = _lastRescheduleUndo;
+    _lastRescheduleUndo = null;
+    if (u == null) return;
+    final db = ref.read(dbProvider);
+    final notifier = ref.read(tasksControllerProvider.notifier);
+    await notifier.updateTaskFields(
+      u.task.id,
+      TasksCompanion(
+        planStart: Value<DateTime?>(u.oldStart),
+        planEnd: Value<DateTime?>(u.oldEnd),
+      ),
+    );
+    for (final c in u.result.removedCompletions) {
+      await db.insertCompletionRaw(
+        TaskCompletionsCompanion(
+          id: Value(c.id),
+          taskId: Value(c.taskId),
+          instanceDate: Value(c.instanceDate),
+          completedAt: Value(c.completedAt),
+        ),
+      );
+    }
+    for (final e in u.result.removedExceptions) {
+      await db.insertExceptionRaw(
+        TaskExceptionsCompanion(
+          id: Value(e.id),
+          taskId: Value(e.taskId),
+          instanceDate: Value(e.instanceDate),
+          action: Value(e.action),
+          overrideScheduledDate: e.overrideScheduledDate == null
+              ? const Value(null)
+              : Value(e.overrideScheduledDate),
+        ),
       );
     }
   }
@@ -1023,6 +1063,16 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       builder: (c) => const QuickAddSheet(),
     );
   }
+}
+
+/// P2-52：任务页改期撤销快照（原锚点 + 被清理的完成记录/例外）
+class _RescheduleUndo {
+  final Task task;
+  final DateTime? oldStart;
+  final DateTime? oldEnd;
+  final RecurringChangeResult result;
+
+  _RescheduleUndo(this.task, this.oldStart, this.oldEnd, this.result);
 }
 
 /// 快速添加弹窗

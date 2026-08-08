@@ -79,6 +79,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // 跨测试去抖：showAppSnackBar 全局记录上一条消息（400ms 去抖窗口），
+    // 测试 1 刚显示过"已完成"，真实时间间隔不足时本条会被吞掉
+    //（测试时序脆弱性，与实现无关）——runAsync 真实等待越过去抖窗口
+    //（testWidgets 的 fake 时钟下 Future.delayed 不会真实推进）
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 450)),
+    );
+
     await tester.tap(find.byIcon(Icons.radio_button_unchecked).first);
     await tester.pump();
     // 等待退出动画完成，Snackbar 出现

@@ -5,6 +5,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_platform.dart';
 import 'package:zhuoluo/data/services/backup_types.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
+import 'package:zhuoluo/core/utils/date_utils.dart';
 
 /// 备份/恢复服务（JSON 格式，设计文档 §9）
 /// 文件系统操作按平台实现：native=真实文件，web=浏览器下载导出。
@@ -86,18 +87,26 @@ class BackupService {
       final data = jsonDecode(json) as Map<String, dynamic>;
       if (data['version'] != 1) return null;
       return BackupStats(
-        lists: (data['lists'] as List).length,
-        tasks: (data['tasks'] as List).length,
-        reminders: (data['reminders'] as List).length,
-        completions: (data['completions'] as List).length,
-        exceptions: (data['exceptions'] as List).length,
-        habits: (data['habits'] as List).length,
-        pomodoros: (data['pomodoros'] as List).length,
+        // P1-21：缺表键（不完整旧备份）兜底计 0，不抛 TypeError
+        lists: _rows(data, 'lists').length,
+        tasks: _rows(data, 'tasks').length,
+        reminders: _rows(data, 'reminders').length,
+        completions: _rows(data, 'completions').length,
+        exceptions: _rows(data, 'exceptions').length,
+        habits: _rows(data, 'habits').length,
+        pomodoros: _rows(data, 'pomodoros').length,
       );
     } catch (_) {
       return null;
     }
   }
+
+  /// P1-21：备份表键缺失/为 null（不完整旧备份）时兜底为空表；
+  /// 键存在但类型错误仍抛 TypeError（数据损坏应明确报错而非静默吞掉）
+  static List _rows(Map<String, dynamic> data, String key) =>
+      data.containsKey(key) && data[key] != null
+          ? data[key] as List
+          : const [];
 
   /// 每天首次打开自动备份（备份方案设计 3.2）：
   /// 1) Settings 读 lastAutoBackupAt；距现在 <24h → 直接返回
@@ -146,25 +155,26 @@ class BackupService {
     if (data['version'] != 1) {
       throw FormatException('不支持的备份版本');
     }
-    final lists = (data['lists'] as List).map(_jsonToList).toList();
-    final tasks = (data['tasks'] as List).map(_jsonToTask).toList();
-    final reminders = (data['reminders'] as List)
+    // P1-21：缺表键（不完整旧备份）兜底为空表，不抛 TypeError
+    final lists = _rows(data, 'lists').map(_jsonToList).toList();
+    final tasks = _rows(data, 'tasks').map(_jsonToTask).toList();
+    final reminders = _rows(data, 'reminders')
         .map(_jsonToReminder)
         .toList();
-    final completions = (data['completions'] as List)
+    final completions = _rows(data, 'completions')
         .map(_jsonToCompletion)
         .toList();
-    final exceptions = (data['exceptions'] as List)
+    final exceptions = _rows(data, 'exceptions')
         .map(_jsonToException)
         .toList();
-    final habits = (data['habits'] as List).map(_jsonToHabit).toList();
-    final habitRecords = (data['habitRecords'] as List)
+    final habits = _rows(data, 'habits').map(_jsonToHabit).toList();
+    final habitRecords = _rows(data, 'habitRecords')
         .map(_jsonToHabitRecord)
         .toList();
-    final pomodoros = (data['pomodoros'] as List)
+    final pomodoros = _rows(data, 'pomodoros')
         .map(_jsonToPomodoro)
         .toList();
-    final settings = (data['settings'] as List)
+    final settings = _rows(data, 'settings')
         .map(
           (e) => SettingsCompanion.insert(
             key: (e as Map<String, dynamic>)['key'] as String,
@@ -590,7 +600,13 @@ class BackupService {
       TaskCompletionsCompanion(
         id: Value(j['id'] as int),
         taskId: Value(j['taskId'] as int),
-        instanceDate: Value(DateTime.parse(j['instanceDate'] as String)),
+        // P1-4：实例日期归一化到当天 00:00（与 DB 基准一致，database.dart
+        // completeInstance；否则恢复后"已完成"状态与规则展开互相不识别）
+        instanceDate: Value(
+          DateUtilsEx.normalizeInstanceDate(
+            DateTime.parse(j['instanceDate'] as String),
+          ),
+        ),
         completedAt: Value(DateTime.parse(j['completedAt'] as String)),
       );
 
@@ -619,7 +635,12 @@ class BackupService {
   HabitRecordsCompanion _jsonToHabitRecord(dynamic j) => HabitRecordsCompanion(
     id: Value(j['id'] as int),
     habitId: Value(j['habitId'] as int),
-    date: Value(DateTime.parse(j['date'] as String)),
+    // P1-4：打卡日期归一化到当天 00:00（与 isHabitDone/checkHabit 基准一致）
+    date: Value(
+      DateUtilsEx.normalizeInstanceDate(
+        DateTime.parse(j['date'] as String),
+      ),
+    ),
     completedAt: Value(DateTime.parse(j['completedAt'] as String)),
   );
 

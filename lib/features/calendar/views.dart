@@ -490,11 +490,19 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
                       // P2：日视图头部可点击跳转其他日期（此前点击无反应）
                       : () async {
                           final now = AppClock.now();
+                          // P1-27：日视图可翻至 2000-01-01，当前显示日超界
+                          // 会触发 DatePicker 断言崩溃，钳制到 [first, last]
+                          final first = DateTime(now.year - 5);
+                          final last = DateTime(now.year + 5);
+                          final initial = widget.start;
+                          final clamped = initial.isBefore(first)
+                              ? first
+                              : (initial.isAfter(last) ? last : initial);
                           final picked = await showDatePicker(
                             context: context,
-                            initialDate: widget.start,
-                            firstDate: DateTime(now.year - 5),
-                            lastDate: DateTime(now.year + 5),
+                            initialDate: clamped,
+                            firstDate: first,
+                            lastDate: last,
                             helpText: '跳转到日期',
                           );
                           if (picked != null && context.mounted) {

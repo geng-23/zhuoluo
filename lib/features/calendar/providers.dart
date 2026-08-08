@@ -1,6 +1,4 @@
-﻿import 'dart:convert';
-
-import 'package:drift/drift.dart' show Value;
+﻿import 'package:drift/drift.dart' show Value;
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
@@ -322,50 +320,22 @@ class CalendarController extends StateNotifier<CalendarState> {
 
   /// 跳过重复实例
   Future<void> skipInstance(int taskId, DateTime instanceDate) async {
-    final t = await _db.getTask(taskId);
-    if (t == null) return;
+    // P0-2/P1-9/P2-40：核心逻辑（暂存完成记录/容错/重排）统一在
+    // ReminderScheduler（任务页与日历页共用），控制器只负责反馈与刷新
+    final ok = await _scheduler.skipInstance(taskId, instanceDate);
+    if (!ok) return;
     SoundService.instance.play(SoundKind.skip);
     Haptics.light();
-    // P0-3.1：跳过日期归一化到当天 00:00
-    final day = DateUtilsEx.normalizeInstanceDate(instanceDate);
-    final skipped = (jsonDecode(t.skippedDates) as List)
-        .map((e) => e as String)
-        .toList();
-    skipped.add(day.toIso8601String());
-    // C1-1：跳过实例时清理当天完成记录（与任务页 skipInstance 一致）
-    await _db.uncompleteInstance(taskId, day);
-    await _db.updateTask(
-      taskId,
-      TasksCompanion(skippedDates: Value(jsonEncode(skipped))),
-    );
-    // 重新取任务：旧快照 skippedDates 不含本次跳过，重排会重新排上该实例
-    final fresh = await _db.getTask(taskId);
-    if (fresh != null) {
-      await _scheduler.scheduleTask(fresh, AppClock.now());
-    }
     _bump();
     load();
   }
 
-  /// 撤销跳过实例（从 skippedDates 移除日期）
+  /// 撤销跳过实例（从 skippedDates 移除日期，并恢复被删除的完成记录）
   Future<void> unskipInstance(int taskId, DateTime instanceDate) async {
-    final t = await _db.getTask(taskId);
-    if (t == null) return;
+    final ok = await _scheduler.unskipInstance(taskId, instanceDate);
+    if (!ok) return;
     SoundService.instance.play(SoundKind.reopen);
     Haptics.light();
-    final day = DateUtilsEx.normalizeInstanceDate(instanceDate);
-    final skipped = (jsonDecode(t.skippedDates) as List)
-        .map((e) => e as String)
-        .toList();
-    skipped.remove(day.toIso8601String());
-    await _db.updateTask(
-      taskId,
-      TasksCompanion(skippedDates: Value(jsonEncode(skipped))),
-    );
-    final fresh = await _db.getTask(taskId);
-    if (fresh != null) {
-      await _scheduler.scheduleTask(fresh, AppClock.now());
-    }
     _bump();
     load();
   }

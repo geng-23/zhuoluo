@@ -1,6 +1,4 @@
-﻿import 'dart:convert';
-
-import 'package:drift/drift.dart' show Value;
+﻿import 'package:drift/drift.dart' show Value;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
@@ -620,11 +618,6 @@ class TasksController extends StateNotifier<TasksState> {
   final Map<int, _DeletedSnapshot> _deletedCache = {};
   static const int _deletedCacheLimit = 50;
 
-  // P0-2：跳过实例时被删除的完成记录暂存（撤销跳过时恢复原完成时间）。
-  // 撤销条 3 秒内有效，同限容策略防止内存增长。
-  final Map<String, DateTime> _skippedCompletionCache = {};
-  static const int _skippedCompletionCacheLimit = 50;
-
   /// 递归收集任务子树（含自身后代，不含根）
   Future<List<Task>> _collectSubtree(int id) async {
     final result = <Task>[];
@@ -876,80 +869,25 @@ class TasksController extends StateNotifier<TasksState> {
   }
 
   Future<void> skipInstance(int id, DateTime instanceDate) async {
-    final t = await _db.getTask(id);
-    if (t == null) return;
+    // P0-2/P1-9/P2-40：核心逻辑（暂存完成记录/容错/重排）统一在
+    // ReminderScheduler（任务页与日历页共用），控制器只负责反馈与刷新
+    final ok = await _scheduler.skipInstance(id, instanceDate);
+    if (!ok) return;
     SoundService.instance.play(SoundKind.skip);
     Haptics.light();
-    // P0-3.1：跳过日期归一化到当天 00:00（与规则展开/例外基准一致）
-    final day = DateUtilsEx.normalizeInstanceDate(instanceDate);
-    final skipped = _parseSkippedDates(t.skippedDates);
-    if (!skipped.contains(day.toIso8601String())) {
-      skipped.add(day.toIso8601String());
-    }
-    // C1-1：跳过实例时清理当天完成记录——否则"删除本次"后
-    // 列表/已完成视图/统计仍认为今天已完成（且该天完成数可大于计划数）
-    // P0-2：删除前暂存完成时间，撤销跳过（unskipInstance）时恢复原记录
-    if (await _db.isInstanceCompleted(id, day)) {
-      final comp = await _db.getInstanceCompletion(id, day);
-      if (comp != null) {
-        _skippedCompletionCache[_skipCompletionKey(id, day)] = comp.completedAt;
-        while (_skippedCompletionCache.length > _skippedCompletionCacheLimit) {
-          _skippedCompletionCache.remove(_skippedCompletionCache.keys.first);
-        }
-      }
-    }
-    await _db.uncompleteInstance(id, day);
-    await _db.updateTask(
-      id,
-      TasksCompanion(skippedDates: Value(jsonEncode(skipped))),
-    );
     await _reloadTasks();
-    // 重新取任务：旧快照的 skippedDates 不含本次跳过，会让重排重新排上该实例
-    final fresh = await _db.getTask(id);
-    if (fresh != null) {
-      await _scheduler.scheduleTask(fresh, AppClock.now());
-    }
     _bump();
   }
 
-  /// 撤销跳过：从 skippedDates 移除指定日期（删除本次/跳过的撤销）
+  /// 撤销跳过：从 skippedDates 移除指定日期，并恢复被删除的完成记录
   Future<void> unskipInstance(int id, DateTime instanceDate) async {
-    final t = await _db.getTask(id);
-    if (t == null) return;
-    final day = DateUtilsEx.normalizeInstanceDate(instanceDate);
-    final skipped = _parseSkippedDates(t.skippedDates);
-    skipped.remove(day.toIso8601String());
-    // P0-2：撤销跳过恢复被删除的完成记录（保留原完成时间，统计不漂移）
-    final cachedAt = _skippedCompletionCache.remove(_skipCompletionKey(id, day));
-    if (cachedAt != null) {
-      await _db.restoreInstanceCompletion(id, day, cachedAt);
-    }
-    await _db.updateTask(
-      id,
-      TasksCompanion(skippedDates: Value(jsonEncode(skipped))),
-    );
+    final ok = await _scheduler.unskipInstance(id, instanceDate);
+    if (!ok) return;
+    SoundService.instance.play(SoundKind.reopen);
+    Haptics.light();
     await _reloadTasks();
-    // 重新取任务：旧快照仍含被移除的跳过日期，会让重排漏排该实例
-    final fresh = await _db.getTask(id);
-    if (fresh != null) {
-      await _scheduler.scheduleTask(fresh, AppClock.now());
-    }
     _bump();
   }
-
-  /// P1-12：skippedDates 非法 JSON（损坏备份导入等）静默视为无跳过，
-  /// 避免跳过/撤销操作直接抛 FormatException
-  static List<String> _parseSkippedDates(String raw) {
-    if (raw.isEmpty) return [];
-    try {
-      return (jsonDecode(raw) as List).map((e) => e as String).toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  static String _skipCompletionKey(int taskId, DateTime day) =>
-      '$taskId:${day.toIso8601String()}';
 
   /// 列表页操作用的"当前实例日期"（供 UI 显示/删除选择框）
   static DateTime currentInstanceDate(Task t) {

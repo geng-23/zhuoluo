@@ -1,4 +1,6 @@
-﻿import 'package:zhuoluo/core/utils/app_clock.dart';
+﻿import 'dart:convert';
+
+import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 日期工具（周一为一周开始，中文格式化）
 class DateUtilsEx {
   DateUtilsEx._();
@@ -78,4 +80,16 @@ class DateUtilsEx {
     d.month,
     d.day,
   );
+
+  /// P1-9/P2-40：skippedDates 非法 JSON（损坏备份导入等）静默视为无跳过，
+  /// 避免跳过/撤销操作直接抛 FormatException。
+  /// 任务页与日历页共用同一实现（此前日历侧漏掉容错直接 jsonDecode）。
+  static List<String> parseSkippedDates(String raw) {
+    if (raw.isEmpty) return [];
+    try {
+      return (jsonDecode(raw) as List).map((e) => e as String).toList();
+    } catch (_) {
+      return [];
+    }
+  }
 }

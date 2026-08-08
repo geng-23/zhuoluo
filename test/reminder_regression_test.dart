@@ -36,49 +36,51 @@ void main() {
   }
 
   test('#1 通知 ID 含实例日期维度：同一 (task, reminder) 不同实例 ID 互异', () {
-    final taskId = 3;
     final reminderId = 1;
     final day1 = DateTime(2026, 8, 10);
     final day2 = DateTime(2026, 8, 11);
-    final id1 = NotificationIds.forReminder(taskId, reminderId, day1);
-    final id2 = NotificationIds.forReminder(taskId, reminderId, day2);
+    final id1 = NotificationIds.forReminder(reminderId, day1);
+    final id2 = NotificationIds.forReminder(reminderId, day2);
     expect(id1, isNot(id2), reason: '不同实例的通知 ID 必须不同，否则互相覆盖');
 
     // 同实例、同任务、不同提醒 ID 也互异
-    final id3 = NotificationIds.forReminder(taskId, 2, day1);
+    final id3 = NotificationIds.forReminder(2, day1);
     expect(id1, isNot(id3));
 
-    // 不同任务同一天不冲突
+    // 不同任务不冲突：提醒 ID 是 Reminders 表全局自增主键，不同任务的提醒
+    // 必然不同 ID（此处以不同 reminderId 模拟两条不同任务的提醒记录）
     expect(
-      NotificationIds.forReminder(4, 1, day1),
-      isNot(NotificationIds.forReminder(3, 1, day1)),
+      NotificationIds.forReminder(1, day1),
+      isNot(NotificationIds.forReminder(2, day1)),
     );
 
     // 实例日期带时间与 00:00 归一化后 ID 一致（排期/取消同基准）
     final id4 = NotificationIds.forReminder(
-      taskId,
       reminderId,
       DateTime(2026, 8, 10, 23, 59),
     );
     expect(id1, id4);
   });
 
-  test('#1 习惯通知 ID 与任务通知 ID 区段分离（常见 taskId 范围）', () {
-    for (var taskId = 1; taskId <= 1500; taskId++) {
-      for (var habitId = 1; habitId <= 500; habitId++) {
-        final taskIdMax = NotificationIds.forReminder(
-          taskId,
-          10,
-          DateTime(2050, 12, 31),
-        );
-        final habitIdMin = NotificationIds.forHabit(habitId);
-        expect(
-          taskIdMax,
-          lessThan(habitIdMin),
-          reason: 'taskId=$taskId 撞习惯区段 habitId=$habitId',
-        );
-      }
+  test('#1 提醒通知 ID 与习惯通知 ID 区段分离（大 reminderId 范围）', () {
+    // reminderId 为全局自增主键，验证累积到远超 64（N-P1-4 修复点）仍安全
+    for (var reminderId = 1; reminderId <= 100000; reminderId += 997) {
+      final reminderIdMax = NotificationIds.forReminder(
+        reminderId,
+        DateTime(2050, 12, 31),
+      );
+      final habitIdMin = NotificationIds.forHabit(1);
+      expect(
+        reminderIdMax,
+        lessThan(habitIdMin),
+        reason: 'reminderId=$reminderId 撞习惯区段',
+      );
     }
+    // 上限内最高值不超 int32（Android 通知 ID 为 32 位有符号）
+    expect(
+      NotificationIds.forReminder(127999, DateTime(2068, 12, 31)),
+      lessThan(2147483647),
+    );
   });
 
   test('#3 例外改期后实例在新日期可见、原日期隐藏', () async {
@@ -200,25 +202,53 @@ void main() {
     final day1 = DateTime(2026, 8, 10);
     final day2 = DateTime(2026, 8, 11);
     // 同任务两条提醒 reminderId 差 1（旧公式在此场景跨实例碰撞的临界形态）
-    final a = NotificationIds.forReminder(7, 1, day1);
-    final b = NotificationIds.forReminder(7, 2, day1);
+    final a = NotificationIds.forReminder(1, day1);
+    final b = NotificationIds.forReminder(2, day1);
     expect(a, isNot(b), reason: '同实例不同提醒必须互异');
     expect(
-      NotificationIds.forReminder(7, 1, day2),
-      isNot(NotificationIds.forReminder(7, 2, day2)),
+      NotificationIds.forReminder(1, day2),
+      isNot(NotificationIds.forReminder(2, day2)),
       reason: '相邻实例日两条提醒组合必须互异',
     );
     expect(
-      NotificationIds.forReminder(7, 2, day1),
-      isNot(NotificationIds.forReminder(7, 1, day2)),
+      NotificationIds.forReminder(2, day1),
+      isNot(NotificationIds.forReminder(1, day2)),
       reason: '提醒 r=2 的 day1 与提醒 r=1 的 day2 不得跨实例碰撞（旧公式缺陷）',
     );
-    // 同实例、同任务 63 条提醒全部互异（段位上限内）
+    // 同实例、同任务 64 条提醒全部互异（旧段位上限内）
     final ids = {
-      for (var r = 0; r < 64; r++)
-        NotificationIds.forReminder(7, r, day1),
+      for (var r = 0; r < 64; r++) NotificationIds.forReminder(r, day1),
     };
     expect(ids.length, 64, reason: '同实例提醒 id 段位内必须全部唯一');
+  });
+
+  test('N-P1-4 提醒自增 ID 累积远超 64 仍无碰撞（修复回归）', () {
+    final day1 = DateTime(2026, 8, 10);
+    final day2 = DateTime(2026, 8, 11);
+    final day3 = DateTime(2026, 8, 12);
+    // 全局提醒记录自增累积形态：r.id 跨任务单调递增，64/100/10000 均为现实可达
+    for (final r in [64, 65, 100, 999, 10000]) {
+      // 与相邻 ID 的提醒跨实例不碰撞（旧公式 r.id=64 与 r.id=0 跨日同 ID）
+      expect(
+        NotificationIds.forReminder(r, day1),
+        isNot(NotificationIds.forReminder(0, day2)),
+        reason: 'reminderId=$r 的 day1 不得与 reminderId=0 的 day2 同 ID',
+      );
+      expect(
+        NotificationIds.forReminder(r, day1),
+        isNot(NotificationIds.forReminder(r - 64 < 0 ? 0 : r - 64, day2)),
+      );
+      // 同 reminderId 不同实例仍互异
+      expect(
+        NotificationIds.forReminder(r, day1),
+        isNot(NotificationIds.forReminder(r, day2)),
+      );
+      // 同实例不同 reminderId 仍互异
+      expect(
+        NotificationIds.forReminder(r, day3),
+        isNot(NotificationIds.forReminder(r + 1, day3)),
+      );
+    }
   });
 
   test('P0-7 测试通知 ID 不与第 10 个习惯提醒 ID 碰撞', () {

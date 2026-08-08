@@ -109,7 +109,7 @@ void main() {
     test('测试通知 ID 不与任务/习惯区段重叠', () {
       final testId = NotificationIds.forTest;
       final habitId = NotificationIds.forHabit(1);
-      final taskId = NotificationIds.forReminder(2000, 1, DateTime(2026, 8, 10));
+      final taskId = NotificationIds.forReminder(1, DateTime(2026, 8, 10));
       expect(testId, isNot(equals(habitId)));
       expect(testId, isNot(equals(taskId)));
       // P0-7：测试段在 int32 上限附近，高于习惯段（习惯段 = 2.1e9 - habitId）

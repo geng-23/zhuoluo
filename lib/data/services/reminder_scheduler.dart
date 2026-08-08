@@ -144,7 +144,7 @@ class ReminderScheduler {
       ).subtract(Duration(minutes: r.remindMinutesBefore));
       if (when.isBefore(AppClock.now())) continue; // 已过时间：不算失败
       // ID 含实例日期：同一 (task, reminder) 的不同实例通知互不覆盖
-      final id = NotificationIds.forReminder(task.id, r.id, day);
+      final id = NotificationIds.forReminder(r.id, day);
       final scheduled = await NotificationService.instance.schedule(
         id,
         title: task.title,
@@ -210,7 +210,7 @@ class ReminderScheduler {
         for (final r in reminders) {
           try {
             await NotificationService.instance.cancel(
-              NotificationIds.forReminder(taskId, r.id, d),
+              NotificationIds.forReminder(r.id, d),
             );
           } catch (e) {
             debugPrint('通知取消失败 taskId=$taskId reminderId=${r.id}: $e');
@@ -230,7 +230,7 @@ class ReminderScheduler {
       final dates = await _cancelDatesFor(t);
       for (final d in dates) {
         await NotificationService.instance.cancel(
-          NotificationIds.forReminder(taskId, reminderId, d),
+          NotificationIds.forReminder(reminderId, d),
         );
       }
     } catch (e) {

@@ -418,34 +418,41 @@ class NotificationService {
 /// 提醒 ID 含实例日期维度：同一 (task, reminder) 在不同实例上的通知互不覆盖，
 /// 否则重复任务 93 天内的各实例会因同 ID 互相替换（只剩最后一个）。
 ///
-/// P0-6：旧公式 taskId*1e6 + dayIndex*100 + reminderId 在两条提醒
-/// reminderId 相差 100 时跨实例碰撞（N*100+r1 == (N-1)*100+(r1+100)），
-/// reminderId≥100 时直接跨入次日槽位。新公式改为：
-///   taskId*200000（任务段）+ dayIndex*64（实例日槽）+ reminderId（提醒序号）
-/// 同任务提醒数 < 64 时，同任务跨实例、同实例多条提醒均互不冲突；
-/// taskId ≤ 10000 时任务段互不侵入，且最高值 ≈2.0015e9 远低于习惯段
-/// 2.1e9（P2-11 隔离带天然成立）。
+/// 历史公式（P0-5/P0-6）：taskId*200000 + dayIndex*64 + reminderId，按
+/// "任务内 0..63 槽位"设计，但调用方传的是 Reminders 表**全局自增主键**
+/// r.id（非任务内序号）——全局提醒记录累积 64 条后：
+/// - debug：assert 崩溃；
+/// - release：r.id=64 与次日 r.id=0 同 ID，日重复任务跨日互相覆盖漏提醒。
+///
+/// 现行公式（N-P1-4 修复）：
+///   reminderId*16384 + max(0, dayIndex)
+/// 依据：r.id 全局唯一 → 无需 taskId 因子（taskId 段位限制 10000 随之消除）；
+/// dayIndex 为实例日距 2024-01-01 天数，槽宽 16384 覆盖约 45 年（2068 年前
+/// 安全），负值钳 0 防历史数据（2024 前）侵入相邻槽；reminderId < 128000
+/// 时最高 ID ≈2.100e9 仍低于习惯段 2.1e9（隔离带成立），且不超 int32。
+/// 上限 12.8 万条提醒记录（含删除，自增不复用），现实使用不可达。
 class NotificationIds {
   static final DateTime _epoch = DateTime(2024, 1, 1);
 
-  /// 每任务最多同时存在的提醒条数（每实例槽位宽）。实际每任务 0-5 条。
-  static const int _reminderSlots = 64;
+  /// 实例日槽宽：须大于任意可能 dayIndex（约 45 年内的天数），
+  /// 保证同 reminderId 不同实例日不碰撞、相邻 reminderId 不跨日侵入。
+  static const int _daySlotWidth = 16384;
 
-  /// 任务段宽：dayIndex*64 最大贡献 200000 内（约 3125 天，2032 年前安全）
-  /// 即 taskId 段互不侵入；排期窗口实际仅 93 天，远期改期仍远小于该值。
-  static const int _taskSegmentWidth = 200000;
+  /// 提醒记录 ID（Reminders 表自增主键）上限：128000*16384 ≈ 2.097e9，
+  /// 低于习惯段起点 2.1e9（P2-11 隔离带）。
+  static const int _maxReminderId = 128000;
 
-  /// 提醒通知 ID：taskId*200000 + 实例日距 2024-01-01 天数*64 + reminderId
+  /// 提醒通知 ID：reminderId*16384 + 实例日距 2024-01-01 天数
   /// 实例日必须传入当天 00:00（与排期/取消使用同一天数基准）。
-  /// 约束：reminderId ∈ [0, 63]；taskId ≤ 10000（超出段位则可能跨段侵入）。
-  static int forReminder(int taskId, int reminderId, DateTime instanceDate) {
+  /// 约束：reminderId ∈ [0, 128000)（全局自增主键，删除不复用）。
+  static int forReminder(int reminderId, DateTime instanceDate) {
     assert(
-      reminderId < _reminderSlots,
-      '提醒 ID 段位溢出：reminderId=$reminderId ≥ $_reminderSlots，'
-      '同一任务提醒过多将导致通知 ID 碰撞',
+      reminderId >= 0 && reminderId < _maxReminderId,
+      '提醒 ID 段位溢出：reminderId=$reminderId ≥ $_maxReminderId，'
+      '提醒记录累积过多将导致通知 ID 侵入习惯段',
     );
     final dayIndex = instanceDate.difference(_epoch).inDays;
-    return taskId * _taskSegmentWidth + dayIndex * _reminderSlots + reminderId;
+    return reminderId * _daySlotWidth + (dayIndex < 0 ? 0 : dayIndex);
   }
 
   /// 习惯提醒 ID（独立区段，置于任务 ID 空间之上，互不干扰）

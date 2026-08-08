@@ -99,7 +99,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
             leading: const Icon(Icons.notifications_none),
             title: const Text('默认提醒提前量'),
             subtitle: Text(
-              _defaultRemindLabel,
+              '$_defaultRemindLabel（定时任务）',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
             ),
             trailing: const Icon(Icons.chevron_right),
@@ -109,7 +109,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
             leading: const Icon(Icons.schedule_outlined),
             title: const Text('全天任务默认提醒时刻'),
             subtitle: Text(
-              _allDayAtLabel,
+              '$_allDayAtLabel（全天任务自动提醒时刻）',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
             ),
             trailing: const Icon(Icons.chevron_right),

@@ -1,4 +1,4 @@
-import 'package:drift/native.dart';
+﻿import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
@@ -126,6 +126,87 @@ void main() {
       await settings.set(SettingsController.keyDefaultAllDayRemindAt, '');
       expect(await settings.getDefaultAllDayRemindAt(), 540,
           reason: '空值回落 09:00');
+    });
+  });
+
+  group('自动默认提醒（新建任务）', () {
+    test('设置提前量后新建定时任务自动带默认提醒', () async {
+      await db.ensureDefaultList();
+      final settings = SettingsController(db);
+      await settings.set(SettingsController.keyDefaultRemindMinutes, '30');
+
+      final container = makeContainer();
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final parsed = ChineseDateParser.instance.parse('明天3点开会');
+      final id = (await notifier.addTaskFromParsed('开会', parsed))!;
+      await settle(container);
+
+      final reminders = await db.getReminders(id);
+      expect(reminders, hasLength(1),
+          reason: '设置默认提醒提前量后新建任务自动带一条提醒');
+      expect(reminders.single.remindMinutesBefore, 30);
+      final task = (await db.getTask(id))!;
+      expect(task.hasReminder, isTrue);
+    });
+
+    test('全天任务自动带默认提醒时刻（可配置，无提前量）', () async {
+      await db.ensureDefaultList();
+      final settings = SettingsController(db);
+      await settings.set(SettingsController.keyDefaultRemindMinutes, '10');
+      await settings.set(SettingsController.keyDefaultAllDayRemindAt, '600');
+
+      final container = makeContainer();
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final parsed = ChineseDateParser.instance.parse('明天晨跑');
+      final id = (await notifier.addTaskFromParsed('晨跑', parsed))!;
+      await settle(container);
+
+      final reminders = await db.getReminders(id);
+      expect(reminders, hasLength(1));
+      expect(reminders.single.remindMinutesBefore, 0,
+          reason: '全天任务无"提前量"概念，remindMinutesBefore 恒为 0');
+      expect(reminders.single.remindAtMinutes ?? -1, 600,
+          reason: '全天任务自动提醒用偏好设置的全天提醒时刻');
+    });
+
+    test('未设置默认提醒时全天任务不自动添加', () async {
+      await db.ensureDefaultList();
+      // 未设置默认提醒提前量：即使全天时刻有默认值也不自动添加
+      final container = makeContainer();
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final parsed = ChineseDateParser.instance.parse('明天晨跑');
+      final id = (await notifier.addTaskFromParsed('晨跑', parsed))!;
+      await settle(container);
+
+      expect(await db.getReminders(id), isEmpty,
+          reason: '未开启默认提醒时全天任务不自动添加提醒');
+    });
+
+    test('未设置默认提醒时不自动添加', () async {
+      await db.ensureDefaultList();
+      final container = makeContainer();
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final parsed = ChineseDateParser.instance.parse('明天3点开会');
+      final id = (await notifier.addTaskFromParsed('开会', parsed))!;
+      await settle(container);
+
+      expect(await db.getReminders(id), isEmpty,
+          reason: '未设置默认提醒提前量时行为不变（不自动添加）');
+    });
+
+    test('纯标题任务（无计划时间）不自动添加提醒', () async {
+      await db.ensureDefaultList();
+      final settings = SettingsController(db);
+      await settings.set(SettingsController.keyDefaultRemindMinutes, '30');
+
+      final container = makeContainer();
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final parsed = ChineseDateParser.instance.parse('随便记一笔');
+      final id = (await notifier.addTaskFromParsed('随便记一笔', parsed))!;
+      await settle(container);
+
+      expect(await db.getReminders(id), isEmpty,
+          reason: '无计划时间的任务无法排提醒，不自动添加');
     });
   });
 

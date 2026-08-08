@@ -342,6 +342,34 @@ class TasksController extends StateNotifier<TasksState> {
     // 新任务排顶部：把现有同清单任务 sortOrder +1，新任务保持 0
     // P1-4.5：排除新任务自身（此前把新任务也 +1，导致排序可能不是置顶）
     await _shiftSortOrders(targetList, parentId, excludeId: id);
+    // 偏好设置组：设置了默认提醒提前量时，新建任务自动带默认提醒
+    // （仅有计划时间/重复规则的任务；纯标题任务与子任务不自动添加，
+    // 无计划时间时提醒无法排期）。
+    // 全天任务无"提前量"概念：自动添加的是"全天默认提醒时刻"（remindAt）。
+    if (ps != null || rrule.isNotEmpty) {
+      final settings = _ref.read(settingsProvider);
+      final defaultRemind = await settings.getDefaultRemindMinutes();
+      if (defaultRemind != null) {
+        if (isAllDay) {
+          final remindAt = await settings.getDefaultAllDayRemindAt();
+          await _db.insertReminder(
+            RemindersCompanion.insert(
+              taskId: id,
+              remindMinutesBefore: const Value(0),
+              remindAtMinutes: Value(remindAt),
+            ),
+          );
+        } else {
+          await _db.insertReminder(
+            RemindersCompanion.insert(
+              taskId: id,
+              remindMinutesBefore: Value(defaultRemind),
+            ),
+          );
+        }
+        await _db.updateTaskHasReminder(id, true);
+      }
+    }
     await _reloadTasks();
     final t = await _db.getTask(id);
     if (t != null && (t.planStart != null || t.rrule.isNotEmpty)) {

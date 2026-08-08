@@ -537,11 +537,13 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
   }
 
   String _reminderText(Reminder r) {
+    // 全天任务：提醒 = 当天某时刻（提前量概念已废弃，旧数据也忽略提前量显示）
+    if (_task!.isAllDay) {
+      final m = r.remindAtMinutes ?? 540; // 默认 09:00
+      return '${_repeatLabel()} '
+          '${DateUtilsEx.timeCn(DateTime(2024, 1, 1, m ~/ 60, m % 60))} 提醒';
+    }
     final m = r.remindMinutesBefore;
-    // P2：按任务重复频率显示提醒基准（每周/每月任务不再误导为"每天"）
-    final when = _task!.isAllDay
-        ? '${_repeatLabel()} ${DateUtilsEx.timeCn(DateTime(2024, 1, 1, (r.remindAtMinutes ?? 540) ~/ 60, (r.remindAtMinutes ?? 540) % 60))}'
-        : null;
     String ahead;
     if (m == 0) {
       ahead = '准时提醒';
@@ -555,7 +557,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       if (mm > 0) parts.add('$mm 分钟');
       ahead = '提前 ${parts.join(' ')}';
     }
-    return when == null ? ahead : '$when $ahead';
+    return ahead;
   }
 
   /// 重复任务的频率标签（"每天"/"每周"/"每月"等）
@@ -914,6 +916,12 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
   Future<void> _addReminder() async {
     // A13：打开选项面板前收起键盘，避免选完回来仍是编辑态
     FocusScope.of(context).unfocus();
+    // 偏好设置组：全天任务提醒 = 当天某时刻（"提前 N 分钟/小时/天"对全天
+    // 任务无意义），走时刻面板；定时任务走提前量面板
+    if (_task!.isAllDay) {
+      await _addAllDayReminder();
+      return;
+    }
     // 偏好设置组：命中默认提醒提前量时标记"（默认）"并高亮
     final defaultMin = await ref.read(settingsProvider).getDefaultRemindMinutes();
     final choice = await _showSheet<int>(
@@ -967,20 +975,13 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       ),
     );
     if (choice != null && choice >= 0) {
-      // 全天任务：提醒时刻（默认 09:00）；取消选择则放弃添加
-      int? remindAt;
-      if (_task!.isAllDay) {
-        remindAt = await _pickRemindAt(null);
-        if (remindAt == null) return;
-      }
       // 插入前检查：非重复任务触发时间已过则阻止；重复任务允许（明天起生效）
-      if (!_checkReminderNotPast(choice, remindAt: remindAt)) return;
+      if (!_checkReminderNotPast(choice)) return;
       final db = ref.read(dbProvider);
       await db.insertReminder(
         RemindersCompanion.insert(
           taskId: _task!.id,
           remindMinutesBefore: Value(choice),
-          remindAtMinutes: Value(remindAt),
         ),
       );
       await db.updateTaskHasReminder(_task!.id, true);
@@ -990,6 +991,102 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       );
       _load();
     }
+  }
+
+  /// 全天任务提醒：当天时刻面板（提前量无意义）。
+  /// 命中全天默认提醒时刻的档位标记"（默认）"并高亮；
+  /// 选中后插入 remindMinutesBefore=0 + remindAtMinutes=时刻。
+  Future<void> _addAllDayReminder() async {
+    final defaultAt = await ref
+        .read(settingsProvider)
+        .getDefaultAllDayRemindAt();
+    final presets = [
+      (420, '早上 7:00'),
+      (480, '早上 8:00'),
+      (540, '早上 9:00'),
+      (720, '中午 12:00'),
+      (1080, '下午 6:00'),
+      (1200, '晚上 8:00'),
+      (1320, '晚上 10:00'),
+      (-1, '自定义…'),
+    ];
+    final choice = await _showSheet<int>(
+      isScrollControlled: true,
+      builder: (c) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final e in presets)
+                ListTile(
+                  title: Text(e.$2),
+                  titleTextStyle: e.$1 == defaultAt
+                      ? TextStyle(
+                          color: Theme.of(c).colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        )
+                      : null,
+                  trailing: e.$1 == defaultAt
+                      ? Text(
+                          '默认',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(c).colorScheme.primary,
+                          ),
+                        )
+                      : null,
+                  onTap: () {
+                    if (e.$1 == -1) {
+                      Navigator.pop(c);
+                      _addAllDayCustomReminder();
+                    } else {
+                      Navigator.pop(c, e.$1);
+                    }
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (choice == null) return; // 取消
+    // 插入前检查：重复任务今天已过允许（明天起生效）；非重复已过阻止
+    if (!_checkReminderNotPast(0, remindAt: choice)) return;
+    final db = ref.read(dbProvider);
+    await db.insertReminder(
+      RemindersCompanion.insert(
+        taskId: _task!.id,
+        remindMinutesBefore: const Value(0),
+        remindAtMinutes: Value(choice),
+      ),
+    );
+    await db.updateTaskHasReminder(_task!.id, true);
+    await _notifier.updateTaskFields(
+      _task!.id,
+      const TasksCompanion(hasReminder: Value(true)),
+    );
+    _load();
+  }
+
+  /// 全天任务自定义提醒时刻（TimePicker 选择，插入后含重排）
+  Future<void> _addAllDayCustomReminder() async {
+    final picked = await _pickRemindAt(null);
+    if (picked == null) return;
+    if (!_checkReminderNotPast(0, remindAt: picked)) return;
+    final db = ref.read(dbProvider);
+    await db.insertReminder(
+      RemindersCompanion.insert(
+        taskId: _task!.id,
+        remindMinutesBefore: const Value(0),
+        remindAtMinutes: Value(picked),
+      ),
+    );
+    await db.updateTaskHasReminder(_task!.id, true);
+    await _notifier.updateTaskFields(
+      _task!.id,
+      const TasksCompanion(hasReminder: Value(true)),
+    );
+    _load();
   }
 
   /// 检查提醒触发时间是否已过。

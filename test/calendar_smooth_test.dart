@@ -452,6 +452,170 @@ void main() {
       expect(find.text('查看详情'), findsWidgets);
     });
   });
+
+  group('全局指针事件驱动 + 边缘 25% 切 tab + 视图铺满', () {
+    Future<ProviderContainer> pumpCalendarWithTask(
+      WidgetTester tester,
+      String title,
+    ) async {
+      await db.ensureDefaultList();
+      final list = await db.getDefaultList();
+      final start = DateTime(now.year, now.month, now.day, 10, 0);
+      await db.insertTask(TasksCompanion.insert(
+        listId: list.id,
+        title: title,
+        planStart: Value(start),
+        planEnd: Value(start.add(const Duration(hours: 1))),
+        createdAt: now,
+      ));
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(home: const CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return container;
+    }
+
+    testWidgets('25% 区滑动切 tab（左缘 x=150 右滑 / 右缘 x=650 左滑）', (tester) async {
+      await db.ensureDefaultList();
+      var left = 0;
+      var right = 0;
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: CalendarPage(
+              onNavigateLeft: () => left++,
+              onNavigateRight: () => right++,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 左 25% 区内右滑（x=150 < 200）
+      final g1 = await tester.startGesture(const Offset(150, 400));
+      await g1.moveBy(const Offset(40, 0));
+      await tester.pump();
+      await g1.up();
+      await tester.pumpAndSettle();
+      expect(left, 1, reason: '左 25% 区右滑应切上一个 tab');
+
+      // 右 25% 区内左滑（x=650 > 600）
+      final g2 = await tester.startGesture(const Offset(650, 400));
+      await g2.moveBy(const Offset(-40, 0));
+      await tester.pump();
+      await g2.up();
+      await tester.pumpAndSettle();
+      expect(right, 1, reason: '右 25% 区左滑应切下一个 tab');
+    });
+
+    testWidgets('长按拖动任务不误触切 tab', (tester) async {
+      await pumpCalendarWithTask(tester, '长按任务');
+      var left = 0;
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: CalendarPage(onNavigateLeft: () => left++),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final block = find.text('长按任务');
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      // 真实等待 400ms（超过 350ms 长按窗口——拖动任务路径）
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 400)),
+      );
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await gesture.moveBy(const Offset(100, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(left, 0, reason: '长按拖动任务不应触发切 tab');
+    });
+
+    testWidgets('视图铺满：周日列右缘贴屏幕右缘', (tester) async {
+      await db.ensureDefaultList();
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // 视图铺满：PageView 右缘应贴屏幕右缘（此前右缘 40px 收窄会留空白）
+      final rect = tester.getRect(find.byType(PageView).last);
+      expect(rect.right, greaterThan(790),
+          reason: '视图应铺满（右缘=屏宽，实际 ${rect.right}）');
+    });
+
+    testWidgets('右缘连续翻页后拖回左缘：反向翻页（全局 route 驱动）', (tester) async {
+      final container = await pumpCalendarWithTask(tester, '反向任务');
+      final before = container.read(calendarControllerProvider).selectedDay;
+      final block = find.text('反向任务');
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      // 右缘首翻
+      await gesture.moveBy(const Offset(200, 0));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      final after1 = container.read(calendarControllerProvider).selectedDay;
+      expect(after1.isAfter(before), isTrue, reason: '右缘应翻到下一周');
+
+      // 不松手拖回左缘（Draggable 可能已跨页被 evict——全局 route 接管）
+      await gesture.moveTo(const Offset(10, 400));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      final after2 = container.read(calendarControllerProvider).selectedDay;
+      expect(after2.isBefore(after1), isTrue,
+          reason: '拖回左缘应反向翻页（全局指针事件驱动）');
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('连续翻 6 页后边缘松手：任务改期成功（落点兜底不回退）', (tester) async {
+      await pumpCalendarWithTask(tester, '兜底任务');
+      final taskId = (await db.allTasksForBackup())
+          .firstWhere((t) => t.title == '兜底任务')
+          .id;
+      final original = (await db.getTask(taskId))!.planStart;
+      final block = find.text('兜底任务');
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await gesture.moveBy(const Offset(200, 0)); // 右缘
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350)); // 首翻
+      await tester.pumpAndSettle();
+      // 连续续翻 6 次（远超 PageView cacheExtent——Draggable 被 evict）
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 850));
+        await tester.pumpAndSettle();
+      }
+      // 在边缘松手（无 DragTarget 命中——落点兜底执行改期）
+      await gesture.up();
+      await tester.pumpAndSettle();
+      final updated = (await db.getTask(taskId))!;
+      expect(updated.planStart, isNot(original),
+          reason: '边缘松手应改期成功（落点兜底，任务不回退）');
+    });
+  });
 }
 
 

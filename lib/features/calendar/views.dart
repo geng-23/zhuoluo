@@ -1,5 +1,6 @@
 ﻿import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
@@ -93,6 +94,20 @@ class _WeekViewState extends ConsumerState<WeekView> {
       ValueNotifier<_DragGhostInfo?>(null);
   /// 共享边缘翻页控制器（连续翻周链跨页保持）
   final _EdgeTurnController _edgeTurnCtrl = _EdgeTurnController();
+  /// 正常落点已处理标志（onAcceptWithDetails 设置——全局 route 的 up
+  /// 兜底据此跳过，避免重复改期）
+  final ValueNotifier<bool> dragDropped = ValueNotifier<bool>(false);
+
+  // ---------- 全局指针事件驱动（跨页拖动：Draggable 被 evict 后仍可靠） ----------
+  /// 拖动中注册到 pointerRouter 的指针（up/取消时移除）
+  int? _dragPointer;
+  /// 拖动任务 id 副本（onDraggableCanceled 会清共享状态——落点兜底用）
+  int? _dragTaskId;
+  /// 拖动任务信息副本（同原因，落点兜底用）
+  _DragGhostInfo? _dragInfo;
+  /// 落点 y 换算基准：当前页时间轴主体顶部全局 y（各页 post-frame
+  /// 上报 + 滚动修正，当前可见页最后写入）
+  final ValueNotifier<double> dragAxisTopY = ValueNotifier<double>(0);
 
   /// 共享垂直滚动位置（跨周翻页时新周继承当前滚动位置，避免跳回顶部）
   /// 优先使用外部传入的共享 notifier（周↔日切换连续）
@@ -164,6 +179,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
 
   @override
   void dispose() {
+    _unregisterDragRoute();
     _controller.dispose();
     _dragDay.dispose();
     _edgeState.dispose();
@@ -171,6 +187,8 @@ class _WeekViewState extends ConsumerState<WeekView> {
     dragTaskId.dispose();
     dragActiveDay.dispose();
     dragGhostInfo.dispose();
+    dragDropped.dispose();
+    dragAxisTopY.dispose();
     _edgeTurnCtrl.timer?.cancel();
     // 仅释放自建的滚动 notifier（外部传入的由持有者管理）
     _ownScroll?.dispose();
@@ -200,6 +218,180 @@ class _WeekViewState extends ConsumerState<WeekView> {
     dragActiveDay.value = dx > 0
         ? targetMonday.add(const Duration(days: 6))
         : targetMonday;
+  }
+
+  // ---------- 全局指针事件驱动（跨页拖动） ----------
+
+  /// 拖动开始：注册 pointerRouter route（Draggable 跨页被 evict/dispose 后
+  /// onDragUpdate 静默失效——本 route 独立于 Draggable State，全程可靠）
+  void _registerDragRoute(int taskId, int pointer) {
+    _unregisterDragRoute();
+    _dragPointer = pointer;
+    _dragTaskId = taskId;
+    _dragInfo = dragGhostInfo.value;
+    GestureBinding.instance.pointerRouter.addRoute(pointer, _onDragPointerEvent);
+  }
+
+  void _unregisterDragRoute() {
+    final p = _dragPointer;
+    if (p != null) {
+      GestureBinding.instance.pointerRouter.removeRoute(p, _onDragPointerEvent);
+      _dragPointer = null;
+    }
+  }
+
+
+  void _onDragPointerEvent(PointerEvent e) {
+    if (e is PointerMoveEvent) {
+      // 共享拖拽位置（虚影/胶囊跟随）+ 边缘翻页检测（反向/连续均可靠）
+      dragGlobalPos.value = e.position;
+      _maybeEdgeTurn(e.position.dx);
+    } else if (e is PointerUpEvent || e is PointerCancelEvent) {
+      _unregisterDragRoute();
+      if (e is PointerUpEvent) {
+        _handleDragDrop(e.position);
+      } else {
+        _clearDragSharedState();
+      }
+    }
+  }
+
+  /// 统一清理共享拖拽状态（松手/取消：虚影/胶囊 + 连续翻页链）
+  void _clearDragSharedState() {
+    dragTaskId.value = null;
+    dragGlobalPos.value = null;
+    dragActiveDay.value = null;
+    dragGhostInfo.value = null;
+    dragDropped.value = false;
+    _dragTaskId = null;
+    _dragInfo = null;
+    _edgeTurnCtrl.timer?.cancel();
+    _edgeTurnCtrl.timer = null;
+    _edgeTurnCtrl.dir = 0;
+  }
+
+  /// 边缘翻周/日：进入边缘区停留 300ms 触发首次翻页；
+  /// 翻页后若指针仍停边缘 → 每 800ms 自动续翻；离开边缘区即停止。
+  /// （与 _DayColumn 内同名方法逻辑一致，共享 edgeTurnCtrl——本层为
+  /// 全局 route 驱动，列版为 Draggable onDragUpdate 驱动，双源幂等）
+  void _maybeEdgeTurn(double globalX) {
+    _edgeTurnCtrl.lastGlobalX = globalX;
+    final w = MediaQuery.sizeOf(context).width;
+    if (globalX > w * 0.94) {
+      _armEdgeTimer(1, w);
+    } else if (globalX < w * 0.06) {
+      _armEdgeTimer(-1, w);
+    } else {
+      _edgeTurnCtrl.timer?.cancel();
+      _edgeTurnCtrl.timer = null;
+      _edgeTurnCtrl.dir = 0;
+    }
+  }
+
+  void _armEdgeTimer(int dir, double w) {
+    if (_edgeTurnCtrl.timer != null && _edgeTurnCtrl.dir == dir) return;
+    _edgeTurnCtrl.timer?.cancel();
+    _edgeTurnCtrl.dir = dir;
+    _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 300), () {
+      _edgeTurnCtrl.timer = null;
+      _edgeTurn(dir.toDouble());
+      _armContinuation(dir, w);
+    });
+  }
+
+  void _armContinuation(int dir, double w) {
+    if (_edgeTurnCtrl.lastGlobalX > w * 0.94 ||
+        _edgeTurnCtrl.lastGlobalX < w * 0.06) {
+      _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 800), () {
+        _edgeTurnCtrl.timer = null;
+        _edgeTurn(dir.toDouble());
+        _armContinuation(dir, w);
+      });
+    }
+  }
+
+  /// 落点兜底：Draggable 被 evict 后（正常 onAcceptWithDetails 未触发），
+  /// 松手时按 route 上下文副本（taskId/时长）+ 指针位置精确换算落点并
+  /// 执行改期——任务不再回退。
+  /// 不依赖共享 dragActiveDay/dragGhostInfo（onDraggableCanceled 会清它们）
+  Future<void> _handleDragDrop(Offset pos) async {
+    if (dragDropped.value) {
+      // 正常路径已处理
+      dragDropped.value = false;
+      _clearDragSharedState();
+      return;
+    }
+    final taskId = _dragTaskId;
+    final info = _dragInfo;
+    if (taskId == null || info == null) {
+      _clearDragSharedState();
+      return;
+    }
+    // 落点日期：指针 x → 列索引（当前周基准 _dragDay 随翻页更新，
+    // 不被 onDraggableCanceled 清理）——周视图 7 列
+    final colWidth = (MediaQuery.sizeOf(context).width - 44) / 7;
+    final col = ((pos.dx - 44) / colWidth).floor().clamp(0, 6);
+    final day = _dragDay.value.add(Duration(days: col));
+    // 时间轴主体顶部全局 y（各页 post-frame 上报，当前页最后写入）
+    final localDy = pos.dy - dragAxisTopY.value;
+    final startHour = effectiveStartHourFor(
+      byDay: widget.byDay,
+      days: [day],
+    );
+    final minutes = (startHour * 60 + localDy / _pixelPerHour * 60)
+        .roundToDouble()
+        .clamp(startHour * 60.0, _endHour * 60.0);
+    final snapped = ((minutes / 10).round() * 10).clamp(
+      startHour * 60,
+      _endHour * 60,
+    );
+    final target = DateTime(
+      day.year,
+      day.month,
+      day.day,
+      snapped ~/ 60,
+      snapped % 60,
+    );
+    final start = DateUtilsEx.clampStartWithinDay(
+      target,
+      Duration(minutes: info.durationMinutes),
+    );
+    _clearDragSharedState();
+    // 系列任务需确认（与 onAcceptWithDetails 行为一致）
+    final db = ref.read(dbProvider);
+    final task = await db.getTask(taskId);
+    if (task == null) return;
+    final notifier = ref.read(calendarControllerProvider.notifier);
+    if (task.rrule.isNotEmpty) {
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('更改整个系列？'),
+          content: Text(
+            '「${task.title}」是重复任务。\n'
+            '将把整个系列改为从 ${DateUtilsEx.timeCn(start)} 开始'
+            '（时长保持不变），旧日期上的完成记录将被清理。\n\n'
+            '只想改这一天，请用「跳过本次 / 改期」菜单。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('更改整个系列'),
+            ),
+          ],
+        ),
+      );
+      if (ok == true) {
+        await notifier.moveTaskToDateTimeSeries(taskId, start);
+      }
+    } else {
+      await notifier.moveTaskToDateTime(taskId, start);
+    }
   }
 
   @override
@@ -246,7 +438,11 @@ class _WeekViewState extends ConsumerState<WeekView> {
             dragTaskId: dragTaskId,
             dragActiveDay: dragActiveDay,
             dragGhostInfo: dragGhostInfo,
+            dragDropped: dragDropped,
+            dragAxisTopY: dragAxisTopY,
             edgeTurnCtrl: _edgeTurnCtrl,
+            onDragStartTracking: (taskId, pointer) =>
+                _registerDragRoute(taskId, pointer),
           ),
         );
       },
@@ -294,6 +490,10 @@ class _DayViewState extends ConsumerState<DayView> {
       ValueNotifier<_DragGhostInfo?>(null);
   /// 共享边缘翻页控制器（连续翻日链跨页保持）
   final _EdgeTurnController _edgeTurnCtrl = _EdgeTurnController();
+  /// 正常落点已处理标志（同 WeekView）
+  final ValueNotifier<bool> dragDropped = ValueNotifier<bool>(false);
+  /// 落点 y 换算基准：当前页时间轴主体顶部全局 y（各页 post-frame 上报）
+  final ValueNotifier<double> dragAxisTopY = ValueNotifier<double>(0);
 
   /// 共享垂直滚动位置（跨日翻页时新日继承当前滚动位置）
   /// 优先使用外部传入的共享 notifier（周↔日切换连续）
@@ -329,6 +529,7 @@ class _DayViewState extends ConsumerState<DayView> {
 
   @override
   void dispose() {
+    _unregisterDragRoute();
     _controller.dispose();
     _dragDay.dispose();
     _edgeState.dispose();
@@ -336,6 +537,8 @@ class _DayViewState extends ConsumerState<DayView> {
     dragTaskId.dispose();
     dragActiveDay.dispose();
     dragGhostInfo.dispose();
+    dragDropped.dispose();
+    dragAxisTopY.dispose();
     _edgeTurnCtrl.timer?.cancel();
     // 仅释放自建的滚动 notifier（外部传入的由持有者管理）
     _ownScroll?.dispose();
@@ -360,6 +563,171 @@ class _DayViewState extends ConsumerState<DayView> {
       1,
       1,
     ).add(Duration(days: page + (dx > 0 ? 1 : -1)));
+    // 虚影跟随到新页（日视图单列即目标日）
+    dragActiveDay.value = _dragDay.value;
+  }
+
+  // ---------- 全局指针事件驱动（跨页拖动，同 WeekView） ----------
+  int? _dragPointer;
+  /// 拖动任务 id 副本（onDraggableCanceled 会清共享状态——落点兜底用）
+  int? _dragTaskId;
+  /// 拖动任务信息副本（同原因，落点兜底用）
+  _DragGhostInfo? _dragInfo;
+
+  void _registerDragRoute(int taskId, int pointer) {
+    _unregisterDragRoute();
+    _dragPointer = pointer;
+    _dragTaskId = taskId;
+    _dragInfo = dragGhostInfo.value;
+    GestureBinding.instance.pointerRouter.addRoute(pointer, _onDragPointerEvent);
+  }
+
+  void _unregisterDragRoute() {
+    final p = _dragPointer;
+    if (p != null) {
+      GestureBinding.instance.pointerRouter.removeRoute(p, _onDragPointerEvent);
+      _dragPointer = null;
+    }
+  }
+
+
+  void _onDragPointerEvent(PointerEvent e) {
+    if (e is PointerMoveEvent) {
+      dragGlobalPos.value = e.position;
+      _maybeEdgeTurn(e.position.dx);
+    } else if (e is PointerUpEvent || e is PointerCancelEvent) {
+      _unregisterDragRoute();
+      if (e is PointerUpEvent) {
+        _handleDragDrop(e.position);
+      } else {
+        _clearDragSharedState();
+      }
+    }
+  }
+
+  void _clearDragSharedState() {
+    dragTaskId.value = null;
+    dragGlobalPos.value = null;
+    dragActiveDay.value = null;
+    dragGhostInfo.value = null;
+    dragDropped.value = false;
+    _dragTaskId = null;
+    _dragInfo = null;
+    _edgeTurnCtrl.timer?.cancel();
+    _edgeTurnCtrl.timer = null;
+    _edgeTurnCtrl.dir = 0;
+  }
+
+  void _maybeEdgeTurn(double globalX) {
+    _edgeTurnCtrl.lastGlobalX = globalX;
+    final w = MediaQuery.sizeOf(context).width;
+    if (globalX > w * 0.94) {
+      _armEdgeTimer(1, w);
+    } else if (globalX < w * 0.06) {
+      _armEdgeTimer(-1, w);
+    } else {
+      _edgeTurnCtrl.timer?.cancel();
+      _edgeTurnCtrl.timer = null;
+      _edgeTurnCtrl.dir = 0;
+    }
+  }
+
+  void _armEdgeTimer(int dir, double w) {
+    if (_edgeTurnCtrl.timer != null && _edgeTurnCtrl.dir == dir) return;
+    _edgeTurnCtrl.timer?.cancel();
+    _edgeTurnCtrl.dir = dir;
+    _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 300), () {
+      _edgeTurnCtrl.timer = null;
+      _edgeTurn(dir.toDouble());
+      _armContinuation(dir, w);
+    });
+  }
+
+  void _armContinuation(int dir, double w) {
+    if (_edgeTurnCtrl.lastGlobalX > w * 0.94 ||
+        _edgeTurnCtrl.lastGlobalX < w * 0.06) {
+      _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 800), () {
+        _edgeTurnCtrl.timer = null;
+        _edgeTurn(dir.toDouble());
+        _armContinuation(dir, w);
+      });
+    }
+  }
+
+  /// 落点兜底（同 WeekView）：Draggable 被 evict 后松手按 route 上下文
+  /// 副本 + 指针位置落点（日视图单列即 _dragDay）
+  Future<void> _handleDragDrop(Offset pos) async {
+    if (dragDropped.value) {
+      dragDropped.value = false;
+      _clearDragSharedState();
+      return;
+    }
+    final taskId = _dragTaskId;
+    final info = _dragInfo;
+    if (taskId == null || info == null) {
+      _clearDragSharedState();
+      return;
+    }
+    final day = _dragDay.value;
+    // 时间轴主体顶部全局 y（各页 post-frame 上报，当前页最后写入）
+    final localDy = pos.dy - dragAxisTopY.value;
+    final startHour = effectiveStartHourFor(
+      byDay: widget.byDay,
+      days: [day],
+    );
+    final minutes = (startHour * 60 + localDy / _pixelPerHour * 60)
+        .roundToDouble()
+        .clamp(startHour * 60.0, _endHour * 60.0);
+    final snapped = ((minutes / 10).round() * 10).clamp(
+      startHour * 60,
+      _endHour * 60,
+    );
+    final target = DateTime(
+      day.year,
+      day.month,
+      day.day,
+      snapped ~/ 60,
+      snapped % 60,
+    );
+    final start = DateUtilsEx.clampStartWithinDay(
+      target,
+      Duration(minutes: info.durationMinutes),
+    );
+    _clearDragSharedState();
+    final db = ref.read(dbProvider);
+    final task = await db.getTask(taskId);
+    if (task == null) return;
+    final notifier = ref.read(calendarControllerProvider.notifier);
+    if (task.rrule.isNotEmpty) {
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('更改整个系列？'),
+          content: Text(
+            '「${task.title}」是重复任务。\n'
+            '将把整个系列改为从 ${DateUtilsEx.timeCn(start)} 开始'
+            '（时长保持不变），旧日期上的完成记录将被清理。\n\n'
+            '只想改这一天，请用「跳过本次 / 改期」菜单。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('更改整个系列'),
+            ),
+          ],
+        ),
+      );
+      if (ok == true) {
+        await notifier.moveTaskToDateTimeSeries(taskId, start);
+      }
+    } else {
+      await notifier.moveTaskToDateTime(taskId, start);
+    }
   }
 
   @override
@@ -391,7 +759,11 @@ class _DayViewState extends ConsumerState<DayView> {
             dragTaskId: dragTaskId,
             dragActiveDay: dragActiveDay,
             dragGhostInfo: dragGhostInfo,
+            dragDropped: dragDropped,
+            dragAxisTopY: dragAxisTopY,
             edgeTurnCtrl: _edgeTurnCtrl,
+            onDragStartTracking: (taskId, pointer) =>
+                _registerDragRoute(taskId, pointer),
           ),
         );
       },
@@ -440,7 +812,10 @@ class _TimeAxisView extends ConsumerStatefulWidget {
     this.dragTaskId,
     this.dragActiveDay,
     this.dragGhostInfo,
+    this.dragDropped,
+    this.dragAxisTopY,
     this.edgeTurnCtrl,
+    this.onDragStartTracking,
   });
 
   final List<CalendarItem> items;
@@ -468,9 +843,15 @@ class _TimeAxisView extends ConsumerStatefulWidget {
   final ValueNotifier<int?>? dragTaskId;
   final ValueNotifier<DateTime?>? dragActiveDay;
   final ValueNotifier<_DragGhostInfo?>? dragGhostInfo;
+  final ValueNotifier<bool>? dragDropped;
+  /// 本页时间轴主体顶部全局 y 上报（落点兜底换算基准）
+  final ValueNotifier<double>? dragAxisTopY;
 
   /// 共享边缘翻页控制器（连续翻周链跨页保持）
   final _EdgeTurnController? edgeTurnCtrl;
+
+  /// 拖动开始上报指针（WeekView/DayView 注册全局 route 用）
+  final void Function(int taskId, int pointer)? onDragStartTracking;
 
   @override
   ConsumerState<_TimeAxisView> createState() => _TimeAxisViewState();
@@ -479,6 +860,8 @@ class _TimeAxisView extends ConsumerStatefulWidget {
 class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
   final _scrollController = ScrollController();
   final _timeBarController = ScrollController();
+  /// 本页时间轴主体 Stack 的 key（落点基准上报用，每页独立）
+  final GlobalKey _axisKey = GlobalKey();
 
   @override
   void initState() {
@@ -496,9 +879,23 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
           share.value.clamp(0.0, _scrollController.position.maxScrollExtent),
         );
       }
+      // 上报本页时间轴主体顶部全局 y（落点兜底换算基准；当前页最后写入）
+      _reportAxisTopY();
     });
     // A7：移除每分钟整页 setState 的时钟 Timer——红线改由独立组件
     // _NowLine 自驱动，不再触发整个时间轴重建
+  }
+
+  /// 本页时间轴主体顶部全局 y（post-frame 布局完成后；滚动时由 _onScroll
+  /// 按 offset 修正）。落点兜底（WeekView._handleDragDrop）换算用
+  void _reportAxisTopY() {
+    final top = widget.dragAxisTopY;
+    if (top == null) return;
+    final box = _axisKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    _baseAxisTopY = box.localToGlobal(Offset.zero).dy;
+    _baseAxisOffset = _scrollController.offset;
+    top.value = _baseAxisTopY!;
   }
 
   void _onScroll() {
@@ -508,7 +905,15 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
     if (share != null) {
       share.value = _scrollController.offset;
     }
+    // 落点基准随滚动修正（时间轴主体在 ListView 内随内容移动）
+    final top = widget.dragAxisTopY;
+    if (top != null && _baseAxisTopY != null) {
+      top.value = _baseAxisTopY! - (_scrollController.offset - _baseAxisOffset);
+    }
   }
+
+  double? _baseAxisTopY;
+  double _baseAxisOffset = 0;
 
   void _syncTimeBar() {
     if (!_timeBarController.hasClients) return;
@@ -700,6 +1105,7 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
                         children: [
                           // 时间轴主体（18 行，6:00~23:00 线）
                           SizedBox(
+                            key: _axisKey,
                             height: totalHours * _pixelPerHour,
                             child: Stack(
                               children: [
@@ -739,7 +1145,10 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
                                           dragTaskId: widget.dragTaskId,
                                           dragActiveDay: widget.dragActiveDay,
                                           dragGhostInfo: widget.dragGhostInfo,
+                                          dragDropped: widget.dragDropped,
                                           edgeTurnCtrl: widget.edgeTurnCtrl,
+                                          onDragStartTracking:
+                                              widget.onDragStartTracking,
                                           // A13：列在视口内的左偏移（含分隔线）
                                           viewportLeft:
                                               i *
@@ -1036,7 +1445,9 @@ class _DayColumn extends ConsumerStatefulWidget {
     this.dragTaskId,
     this.dragActiveDay,
     this.dragGhostInfo,
+    this.dragDropped,
     this.edgeTurnCtrl,
+    this.onDragStartTracking,
   });
 
   final DateTime day;
@@ -1074,9 +1485,15 @@ class _DayColumn extends ConsumerStatefulWidget {
   final ValueNotifier<int?>? dragTaskId;
   final ValueNotifier<DateTime?>? dragActiveDay;
   final ValueNotifier<_DragGhostInfo?>? dragGhostInfo;
+  /// 正常落点已处理标志（onAcceptWithDetails 设置——全局 route 的 up
+  /// 兜底据此跳过，避免重复改期）
+  final ValueNotifier<bool>? dragDropped;
 
   /// 共享边缘翻页控制器（连续翻周链跨页保持，可统一取消）
   final _EdgeTurnController? edgeTurnCtrl;
+
+  /// 拖动开始上报指针（WeekView 注册全局 pointerRouter route 用）
+  final void Function(int taskId, int pointer)? onDragStartTracking;
 
   @override
   ConsumerState<_DayColumn> createState() => _DayColumnState();
@@ -1092,6 +1509,9 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
 
   /// 列容器 GlobalKey（虚影/胶囊全局→局部坐标换算基准）
   final GlobalKey _columnKey = GlobalKey();
+
+  /// 按下本列任务块的指针（拖动开始时上报 WeekView 注册全局 route）
+  int _dragPointer = 0;
 
   // E7：拖动选时状态
   bool _dragSelecting = false;
@@ -1314,6 +1734,8 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
         widget.edgeState?.value = 0; // 重置边缘滞回
       },
       onAcceptWithDetails: (details) async {
+        // 正常落点已处理：全局 route 的 up 兜底据此跳过（避免重复改期）
+        widget.dragDropped?.value = true;
         // 落点局部坐标 → 吸附 10 分钟 → 改期（含时分，支持跨天）。
         // 注意：details.offset 是相对拖拽锚点的偏移（SDK 内部
         // _lastOffset = 指针 − dragStartPoint），不能当全局坐标用；
@@ -1532,6 +1954,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                           onDragPosition: _handleDragGlobal,
                           onDragEnd: _handleDragEnd,
                           onDragCanceled: _clearDragState,
+                          onPointerDown: (p) => _dragPointer = p,
                           onDragStartedTask: (id) {
                             widget.dragTaskId?.value = id;
                             // 上报任务显示信息：跨周后视图 items 不含旧周
@@ -1547,6 +1970,9 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                                 break;
                               }
                             }
+                            // 上报指针：WeekView 注册全局 pointerRouter route
+                            //（跨页事件驱动，Draggable 被 evict 后仍可靠）
+                            widget.onDragStartTracking?.call(id, _dragPointer);
                           },
                         ),
                       ),
@@ -1840,8 +2266,8 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     const capH = 28.0;
     const capW = 78.0;
     final maxY = (_endHour - widget.startHour) * _pixelPerHour;
-    var top = anchorY - capH - 12;
-    if (top < 4) top = anchorY + 12; // 顶部空间不足 → 贴锚点下方
+    var top = anchorY - capH - 28;
+    if (top < 4) top = anchorY + 28; // 顶部空间不足 → 贴锚点下方（留足间距防手指遮挡）
     top = top.clamp(4.0, maxY - capH - 4);
     // A13：水平按整个时间轴视口宽 clamp（周视图单列仅约 50px，
     // 按列 clamp 会因 min>max 抛 ArgumentError 使整列崩溃；
@@ -2168,6 +2594,7 @@ class _TaskBlock extends ConsumerWidget {
     this.onDragEnd,
     this.onDragCanceled,
     this.onDragStartedTask,
+    this.onPointerDown,
   });
 
   final CalendarItem item;
@@ -2183,6 +2610,8 @@ class _TaskBlock extends ConsumerWidget {
   final VoidCallback? onDragCanceled;
   /// 拖动开始回调（上报任务 id——共享拖拽状态据此显示虚影/胶囊）
   final ValueChanged<int>? onDragStartedTask;
+  /// 按下指针上报（全局 pointerRouter 事件驱动用）
+  final ValueChanged<int>? onPointerDown;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -2197,32 +2626,37 @@ class _TaskBlock extends ConsumerWidget {
     final block = _blockBody(context, color, done, notifier, ref);
     // 全天任务：禁止拖入时间轴（保持全天语义），仅保留点击操作
     if (allDay) return block;
-    return LongPressDraggable<int>(
-      data: item.task.id,
-      onDragStarted: () {
-        Haptics.select();
-        // 上报任务 id：共享拖拽状态据此显示虚影/胶囊
-        onDragStartedTask?.call(item.task.id);
-      },
-      // 边缘翻周/日：Draggable 全局坐标驱动（此前依赖 DragTarget.onMove，
-      // 指针离开列范围即失效）
-      onDragUpdate: (d) => onDragPosition?.call(d.globalPosition),
-      onDragEnd: (_) => onDragEnd?.call(),
-      // 兜底：拖动中任务所在列被 PageView evict（跨多周后超 cacheExtent）
-      // 导致 Draggable State dispose（mounted=false）时 onDragEnd 不回调
-      //（SDK 有 mounted 检查），onDraggableCanceled 无此限制——据此清理
-      // 共享拖拽状态与连续翻页链（否则 Timer pending/状态残留）
-      onDraggableCanceled: (_, _) => onDragCanceled?.call(),
-      // 拖动不显示悬浮块：目标位置由虚影（_dragGhost）实时预览
-      feedback: Material(
-        color: Colors.transparent,
-        child: const SizedBox.shrink(),
-      ),
-      childWhenDragging: Opacity(
-        opacity: 0.3,
+    // Listener 捕获按下指针：拖动开始后 WeekView 注册全局 pointerRouter
+    // route（跨页事件驱动——Draggable 被 evict/dispose 后回调失效的兜底）
+    return Listener(
+      onPointerDown: (e) => onPointerDown?.call(e.pointer),
+      child: LongPressDraggable<int>(
+        data: item.task.id,
+        onDragStarted: () {
+          Haptics.select();
+          // 上报任务 id：共享拖拽状态据此显示虚影/胶囊
+          onDragStartedTask?.call(item.task.id);
+        },
+        // 边缘翻周/日：Draggable 全局坐标驱动（此前依赖 DragTarget.onMove，
+        // 指针离开列范围即失效）
+        onDragUpdate: (d) => onDragPosition?.call(d.globalPosition),
+        onDragEnd: (_) => onDragEnd?.call(),
+        // 兜底：拖动中任务所在列被 PageView evict（跨多周后超 cacheExtent）
+        // 导致 Draggable State dispose（mounted=false）时 onDragEnd 不回调
+        //（SDK 有 mounted 检查），onDraggableCanceled 无此限制——据此清理
+        // 共享拖拽状态与连续翻页链（否则 Timer pending/状态残留）
+        onDraggableCanceled: (_, _) => onDragCanceled?.call(),
+        // 拖动不显示悬浮块：目标位置由虚影（_dragGhost）实时预览
+        feedback: Material(
+          color: Colors.transparent,
+          child: const SizedBox.shrink(),
+        ),
+        childWhenDragging: Opacity(
+          opacity: 0.3,
+          child: block,
+        ),
         child: block,
       ),
-      child: block,
     );
   }
 
@@ -2708,6 +3142,16 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
     return l?.name ?? '';
   }
 }
+
+
+
+
+
+
+
+
+
+
 
 
 

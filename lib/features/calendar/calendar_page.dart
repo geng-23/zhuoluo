@@ -11,9 +11,11 @@ import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 日历页（E12：视图切换/月份选择/今天/添加收进左侧侧边栏）
 /// 丝滑交互：左右边缘 24dp 区域滑动切换底部 tab（左缘右滑 → 上一个，
 /// 右缘左滑 → 下一个），中间区域滑动翻月/翻周/翻日。
-/// 实现：body 视图右缘收窄 rightEdge（左缘 0——时间栏贴屏幕左边），
-/// 左右边缘为独立手势区——与 PageView 零手势竞争，
-/// 任务块点击/长按/拖动不受影响（拖动边缘翻周由 Draggable 全局坐标驱动）。
+/// 实现：视图铺满全屏，Stack 顶层为全屏透明监听层（_EdgeTabSwipeDetector，
+/// HitTestBehavior.translucent 零遮挡）——起点在屏幕左右 25% 区域内、
+/// 非长按（首次移动距 down <350ms）、位移 ≥24px 的滑动切换底部 tab；
+/// 中间 50% 区域滑动仍由 PageView 翻月/翻周/翻日；
+/// 任务块点击/长按拖动完全不受影响。
 class CalendarPage extends ConsumerWidget {
   const CalendarPage({
     super.key,
@@ -25,12 +27,6 @@ class CalendarPage extends ConsumerWidget {
   final VoidCallback? onNavigateLeft;
   /// 屏幕右边缘向左滑（切到下一个 tab，如四象限）
   final VoidCallback? onNavigateRight;
-
-  /// 左边缘手势区宽度（dp）：覆盖时间栏区域（时间栏无交互元素），
-  /// 视图左侧不收窄——时间栏贴屏幕左缘
-  static const double leftEdgeWidth = 44;
-  /// 右边缘手势区宽度（dp）：视图右缘收窄让位
-  static const double rightEdgeWidth = 40;
 
   static final GlobalKey<ScaffoldState> scaffoldKey =
       GlobalKey<ScaffoldState>();
@@ -67,20 +63,18 @@ class CalendarPage extends ConsumerWidget {
       ),
       body: Stack(
         children: [
-          // 中间视图（右缘收窄让位给手势区；左缘 0——时间栏贴屏幕左边）
+          // 视图铺满全屏
           Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.only(right: rightEdgeWidth),
-              child: Column(
-                children: [
-                  Expanded(
-                    // 修复：仅首次（无数据）显示 spinner；后续 load（改期/勾选/翻页）
-                    // 不整页替换——否则视图 State 销毁、滚动位置/翻页位置全部重置
-                    child: (state.loading && state.items.isEmpty)
-                        ? const Center(child: CircularProgressIndicator())
-                        : AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 200),
-                            switchInCurve: Curves.easeOut,
+            child: Column(
+              children: [
+                Expanded(
+                  // 修复：仅首次（无数据）显示 spinner；后续 load（改期/勾选/翻页）
+                  // 不整页替换——否则视图 State 销毁、滚动位置/翻页位置全部重置
+                  child: (state.loading && state.items.isEmpty)
+                      ? const Center(child: CircularProgressIndicator())
+                      : AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 200),
+                          switchInCurve: Curves.easeOut,
                             switchOutCurve: Curves.easeIn,
                             transitionBuilder: (child, anim) =>
                                 FadeTransition(opacity: anim, child: child),
@@ -132,24 +126,10 @@ class CalendarPage extends ConsumerWidget {
               ],
             ),
           ),
-        ),
-        // 左边缘手势区（覆盖时间栏区域，44dp）：右滑 → 上一个 tab（任务）
-        Positioned(
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: leftEdgeWidth,
-          child: _EdgeSwipeStrip(
+        // 全屏透明监听层（零遮挡）：边缘 25% 区滑动切 tab
+        Positioned.fill(
+          child: _EdgeTabSwipeDetector(
             onSwipeRight: onNavigateLeft,
-          ),
-        ),
-        // 右边缘手势区（40dp）：左滑 → 下一个 tab（四象限）
-        Positioned(
-          right: 0,
-          top: 0,
-          bottom: 0,
-          width: rightEdgeWidth,
-          child: _EdgeSwipeStrip(
             onSwipeLeft: onNavigateRight,
           ),
         ),
@@ -224,43 +204,94 @@ class CalendarPage extends ConsumerWidget {
   }
 }
 
-/// 边缘滑动切 tab 手势区（丝滑交互）：
-/// 覆盖屏幕左/右边缘独立区域（视图已让位，与其零手势竞争），
-/// 累计位移 ≥24dp 即触发（此前依赖 velocity>400 难以触发）；
-/// 右滑 → [onSwipeRight]，左滑 → [onSwipeLeft]。
-/// 拖动任务到边缘翻周/日由 Draggable 全局坐标驱动（views.dart _handleDragGlobal），
-/// 与此手势区互不干扰（拖动起点在任务块上，本区 recognizer 不参与）。
-class _EdgeSwipeStrip extends StatefulWidget {
-  const _EdgeSwipeStrip({this.onSwipeRight, this.onSwipeLeft});
+/// 边缘滑动切 tab 检测层（丝滑交互，零遮挡）：
+/// 全屏 Listener（HitTestBehavior.translucent——自身监听且下层正常交互），
+/// 判定条件（全部满足才切 tab）：
+/// 1. 指针起点在屏幕左右 25% 区域内（中间 50% 区域滑动仍由 PageView 翻页）
+/// 2. 非长按：首次位移距按下 <350ms（长按拖动任务/长按选时不受影响）
+/// 3. 累计位移 ≥24px（不依赖速度，慢速滑动也可触发）
+/// 右滑 → [onSwipeRight]（左缘），左滑 → [onSwipeLeft]（右缘）。
+/// 拖动任务到边缘翻周/日由 Draggable 全局坐标驱动（views.dart），互不干扰。
+class _EdgeTabSwipeDetector extends StatefulWidget {
+  const _EdgeTabSwipeDetector({this.onSwipeRight, this.onSwipeLeft});
 
   final VoidCallback? onSwipeRight;
   final VoidCallback? onSwipeLeft;
 
   @override
-  State<_EdgeSwipeStrip> createState() => _EdgeSwipeStripState();
+  State<_EdgeTabSwipeDetector> createState() => _EdgeTabSwipeDetectorState();
 }
 
-class _EdgeSwipeStripState extends State<_EdgeSwipeStrip> {
-  /// 累计水平位移（手势内）
+class _EdgeTabSwipeDetectorState extends State<_EdgeTabSwipeDetector> {
+  /// 起点判定区：屏幕左右各 25%
+  static const double _edgeZone = 0.25;
+  /// 触发位移阈值（px）
+  static const double _triggerDx = 24;
+  /// 位移超过半屏视为翻页意图（交给 PageView），不切 tab
+  static const double _maxDx = 0.5;
+  /// 长按判定窗口：首次移动距按下超过此值 = 长按（拖动/选时），不切 tab
+  static const Duration _longPressWindow = Duration(milliseconds: 350);
+
+  Offset? _downPos;
+  DateTime? _downTime;
+  DateTime? _firstMoveAt;
   double _dx = 0;
+
+  void _reset() {
+    _downPos = null;
+    _downTime = null;
+    _firstMoveAt = null;
+    _dx = 0;
+  }
+
+  void _onDown(PointerDownEvent e) {
+    _downPos = e.position;
+    _downTime = DateTime.now();
+    _firstMoveAt = null;
+    _dx = 0;
+  }
+
+  void _onMove(PointerMoveEvent e) {
+    if (_downPos == null) return;
+    _firstMoveAt ??= DateTime.now();
+    _dx += e.delta.dx;
+  }
+
+  void _onUp(PointerUpEvent e) {
+    _maybeTrigger();
+    _reset();
+  }
+
+  void _onCancel(PointerCancelEvent e) => _reset();
+
+  void _maybeTrigger() {
+    final down = _downPos;
+    final downTime = _downTime;
+    final firstMove = _firstMoveAt;
+    if (down == null || downTime == null || firstMove == null) return;
+    if (_dx.abs() < _triggerDx) return;
+    // 长按（拖动任务/选时）：首次移动发生在按下后 350ms 以上 → 不切 tab
+    if (firstMove.difference(downTime) >= _longPressWindow) return;
+    // 位移过半屏 → 翻页意图，不切
+    final w = MediaQuery.sizeOf(context).width;
+    if (_dx.abs() >= w * _maxDx) return;
+    // 起点在左右 25% 区
+    if (down.dx < w * _edgeZone) {
+      if (_dx > 0) widget.onSwipeRight?.call();
+    } else if (down.dx > w * (1 - _edgeZone)) {
+      if (_dx < 0) widget.onSwipeLeft?.call();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onHorizontalDragStart: (_) => _dx = 0,
-      onHorizontalDragUpdate: (d) => _dx += d.delta.dx,
-      onHorizontalDragEnd: (_) {
-        // 位移 ≥24dp 且方向明确 → 切 tab（不依赖速度，慢速滑动也可触发）
-        if (_dx > 24) {
-          widget.onSwipeRight?.call();
-        } else if (_dx < -24) {
-          widget.onSwipeLeft?.call();
-        }
-        _dx = 0;
-      },
-      onHorizontalDragCancel: () => _dx = 0,
-      child: const ColoredBox(color: Colors.transparent),
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _onDown,
+      onPointerMove: _onMove,
+      onPointerUp: _onUp,
+      onPointerCancel: _onCancel,
+      child: const SizedBox.expand(),
     );
   }
 }

@@ -206,13 +206,18 @@ SQLite（Drift），9 张表，schemaVersion = 5：
 
 ```
 lib/
-├── main.dart                入口：通知初始化→DB→锚点修复→全量重排→自动备份
+├── main.dart                入口：通知初始化→DB→默认清单→设置并行读取后 runApp；
+│                            锚点修复/权限请求/全量重排/自动备份在首帧后异步执行
 ├── shell/home_shell.dart    四 Tab 壳（懒加载 IndexedStack + 通知深链）
 ├── core/                    基础设施（providers / services / theme / utils）
 ├── data/
 │   ├── database/            schema + DAO + 迁移（database.g.dart 由 build_runner 生成）
 │   └── services/            中文解析器 / 提醒调度器 / 通知服务 / 备份服务 / RRULE 展开器
-└── features/                任务 / 日历 / 统计 / 我的（含备份管理、番茄、习惯、四象限）
+└── features/
+    ├── task/                任务列表 / 详情 / 计划时间与重复规则弹窗（独立文件）
+    ├── calendar/            月/周/日视图（views 按时间轴/列/弹层拆分）
+    ├── statistics/          统计
+    └── profile/             我的 / 备份管理 / 番茄 / 习惯 / 四象限（独立文件）
 ```
 
 **关键设计**

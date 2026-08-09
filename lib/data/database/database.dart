@@ -1064,17 +1064,42 @@ class AppDatabase extends _$AppDatabase {
               break;
             }
           }
+          final doneKey =
+              '${t.id}_${dayStart.year}_${dayStart.month}_${dayStart.day}';
           items.add(
             CalendarItem(
               task: t,
               instanceDate: dayStart,
-              completed: doneSet.contains(
-                '${t.id}_${dayStart.year}_${dayStart.month}_${dayStart.day}',
-              ),
+              completed: doneSet.contains(doneKey),
               listColor: listColor,
               displayTime: displayTime,
             ),
           );
+          // 跨天覆盖：实例延续到 planEnd 所在日，该日也生成条目
+          //（与非重复任务的跨天覆盖一致；命中日被跳过则整实例不显示）
+          final ps = t.planStart;
+          if (ps != null) {
+            final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
+            final psA = AppClock.asApp(ps);
+            final peA = AppClock.asApp(pe);
+            final spanDays = AppClock.at(peA.year, peA.month, peA.day)
+                .difference(AppClock.at(psA.year, psA.month, psA.day))
+                .inDays;
+            for (var i = 1; i <= spanDays; i++) {
+              final coverDay = dayStart.add(Duration(days: i));
+              if (coverDay.isBefore(start) || !coverDay.isBefore(end)) {
+                continue;
+              }
+              items.add(
+                CalendarItem(
+                  task: t,
+                  instanceDate: coverDay,
+                  completed: doneSet.contains(doneKey),
+                  listColor: listColor,
+                ),
+              );
+            }
+          }
         }
         day = day.add(const Duration(days: 1));
       }

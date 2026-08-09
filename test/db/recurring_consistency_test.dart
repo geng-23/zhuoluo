@@ -1,9 +1,12 @@
-﻿import 'dart:io';
+﻿import 'dart:convert';
+import 'dart:io';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
+import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 
@@ -221,6 +224,57 @@ void main() {
         ),
       ),
       throwsA(anything),
+    );
+  });
+
+  test('getCalendarItems：跨天重复任务 planEnd 覆盖日生成条目；跳过命中日则覆盖日不出现', () async {
+    final db = await newDb();
+    addTearDown(db.close);
+    final list = await db.getDefaultList();
+    // 每周一 22:00 → 周二 06:00 的跨天重复任务（2026-08-10 为周一）
+    final monday = AppClock.at(2026, 8, 10);
+    final tuesday = AppClock.at(2026, 8, 11);
+    final id = await db.insertTask(TasksCompanion.insert(
+      listId: list.id,
+      title: '夜班',
+      planStart: Value(monday.add(const Duration(hours: 22))),
+      planEnd: Value(tuesday.add(const Duration(hours: 6))),
+      rrule: const Value('FREQ=WEEKLY;BYDAY=MO'),
+      createdAt: AppClock.now(),
+    ));
+    final from = AppClock.at(2026, 8, 10);
+    final to = AppClock.at(2026, 8, 13);
+    final items = await db.getCalendarItems(from, to);
+    expect(
+      items.where((i) => DateUtilsEx.sameDay(i.instanceDate, monday)).length,
+      1,
+      reason: '周一命中：应有实例条目',
+    );
+    expect(
+      items.where((i) => DateUtilsEx.sameDay(i.instanceDate, tuesday)).length,
+      1,
+      reason: '周二（planEnd 覆盖日）也应有条目（跨天延续，此前只占一天）',
+    );
+
+    // 跳过周一 → 命中日与覆盖日都不再出现
+    await db.updateTask(
+      id,
+      TasksCompanion(
+        skippedDates: Value(
+          jsonEncode([AppClock.at(2026, 8, 10).toIso8601String()]),
+        ),
+      ),
+    );
+    final items2 = await db.getCalendarItems(from, to);
+    expect(
+      items2.where((i) => DateUtilsEx.sameDay(i.instanceDate, monday)),
+      isEmpty,
+      reason: '跳过周一后命中日不显示',
+    );
+    expect(
+      items2.where((i) => DateUtilsEx.sameDay(i.instanceDate, tuesday)),
+      isEmpty,
+      reason: '跳过命中日后覆盖日也不显示',
     );
   });
 }

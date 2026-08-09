@@ -41,6 +41,8 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
   bool _instanceDoneToday = false;
   /// 重复任务今天是否命中规则（非规则日无"今天实例"可完成）
   bool _todayHas = true;
+  /// 重复任务今天是否被跳过（显示"今天已跳过"占位）
+  bool _todaySkipped = false;
   bool _loaded = false;
   /// _load 请求序号——丢弃过期请求结果，防止旧数据覆盖新状态
   /// （用户输入标题/备注时，较慢的旧 _load 会把输入框回滚为旧值）
@@ -139,10 +141,17 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         _instanceDoneToday = await db.isInstanceCompleted(task.id, today);
         if (!mounted || seq != _loadSeq) return;
         _todayHas = (await db.expandTaskForDate(task, today)).isNotEmpty;
+        _todaySkipped = _isTodaySkipped(task, today);
       }
     }
     if (!mounted || seq != _loadSeq) return;
     setState(() => _loaded = true);
+  }
+
+  /// 今天是否在 skippedDates（被"跳过本次"）
+  bool _isTodaySkipped(Task t, DateTime today) {
+    final dayKey = DateUtilsEx.normalizeInstanceDate(today).toIso8601String();
+    return DateUtilsEx.parseSkippedDates(t.skippedDates).contains(dayKey);
   }
 
   TasksController get _notifier => ref.read(tasksControllerProvider.notifier);
@@ -378,16 +387,33 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                 onTap: () async {
                   await _notifier.completeTask(t.id);
                   _load();
-                  // C4-3：与任务页一致——完成/撤销本次带撤销条
-                  if (context.mounted) {
+                  // 仅"完成"弹撤销条；"撤销完成本次"本身就是撤销动作，
+                  // 不再弹（避免"撤销的撤销"）；撤销条撤销后刷新详情页
+                  if (!done && context.mounted) {
                     showAppSnackBar(
                       context,
-                      done ? '已撤销今天的完成' : '已完成今天的实例',
+                      '已完成今天的实例',
                       actionLabel: '撤销',
-                      onAction: () => _notifier.completeTask(t.id),
-                      icon: done ? Icons.undo : Icons.check_circle_outline,
+                      onAction: () async {
+                        await _notifier.completeTask(t.id);
+                        _load();
+                      },
+                      icon: Icons.check_circle_outline,
                     );
                   }
+                },
+              )
+            else if (_todaySkipped)
+              _ListTileRow(
+                icon: Icons.skip_next,
+                label: '今天已跳过',
+                value: '已跳过今天的实例',
+                onTap: () {
+                  showAppSnackBar(
+                    context,
+                    '今天已跳过，撤销「跳过本次」后可再次完成',
+                    icon: Icons.event_busy,
+                  );
                 },
               ),
             _ListTileRow(
@@ -404,13 +430,17 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                 final instDay = TasksController.currentInstanceDate(t);
                 await _notifier.skipInstance(t.id, instDay);
                 _load();
-                // C4-2：与其余入口一致——跳过带撤销条
+                // C4-2：与其余入口一致——跳过带撤销条；撤销后刷新详情页
+                //（恢复"完成本次"选项、更新"今天已跳过"占位）
                 if (context.mounted) {
                   showAppSnackBar(
                     context,
                     '已跳过 ${DateUtilsEx.dateCn(instDay)} 的实例',
                     actionLabel: '撤销',
-                    onAction: () => _notifier.unskipInstance(t.id, instDay),
+                    onAction: () async {
+                      await _notifier.unskipInstance(t.id, instDay);
+                      _load();
+                    },
                     icon: Icons.skip_next,
                   );
                 }
@@ -1427,19 +1457,25 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       helpText: '改期本次到',
     );
     if (picked == null || !mounted) return;
-    final pickedTime = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay(hour: ps?.hour ?? 9, minute: ps?.minute ?? 0),
-      helpText: '选择实例时间',
-    );
-    if (pickedTime == null || !mounted) return;
-    final toDate = AppClock.at(
-      picked.year,
-      picked.month,
-      picked.day,
-      pickedTime.hour,
-      pickedTime.minute,
-    );
+    DateTime toDate;
+    if (t.isAllDay) {
+      // 全天任务改期本次维持全天：只改日期，不选时间（粒度与计划时间对齐）
+      toDate = AppClock.at(picked.year, picked.month, picked.day);
+    } else {
+      final pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay(hour: ps?.hour ?? 9, minute: ps?.minute ?? 0),
+        helpText: '选择实例时间',
+      );
+      if (pickedTime == null || !mounted) return;
+      toDate = AppClock.at(
+        picked.year,
+        picked.month,
+        picked.day,
+        pickedTime.hour,
+        pickedTime.minute,
+      );
+    }
     final notifier = ref.read(tasksControllerProvider.notifier);
     // 记录例外 ID，撤销时删除该例外（而非新增反向例外）
     final exId = await notifier.editException(t.id, instDay, toDate);
@@ -1447,10 +1483,13 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     if (mounted) {
       showAppSnackBar(
         context,
-        '已改期到 ${DateUtilsEx.dateCn(toDate)} ${DateUtilsEx.timeCn(toDate)}',
+        t.isAllDay
+            ? '已改期到 ${DateUtilsEx.dateCn(toDate)}'
+            : '已改期到 ${DateUtilsEx.dateCn(toDate)} ${DateUtilsEx.timeCn(toDate)}',
         actionLabel: '撤销',
-        onAction: () {
-          notifier.undoEditException(t.id, exId);
+        onAction: () async {
+          await notifier.undoEditException(t.id, exId);
+          _load();
         },
         icon: Icons.event_repeat,
       );

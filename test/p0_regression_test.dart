@@ -8,8 +8,11 @@ import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_service.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/task/providers.dart';
+
+import 'support/fake_notification_scheduler.dart';
 
 /// P0 回归测试（docs/00-code-audit-and-correctness-plan.md 第 3 章）
 ///
@@ -30,9 +33,14 @@ void main() {
   setUp(() {
     db = AppDatabase.forTesting(NativeDatabase.memory());
     SoundService.enabled = false;
+    // 调度路径注入替身：完成/跳过/撤销等操作内部会重排提醒，
+    // 避免触发平台插件未初始化异常（此前依赖异常吞掉，属假绿）
+    final fake = FakeNotificationScheduler();
+    NotificationService.instance.debugOverrideScheduler = fake;
   });
 
   tearDown(() async {
+    NotificationService.instance.debugOverrideScheduler = null;
     await db.close();
   });
 

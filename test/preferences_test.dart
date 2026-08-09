@@ -6,7 +6,10 @@ import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/features/task/providers.dart';
+
+import 'support/fake_notification_scheduler.dart';
 
 /// 偏好设置组（2026-08-08）：默认清单 / 默认提醒 / 全天提醒时刻 / 应用时区
 void main() {
@@ -18,9 +21,13 @@ void main() {
 
   setUp(() {
     db = AppDatabase.forTesting(NativeDatabase.memory());
+    // addTaskFromParsed 创建带提醒任务会触发调度，注入替身避免平台异常
+    final fake = FakeNotificationScheduler();
+    NotificationService.instance.debugOverrideScheduler = fake;
   });
 
   tearDown(() async {
+    NotificationService.instance.debugOverrideScheduler = null;
     await db.close();
     // 每个用例后复位应用时区，避免跨用例污染
     AppClock.setTimezone(null);

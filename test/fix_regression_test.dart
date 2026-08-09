@@ -8,9 +8,12 @@ import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_service.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/features/calendar/providers.dart';
 import 'package:zhuoluo/features/task/providers.dart';
+
+import 'support/fake_notification_scheduler.dart';
 
 /// 2026-08-08 21:27 总览新发现 3 项 + 第二批 3 项（P1-27 纯 UI 钳制，
 /// 与既有 7 处同模式，analyze 覆盖）回归测试：
@@ -264,7 +267,13 @@ void main() {
   });
 
   group('新发现② 习惯提醒独立渠道（P2-51）', () {
-    test('scheduleHabitReminder 走渠道参数路径不抛异常', () async {
+    test('scheduleHabitReminder 走习惯渠道 + 逐日排期 + 已打卡跳过', () async {
+      // 注入记录型替身：断言真实调度结果（此前依赖平台插件不可用时的
+      // 异常吞掉行为，属"假绿"——断言的是环境失败而非功能正确性）
+      final fake = FakeNotificationScheduler();
+      NotificationService.instance.debugOverrideScheduler = fake;
+      addTearDown(() => NotificationService.instance.debugOverrideScheduler = null);
+
       final habitId = await db.insertHabit(
         '阅读',
         '⭐',
@@ -272,10 +281,34 @@ void main() {
       );
       final habit = (await db.getHabit(habitId))!;
       final scheduler = ReminderScheduler(db);
-      // 无插件环境：schedule 内部 init 抛平台异常 → 被 scheduleHabitReminder
-      // try/catch 吞掉返回 false（验证渠道参数调用路径无回归）
+      // 今天已打卡 → 今天的提醒应被跳过，从明天开始排
+      final todayKey = DateTime(now.year, now.month, now.day);
+      await db.checkHabit(habitId, todayKey);
+
       final ok = await scheduler.scheduleHabitReminder(habit);
-      expect(ok, isFalse);
+      expect(ok, isTrue, reason: 'P2-51：替身环境调度成功应返回 true');
+      // 93 天窗口 − 今天（已打卡跳过）= 92 条，全部走习惯渠道
+      expect(fake.scheduled.length, 92,
+          reason: 'P2-51：93 天逐日排期，今天已打卡跳过');
+      expect(
+        fake.scheduled.every((s) => s.channel == 'habit_reminder_v3'),
+        isTrue,
+        reason: 'P2-51：习惯提醒走独立渠道',
+      );
+      expect(
+        fake.scheduled.every((s) => s.payload == 'h$habitId'),
+        isTrue,
+        reason: 'P2-51：深链载荷定位习惯',
+      );
+      // 第一条 = 明天 09:00
+      final first = fake.scheduled.first;
+      expect(
+        first.when.difference(
+          DateTime(now.year, now.month, now.day + 1, 9, 0),
+        ).inMinutes.abs(),
+        lessThanOrEqualTo(1),
+        reason: 'P2-51：明天 09:00 开始排期',
+      );
     });
   });
 

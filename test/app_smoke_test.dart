@@ -6,7 +6,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/main.dart';
+
+import 'support/fake_notification_scheduler.dart';
 
 /// App 冒烟测试：验证启动、四 Tab、任务创建全流程
 void main() {
@@ -25,9 +28,13 @@ void main() {
     db = AppDatabase.forTesting(NativeDatabase.memory());
     // 测试环境无音频插件，关闭动作音效
     SoundService.enabled = false;
+    // 任务创建/完成会触发提醒调度，注入替身避免平台插件异常
+    final fake = FakeNotificationScheduler();
+    NotificationService.instance.debugOverrideScheduler = fake;
   });
 
   tearDown(() async {
+    NotificationService.instance.debugOverrideScheduler = null;
     await db.close();
   });
 

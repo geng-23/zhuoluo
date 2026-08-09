@@ -8,9 +8,12 @@ import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/task_ext.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/features/profile/profile_page.dart';
 import 'package:zhuoluo/features/task/providers.dart';
+
+import 'support/fake_notification_scheduler.dart';
 
 /// P1 回归测试（docs/00-code-audit-and-correctness-plan.md 第 4 章）
 void main() {
@@ -325,13 +328,21 @@ void main() {
 
   group('P1-4.9 提醒调度结果反馈', () {
     test('无提醒/已完成 → 视为成功；有提醒但排期失败 → 返回 false', () async {
+      // 注入记录型替身：断言真实调度结果（此前依赖平台插件不可用的
+      // 异常吞掉行为，属"假绿"——断言的是环境失败而非功能正确性）
+      final fake = FakeNotificationScheduler();
+      NotificationService.instance.debugOverrideScheduler = fake;
+      addTearDown(() => NotificationService.instance.debugOverrideScheduler = null);
+
       final scheduler = ReminderScheduler(db);
-      // 无提醒：true
+      // 无提醒：true 且无调度调用
       final noReminder = await insertTask(title: '无提醒任务');
       final t1 = (await db.getTask(noReminder))!;
       expect(await scheduler.scheduleTask(t1, now), isTrue);
+      expect(fake.scheduled, isEmpty,
+          reason: 'P1-4.9：无提醒任务不应产生任何调度');
 
-      // 有未来提醒：测试环境无通知插件 → 排期失败 → false
+      // 有未来提醒：替身模拟排期失败 → false
       final withReminder = await insertTask(
         title: '带提醒任务',
         planStart: today.add(const Duration(days: 1)),
@@ -342,9 +353,29 @@ void main() {
           remindMinutesBefore: const Value(10),
         ),
       );
+      fake.failSchedules = true;
       final t2 = (await db.getTask(withReminder))!;
       expect(await scheduler.scheduleTask(t2, now), isFalse,
           reason: 'P1-4.9：排期失败应返回 false 供 UI 提示');
+
+      // 替身恢复成功：应真实调度一条通知（ID 含实例维度 + 提前 10 分钟）
+      fake.failSchedules = false;
+      fake.clear();
+      expect(await scheduler.scheduleTask(t2, now), isTrue);
+      expect(fake.scheduled.length, 1,
+          reason: 'P1-4.9：一条提醒应产生一条通知');
+      final s = fake.scheduled.single;
+      expect(s.title, '带提醒任务', reason: '通知标题 = 任务标题');
+      // 提醒时刻 = planStart（明天）− 10 分钟
+      final expectedWhen = today
+          .add(const Duration(days: 1))
+          .add(const Duration(minutes: -10));
+      expect(
+        s.when.difference(expectedWhen).inMinutes.abs(),
+        lessThanOrEqualTo(1),
+        reason: 'P1-4.9：通知时刻 = 计划开始 − 提前 10 分钟',
+      );
+      expect(s.payload, 't$withReminder', reason: '深链载荷定位任务');
     });
   });
 

@@ -8,6 +8,10 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 本地通知服务（flutter_local_notifications v22 封装）
+///
+/// 调度内核可注入（[debugOverrideScheduler]）：测试环境用记录型替身
+/// 断言真实调度结果（ID/时间/数量），而非依赖平台插件不可用时的
+/// 异常吞掉行为（此前测试"假绿"——断言的是环境失败而非功能正确性）。
 class NotificationService {
   NotificationService._();
 
@@ -27,6 +31,10 @@ class NotificationService {
   /// payload 不经过 onDidReceiveNotificationResponse 回调（此时无人订阅），
   /// 需在 init 时通过 getNotificationAppLaunchDetails 主动捕获，供订阅前消费。
   String? _launchPayload;
+
+  /// 测试替身调度内核（非空时接管 schedule/cancel/cancelAll，不触平台插件）。
+  /// 生产代码永不设置；测试 setUp 注入记录型替身并断言结果。
+  NotificationScheduler? debugOverrideScheduler;
 
   /// 系统级能力通道（MainActivity 原生实现）：
   /// 通知设置跳转 / 电池优化豁免查询与请求
@@ -187,6 +195,11 @@ class NotificationService {
   /// N-权限缓存失效通道——用户在系统设置授予/拒绝通知权限后调用，
   /// 否则调度器会一直按旧的 `_permissionGranted` 短路（提醒全部静默跳过）。
   Future<bool> refreshPermissionCache() async {
+    // 测试替身接管：不触平台插件，直接视为已授权
+    if (debugOverrideScheduler != null) {
+      _permissionGranted = true;
+      return true;
+    }
     try {
       final granted = await _fetchPermission();
       _permissionGranted = granted;
@@ -249,6 +262,18 @@ class NotificationService {
     String? payload,
     String channel = 'task_reminder_v4',
   }) async {
+    // 测试替身接管：直接记录调度请求，不触平台插件
+    final stub = debugOverrideScheduler;
+    if (stub != null) {
+      return stub.schedule(
+        id,
+        title: title,
+        body: body,
+        when: when,
+        payload: payload,
+        channel: channel,
+      );
+    }
     if (!_initialized) await init();
     // Android 13+：确保通知权限已授予；未授予则不调度
     // 只在状态未知时请求一次（被拒后不再重复弹窗）
@@ -325,6 +350,11 @@ class NotificationService {
 
   /// 取消通知（失败静默：业务不依赖）
   Future<void> cancel(int id) async {
+    final stub = debugOverrideScheduler;
+    if (stub != null) {
+      stub.cancel(id);
+      return;
+    }
     try {
       await _plugin.cancel(id: id);
     } catch (e) {
@@ -334,12 +364,36 @@ class NotificationService {
 
   /// 取消全部（失败静默）
   Future<void> cancelAll() async {
+    final stub = debugOverrideScheduler;
+    if (stub != null) {
+      stub.cancelAll();
+      return;
+    }
     try {
       await _plugin.cancelAll();
     } catch (e) {
       debugPrint('通知全部取消失败: $e');
     }
   }
+}
+
+/// 通知调度内核抽象（生产 = 平台插件；测试 = 记录型替身）
+abstract class NotificationScheduler {
+  /// 调度一条通知，返回是否成功排入系统
+  Future<bool> schedule(
+    int id, {
+    required String title,
+    required String body,
+    required DateTime when,
+    String? payload,
+    String channel = 'task_reminder_v4',
+  });
+
+  /// 取消单条通知
+  Future<void> cancel(int id);
+
+  /// 取消全部通知
+  Future<void> cancelAll();
 }
 
 /// 通知 ID 分配

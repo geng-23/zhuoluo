@@ -5,9 +5,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/calendar/providers.dart';
 import 'package:zhuoluo/main.dart';
+
+import 'support/fake_notification_scheduler.dart';
 
 /// 复现：重复任务在日历（周/月窗口）中是否可见
 void main() {
@@ -17,9 +20,13 @@ void main() {
 
   setUp(() {
     db = AppDatabase.forTesting(NativeDatabase.memory());
+    // 完成/跳过/拖动系列会触发提醒重排，注入替身避免平台插件异常
+    final fake = FakeNotificationScheduler();
+    NotificationService.instance.debugOverrideScheduler = fake;
   });
 
   tearDown(() async {
+    NotificationService.instance.debugOverrideScheduler = null;
     await db.close();
   });
 

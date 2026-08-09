@@ -5,6 +5,8 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 
+import 'support/fake_notification_scheduler.dart';
+
 /// 修复回归测试：
 /// - #1 通知 ID 含实例日期维度：同 (task, reminder) 不同实例互不覆盖
 /// - #3 例外改期：新日期可见、原日期隐藏
@@ -18,9 +20,13 @@ void main() {
 
   setUp(() {
     db = AppDatabase.forTesting(NativeDatabase.memory());
+    // 调度路径注入替身（重排/取消提醒走记录型替身，不触平台插件）
+    final fake = FakeNotificationScheduler();
+    NotificationService.instance.debugOverrideScheduler = fake;
   });
 
   tearDown(() async {
+    NotificationService.instance.debugOverrideScheduler = null;
     await db.close();
   });
 
@@ -261,7 +267,9 @@ void main() {
     expect(NotificationIds.forTest, greaterThan(2100000000));
   });
 
-  test('N-P1-1 权限缓存刷新在测试环境不抛异常且返回 true', () async {
+  test('N-P1-1 权限缓存刷新在无平台宿主时不抛异常且返回 true', () async {
+    // 清空替身：验证真实容错路径（平台插件未初始化时吞异常兜底 true）
+    NotificationService.instance.debugOverrideScheduler = null;
     final svc = NotificationService.instance;
     final granted = await svc.refreshPermissionCache();
     expect(granted, isTrue,
@@ -287,11 +295,24 @@ void main() {
     expect(maxHabit, greaterThan(0));
   });
 
-  test('P0-6 rescheduleIfStale 未过期时短路（冒烟，不重复全量重排）', () async {
+  test('P0-6 rescheduleIfStale 未过期时短路（不重复全量重排）', () async {
+    // setUp 已注入记录型替身（FakeNotificationScheduler）：
+    // 断言门控逻辑（此前依赖平台插件不可用时的异常吞掉行为，
+    // 属"假绿"——无法验证是否真的短路）
+    final fake = NotificationService.instance.debugOverrideScheduler! as FakeNotificationScheduler;
+
     final scheduler = ReminderScheduler(db);
     await scheduler.rescheduleAll();
-    // 测试环境通知平台不可用：rescheduleAll 吞异常返回；
-    // 立即调用 rescheduleIfStale（<24h）应被门控短路，不抛
+    // 全量重排：cancelAll 1 次 + 重新调度
+    expect(fake.cancelAllCount, 1, reason: 'P0-6：rescheduleAll 先全量取消');
+    final afterFull = fake.scheduled.length;
+    expect(afterFull, greaterThanOrEqualTo(0));
+
+    // 立即调用 rescheduleIfStale（<24h）应被门控短路：不再次 cancelAll
     await scheduler.rescheduleIfStale();
+    expect(fake.cancelAllCount, 1,
+        reason: 'P0-6：<24h 门控应短路，不得二次全量重排');
+    expect(fake.scheduled.length, afterFull,
+        reason: 'P0-6：短路后不得新增调度');
   });
 }

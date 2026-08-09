@@ -6,9 +6,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/features/calendar/providers.dart';
 import 'package:zhuoluo/features/calendar/quick_add_sheets.dart';
 import 'package:zhuoluo/features/task/providers.dart';
+
+import 'support/fake_notification_scheduler.dart';
 
 /// 反直觉修复回归测试（23 项修复中的关键行为）
 void main() {
@@ -21,9 +24,14 @@ void main() {
   setUp(() {
     db = AppDatabase.forTesting(NativeDatabase.memory());
     SoundService.enabled = false;
+    // 调度路径注入替身：跳过实例等操作内部会重排提醒，避免触发
+    // 平台插件未初始化异常（此前依赖异常吞掉，属假绿）
+    final fake = FakeNotificationScheduler();
+    NotificationService.instance.debugOverrideScheduler = fake;
   });
 
   tearDown(() async {
+    NotificationService.instance.debugOverrideScheduler = null;
     await db.close();
   });
 

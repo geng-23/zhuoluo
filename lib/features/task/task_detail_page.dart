@@ -37,14 +37,19 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
   List<Task> _subTasks = [];
   /// 子任务"今天完成"状态（重复子任务按实例表判断）
   final Map<int, bool> _subTasksDone = {};
-  /// 重复任务：今天实例是否已完成
-  bool _instanceDoneToday = false;
-  /// 重复任务今天是否命中规则（非规则日无"今天实例"可完成）
-  bool _todayHas = true;
-  /// 重复任务今天是否被跳过（显示"今天已跳过"占位）
-  bool _todaySkipped = false;
-  /// 当前实例（今天）被"改期本次"到的目标日期/时间（改期行显示用）
-  DateTime? _instRescheduleTarget;
+  /// 重复任务：当前实例日（今天有实例→今天；否则→下一个计划实例）
+  DateTime? _currentInstance;
+  /// 当前实例日是否有实例（规则命中且未跳过/未改期移走）
+  bool _currentHas = true;
+  /// 当前实例日是否已完成
+  bool _currentDone = false;
+  /// 当前实例日是否被跳过（显示"已跳过"占位）
+  bool _currentSkipped = false;
+  /// 当前实例日被"改期本次"到的目标日期/时间（改期行/状态行显示用）
+  DateTime? _currentRescheduleTarget;
+  /// 当前实例改期目标日的完成记录（完成→改期后完成记录迁移到目标日，
+  /// 用于状态行"已完成并改期至 X"的交代）
+  bool _currentMigratedDone = false;
   /// 下一次实例日期（含例外改期目标；跳过/改期行显示用）
   DateTime? _nextInstance;
   bool _loaded = false;
@@ -142,21 +147,32 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         if (!mounted || seq != _loadSeq) return;
       }
       if (task.rrule.isNotEmpty) {
-        _instanceDoneToday = await db.isInstanceCompleted(task.id, today);
-        if (!mounted || seq != _loadSeq) return;
-        _todayHas = (await db.expandTaskForDate(task, today)).isNotEmpty;
-        _todaySkipped = _isTodaySkipped(task, today);
-        // 当前实例的改期例外目标 + 下一次实例（实例操作行显示用）
+        // 当前实例（今天有实例→今天；否则→下一个计划实例）统一作为
+        // 完成/跳过/改期本次的目标；界面据此显示实例状态
         final instDay = TasksController.currentInstanceDate(task);
         final exceptions = await db.getExceptions(task.id);
         if (!mounted || seq != _loadSeq) return;
-        _instRescheduleTarget = null;
+        _currentInstance = instDay;
+        _currentHas = (await db.expandTaskForDate(task, instDay)).isNotEmpty;
+        if (!mounted || seq != _loadSeq) return;
+        _currentDone = await db.isInstanceCompleted(task.id, instDay);
+        if (!mounted || seq != _loadSeq) return;
+        _currentSkipped = _isSkipped(task, instDay);
+        _currentRescheduleTarget = null;
         for (final ex in exceptions) {
           if (ex.action == 'edit' &&
               DateUtilsEx.sameDay(ex.instanceDate, instDay)) {
-            _instRescheduleTarget = ex.overrideScheduledDate;
+            _currentRescheduleTarget = ex.overrideScheduledDate;
             break;
           }
+        }
+        // 完成→改期：完成记录迁移到目标日，据此交代"已完成并改期至 X"
+        _currentMigratedDone = false;
+        final reschedTo = _currentRescheduleTarget;
+        if (reschedTo != null) {
+          _currentMigratedDone =
+              await db.isInstanceCompleted(task.id, reschedTo);
+          if (!mounted || seq != _loadSeq) return;
         }
         _nextInstance = await _notifier.nextInstanceFor(task);
         if (!mounted || seq != _loadSeq) return;
@@ -166,10 +182,34 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     setState(() => _loaded = true);
   }
 
-  /// 今天是否在 skippedDates（被"跳过本次"）
-  bool _isTodaySkipped(Task t, DateTime today) {
-    final dayKey = DateUtilsEx.normalizeInstanceDate(today).toIso8601String();
+  /// 指定日期是否在 skippedDates（被"跳过本次"）
+  bool _isSkipped(Task t, DateTime day) {
+    final dayKey = DateUtilsEx.normalizeInstanceDate(day).toIso8601String();
     return DateUtilsEx.parseSkippedDates(t.skippedDates).contains(dayKey);
+  }
+
+  /// 当前实例标识："今天" / "下次 X"
+  String _currentInstanceLabel() {
+    final inst = _currentInstance;
+    if (inst == null) return '无';
+    final now = AppClock.now();
+    final today = AppClock.at(now.year, now.month, now.day);
+    return DateUtilsEx.sameDay(inst, today)
+        ? '今天'
+        : '下次 ${DateUtilsEx.dateCn(inst)}';
+  }
+
+  /// 当前实例三态状态文本（互斥，改期+完成/跳过并存时合并）；无状态返回 null
+  String? _currentStateText() {
+    final reschedTo = _currentRescheduleTarget;
+    if (reschedTo != null) {
+      return _currentMigratedDone
+          ? '已完成并改期至 ${DateUtilsEx.dateCn(reschedTo)}'
+          : '已改到 ${DateUtilsEx.dateCn(reschedTo)}';
+    }
+    if (_currentSkipped) return '已跳过';
+    if (_currentDone) return '已完成';
+    return null;
   }
 
   TasksController get _notifier => ref.read(tasksControllerProvider.notifier);
@@ -227,7 +267,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         ),
       );
     }
-    final done = t.rrule.isNotEmpty ? _instanceDoneToday : t.completedAt != null;
+    final done = t.rrule.isNotEmpty ? _currentDone : t.completedAt != null;
     return Scaffold(
       appBar: AppBar(
         title: const Text('任务详情'),
@@ -252,12 +292,11 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                   size: 28,
                 ),
                 onPressed: () async {
-                  // 重复任务今天不是规则日 → 无"今天实例"可完成
-                  // （防止写入不存在的实例记录）
-                  if (t.rrule.isNotEmpty && !_todayHas) {
+                  // 重复任务当前实例日无实例（被跳过/改期移走）→ 不可完成
+                  if (t.rrule.isNotEmpty && !_currentHas) {
                     showAppSnackBar(
                       context,
-                      '今天没有「${t.title}」的实例',
+                      '当前实例（${_currentInstanceLabel()}）没有可完成的实例',
                       icon: Icons.event_busy,
                     );
                     return;
@@ -393,15 +432,26 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
             value: t.rrule.isEmpty ? '不重复' : _rruleText(t.rrule),
             onTap: () => _pickRepeat(t),
           ),
-          // 重复任务：实例操作（完成/改期/跳过本次）
+          // 重复任务：实例操作（完成/改期/跳过本次）——统一针对"当前实例"
           if (t.rrule.isNotEmpty) ...[
-            // 今天非规则日 → 无"今天实例"可完成（防止写入不存在
-            // 的实例记录；改期/跳过本次仍可用）
-            if (_todayHas)
+            // 当前实例标识 + 三态状态行
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                '当前实例：${_currentInstanceLabel()}'
+                '${_currentStateText() == null ? '' : '  ·  ${_currentStateText()}'}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            // 当前实例有实例 → 完成本次；被跳过/改期移走/非规则日 → 占位
+            if (_currentHas)
               _ListTileRow(
                 icon: Icons.check_circle_outline,
                 label: done ? '撤销完成本次' : '完成本次',
-                value: done ? '今天已完成' : '今天待完成',
+                value: done ? '当前实例已完成' : '当前实例待完成',
                 onTap: () async {
                   // 记录点按前状态：撤销条按此精确恢复（completeTask 是
                   // 切换语义，慢设备连点 + 未 await _load 会让 done 闭包
@@ -414,7 +464,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                   if (!wasDone && context.mounted) {
                     showAppSnackBar(
                       context,
-                      '已完成今天的实例',
+                      '已完成当前实例（${_currentInstanceLabel()}）',
                       actionLabel: '撤销',
                       onAction: () async {
                         await _notifier.completeTask(t.id);
@@ -425,28 +475,42 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                   }
                 },
               )
-            else if (_todaySkipped)
+            else if (_currentSkipped)
               _ListTileRow(
                 icon: Icons.skip_next,
-                label: '今天已跳过',
-                value: '已跳过今天的实例',
+                label: '当前实例已跳过',
+                value: '已跳过 ${DateUtilsEx.dateCn(_currentInstance ?? AppClock.now())}',
                 onTap: () async {
-                  // 直接撤销跳过（不再弹会顶掉撤销条的提示）
-                  final now = AppClock.now();
-                  final day = AppClock.at(now.year, now.month, now.day);
-                  await _notifier.unskipInstance(t.id, day);
-                  await _load();
+                  final instDay = _currentInstance;
+                  if (instDay != null) {
+                    await _notifier.unskipInstance(t.id, instDay);
+                    await _load();
+                    if (context.mounted) {
+                      showAppSnackBar(
+                        context,
+                        '已撤销跳过，恢复 ${DateUtilsEx.dateCn(instDay)} 的实例',
+                        icon: Icons.event_busy,
+                      );
+                    }
+                  }
                 },
               )
             else
               _ListTileRow(
                 icon: Icons.event_busy,
-                label: '今天非实例日',
-                value: '今天没有可完成的实例',
+                label: '当前实例不可用',
+                value: _currentRescheduleTarget != null
+                    ? '已改到 ${DateUtilsEx.dateCn(_currentRescheduleTarget!)}'
+                    : '${DateUtilsEx.dateCn(_currentInstance ?? AppClock.now())} '
+                        '没有可完成的实例',
                 onTap: () {
                   showAppSnackBar(
                     context,
-                    '今天不在重复规则内，或该日已改期/跳过',
+                    _currentRescheduleTarget != null
+                        ? '当前实例已改期到 '
+                            '${DateUtilsEx.dateCn(_currentRescheduleTarget!)}'
+                        : '${DateUtilsEx.dateCn(_currentInstance ?? AppClock.now())} '
+                            '不在重复规则内',
                     icon: Icons.event_busy,
                   );
                 },
@@ -454,10 +518,10 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
             _ListTileRow(
               icon: Icons.event_repeat,
               label: '改期本次',
-              value: _instRescheduleTarget != null
-                  ? '已改到 ${DateUtilsEx.dateCn(_instRescheduleTarget!)} '
-                      '${DateUtilsEx.timeCn(_instRescheduleTarget!)}'
-                  : DateUtilsEx.dateCn(TasksController.currentInstanceDate(t)),
+              value: _currentRescheduleTarget != null
+                  ? '已改到 ${DateUtilsEx.dateCn(_currentRescheduleTarget!)} '
+                      '${DateUtilsEx.timeCn(_currentRescheduleTarget!)}'
+                  : DateUtilsEx.dateCn(_currentInstance ?? AppClock.now()),
               onTap: () => _rescheduleInstance(t),
             ),
             _ListTileRow(
@@ -467,11 +531,21 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                   ? '下次 ${DateUtilsEx.dateCn(_nextInstance!)}'
                   : '不再安排当天实例',
               onTap: () async {
-                final instDay = TasksController.currentInstanceDate(t);
+                // 改期后：跳过无意义（当前实例已移走）→ 提示而非空操作
+                final reschedTo = _currentRescheduleTarget;
+                if (reschedTo != null) {
+                  showAppSnackBar(
+                    context,
+                    '当前实例已改期到 ${DateUtilsEx.dateCn(reschedTo)}，无需跳过',
+                    icon: Icons.event_busy,
+                  );
+                  return;
+                }
+                final instDay = _currentInstance;
+                if (instDay == null) return;
                 await _notifier.skipInstance(t.id, instDay);
-                _load();
-                // C4-2：与其余入口一致——跳过带撤销条；撤销后刷新详情页
-                //（恢复"完成本次"选项、更新"今天已跳过"占位）
+                await _load();
+                // C4-2：跳过带撤销条；撤销后刷新详情页
                 if (context.mounted) {
                   showAppSnackBar(
                     context,
@@ -479,7 +553,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                     actionLabel: '撤销',
                     onAction: () async {
                       await _notifier.unskipInstance(t.id, instDay);
-                      _load();
+                      await _load();
                     },
                     icon: Icons.skip_next,
                   );

@@ -71,13 +71,15 @@ void main() {
         reason: '详情页应加载完成');
     expect(find.text('每日任务'), findsOneWidget, reason: '任务标题应显示');
 
-    await tester.scrollUntilVisible(find.text('完成本次'), 200,
-        scrollable: find.byType(Scrollable).first);
+    await tester.dragUntilVisible(find.text('完成本次'),
+        find.byType(ListView).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('完成本次'));
     await tester.pumpAndSettle();
     expect(await db.isInstanceCompleted(id, today), isTrue,
         reason: '完成本次写入实例完成记录');
-    expect(find.text('已完成今天的实例'), findsOneWidget, reason: '完成后弹撤销条');
+    expect(find.textContaining('已完成当前实例'), findsOneWidget,
+        reason: '完成后弹撤销条');
     expect(find.text('撤销完成本次'), findsOneWidget, reason: '详情页刷新为已完成');
 
     await tester.ensureVisible(find.text('撤销'));
@@ -93,8 +95,9 @@ void main() {
     final id = await insertDailyTask();
     await db.completeInstance(id, today);
     await pumpDetail(tester, id);
-    await tester.scrollUntilVisible(find.text('撤销完成本次'), 200,
-        scrollable: find.byType(Scrollable).first);
+    await tester.dragUntilVisible(find.text('撤销完成本次'),
+        find.byType(ListView).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
     expect(find.text('撤销完成本次'), findsOneWidget, reason: '今天已完成');
 
     await tester.tap(find.text('撤销完成本次'));
@@ -110,8 +113,9 @@ void main() {
     final id = await insertDailyTask(allDay: true);
     await pumpDetail(tester, id);
 
-    await tester.scrollUntilVisible(find.text('改期本次'), 200,
-        scrollable: find.byType(Scrollable).first);
+    await tester.dragUntilVisible(find.text('改期本次'),
+        find.byType(ListView).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('改期本次'));
     await tester.pumpAndSettle();
     expect(find.byType(DatePickerDialog), findsOneWidget, reason: '先选日期');
@@ -136,17 +140,18 @@ void main() {
     final id = await insertDailyTask();
     await pumpDetail(tester, id);
 
-    await tester.scrollUntilVisible(find.text('跳过本次'), 200,
-        scrollable: find.byType(Scrollable).first);
+    await tester.dragUntilVisible(find.text('跳过本次'),
+        find.byType(ListView).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('跳过本次'));
     await tester.pumpAndSettle();
-    expect(find.text('今天已跳过'), findsOneWidget, reason: '跳过后显示占位');
+    expect(find.text('当前实例已跳过'), findsOneWidget, reason: '跳过后显示占位');
     expect(find.text('完成本次'), findsNothing, reason: '跳过后完成选项消失');
 
     await tester.ensureVisible(find.text('撤销'));
     await tester.tap(find.text('撤销'));
     await tester.pumpAndSettle();
-    expect(find.text('今天已跳过'), findsNothing, reason: '撤销跳过后占位消失');
+    expect(find.text('当前实例已跳过'), findsNothing, reason: '撤销跳过后占位消失');
     expect(find.text('完成本次'), findsOneWidget, reason: '撤销跳过后完成选项恢复');
   });
 
@@ -154,8 +159,9 @@ void main() {
     final id = await insertDailyTask();
     await pumpDetail(tester, id);
 
-    await tester.scrollUntilVisible(find.text('跳过本次'), 200,
-        scrollable: find.byType(Scrollable).first);
+    await tester.dragUntilVisible(find.text('跳过本次'),
+        find.byType(ListView).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('跳过本次'));
     await tester.pumpAndSettle();
     expect(find.textContaining('下次'), findsOneWidget,
@@ -166,16 +172,18 @@ void main() {
     final id = await insertDailyTask();
     await pumpDetail(tester, id);
 
-    await tester.scrollUntilVisible(find.text('跳过本次'), 200,
-        scrollable: find.byType(Scrollable).first);
+    await tester.dragUntilVisible(find.text('跳过本次'),
+        find.byType(ListView).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('跳过本次'));
     await tester.pumpAndSettle();
-    expect(find.text('今天已跳过'), findsOneWidget);
+    expect(find.text('当前实例已跳过'), findsOneWidget);
 
     // 点占位 tile → 直接撤销跳过 → 恢复"完成本次"（不再弹会顶掉撤销条的提示）
-    await tester.tap(find.text('今天已跳过'));
+    await tester.ensureVisible(find.text('当前实例已跳过'));
+    await tester.tap(find.text('当前实例已跳过'));
     await tester.pumpAndSettle();
-    expect(find.text('今天已跳过'), findsNothing, reason: '占位撤销后消失');
+    expect(find.text('当前实例已跳过'), findsNothing, reason: '占位撤销后消失');
     expect(find.text('完成本次'), findsOneWidget, reason: '恢复完成本次');
   });
 
@@ -192,11 +200,40 @@ void main() {
       ).add(const Duration(days: 1, hours: 15))),
     ));
     await pumpDetail(tester, id);
-    await tester.scrollUntilVisible(find.text('改期本次'), 200,
-        scrollable: find.byType(Scrollable).first);
-    expect(find.textContaining('已改到'), findsOneWidget,
+    await tester.dragUntilVisible(find.text('改期本次'),
+        find.byType(ListView).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('已改到'), findsWidgets,
         reason: '改期本次后显示改到的新日期时间');
-    expect(find.text('今天非实例日'), findsOneWidget,
+    expect(find.text('当前实例不可用'), findsOneWidget,
         reason: '今天被例外移走 → 完成区显示兜底占位（不再消失）');
+  });
+
+  testWidgets('未来计划实例也能完成（当前实例语义，非仅今天）', (tester) async {
+    // planStart 在明天：今天无实例，当前实例 = 明天
+    final day = today.add(const Duration(days: 1));
+    await db.ensureDefaultList();
+    final list = await db.getDefaultList();
+    final id = await db.insertTask(TasksCompanion.insert(
+      listId: list.id,
+      title: '未来任务',
+      planStart: Value(day),
+      planEnd: Value(day.add(const Duration(hours: 1))),
+      rrule: const Value('FREQ=DAILY'),
+      createdAt: AppClock.now(),
+    ));
+    await pumpDetail(tester, id);
+    await tester.dragUntilVisible(find.text('完成本次'),
+        find.byType(ListView).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
+    expect(find.text('完成本次'), findsOneWidget,
+        reason: '未来计划实例也可完成（当前实例语义，不再仅今天）');
+    expect(find.textContaining('下次'), findsWidgets,
+        reason: '当前实例标识显示"下次 X"');
+
+    await tester.tap(find.text('完成本次'));
+    await tester.pumpAndSettle();
+    expect(await db.isInstanceCompleted(id, day), isTrue,
+        reason: '完成的是未来计划日实例');
   });
 }

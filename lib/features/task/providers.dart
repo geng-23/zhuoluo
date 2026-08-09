@@ -252,21 +252,41 @@ class TasksController extends StateNotifier<TasksState> {
       to: today.add(Duration(days: RruleService.windowDaysFor(t.rrule))),
       limit: 400,
     );
+    // 候选日期 = 规则实例（被"改期本次"移走的实例替换为其目标日）
+    // + 例外改期目标日。取最早"当天确有实例且未完成"者。
+    // 统一口径：expandTaskForDateWith 判断（跳过/例外移走 → 当天无实例），
+    // 与日历显示一致，避免"任务页显示下次 X、日历 X 无实例"的矛盾（P1）
+    final candidates = <DateTime>[];
     for (final inst in instances) {
-      if ((await _db.expandTaskForDateWith(t, inst, exceptions)).isEmpty) {
-        continue;
+      DateTime? movedTo;
+      for (final ex in exceptions) {
+        final od = ex.overrideScheduledDate;
+        if (ex.action == 'edit' &&
+            od != null &&
+            DateUtilsEx.sameDay(ex.instanceDate, inst)) {
+          movedTo = od;
+          break;
+        }
       }
-      if (doneSet.contains(_doneKey(t.id, inst))) continue;
-      return inst;
+      candidates.add(movedTo ?? inst);
     }
-    // 例外改期（edit）目标日也作为下次实例候选：改期本次到非规则日时
-    //（如每周一改到周三），任务页/详情页据此显示"下次实例已改到 X"
     for (final ex in exceptions) {
       final od = ex.overrideScheduledDate;
       if (ex.action != 'edit' || od == null) continue;
       if (od.isBefore(today)) continue;
-      if (doneSet.contains(_doneKey(t.id, od))) continue;
-      return od;
+      if (!candidates.any((c) => DateUtilsEx.sameDay(c, od))) {
+        candidates.add(od);
+      }
+    }
+    candidates.sort();
+    for (final c in candidates) {
+      if (c.isBefore(today)) continue;
+      // 目标日被跳过 / 被其他例外移走 → 当天无实例，跳过该候选
+      if ((await _db.expandTaskForDateWith(t, c, exceptions)).isEmpty) {
+        continue;
+      }
+      if (doneSet.contains(_doneKey(t.id, c))) continue;
+      return c;
     }
     // 系列已结束或未来实例全部完成 → 无下次实例（不回落今天）
     return null;

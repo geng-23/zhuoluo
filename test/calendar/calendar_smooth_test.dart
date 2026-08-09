@@ -342,6 +342,25 @@ void main() {
       return gesture;
     }
 
+    testWidgets('长按任务块不动直接松手：计划时间不变（不落到时间轴顶部）', (tester) async {
+      await pumpCalendarWithTask(tester, '不动任务');
+      final taskId = (await db.allTasksForBackup())
+          .firstWhere((t) => t.title == '不动任务')
+          .id;
+      final original = (await db.getTask(taskId))!.planStart;
+      // 长按进入拖动状态，但不移动
+      final gesture = await longPressDrag(tester, '不动任务');
+      await gesture.up();
+      await tester.pumpAndSettle();
+      final updated = (await db.getTask(taskId))!.planStart;
+      expect(
+        updated,
+        original,
+        reason:
+            '长按不动松手不应改期（修复前 dragGlobalPos 为 null，dy=0 兜底会把任务挪到 06:00 顶部）',
+      );
+    });
+
     testWidgets('右缘停留连续翻周：翻第一周后 500ms 自动续翻第二周', (tester) async {
       final container = await pumpCalendarWithTask(tester, '拖拽任务A');
       final before = container.read(calendarControllerProvider).selectedDay;

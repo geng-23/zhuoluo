@@ -413,10 +413,14 @@ class DayColumnState extends ConsumerState<DayColumn> {
         // 用共享 dragGlobalPos（Draggable 全局坐标）换算本列局部位置
         final gpos = widget.dragGlobalPos?.value;
         final box = context.findRenderObject() as RenderBox?;
-        var dy = 0.0;
-        if (box != null && gpos != null) {
-          dy = box.globalToLocal(gpos).dy;
+        // 长按未移动（无 move 事件，dragGlobalPos 为 null）或列未布局时
+        // 没有有效落点坐标——视为"未拖动"，取消改期。此前 dy=0 兜底会把
+        // 落点算成 06:00（时间轴最顶部），长按不动松手任务被误改期。
+        if (gpos == null || box == null) {
+          _clearDragState();
+          return;
         }
+        final dy = box.globalToLocal(gpos).dy;
         final minutes = (widget.startHour * 60 + dy / pixelPerHour * 60)
             .roundToDouble()
             .clamp(widget.startHour * 60.0, endHour * 60.0);

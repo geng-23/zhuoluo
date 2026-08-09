@@ -424,7 +424,9 @@ class CalendarController extends StateNotifier<CalendarState> {
       Haptics.light();
     } else {
       if (item.task.rrule.isNotEmpty) {
-        await _db.completeInstance(item.task.id, item.instanceDate);
+        // P1-4：命中校验统一收口（日历条目本身来自规则展开，正常必命中；
+        // 兜底防御未来新增入口绕过 UI 检查）
+        await _db.completeInstanceIfHit(item.task.id, item.instanceDate);
         // 完成实例后重排：取消该实例已排提醒，其余未完成实例保留
         final fresh = await _db.getTask(item.task.id);
         if (fresh != null) {

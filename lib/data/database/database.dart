@@ -622,6 +622,24 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
+  /// P1-4：命中校验的实例完成——重复任务只允许在"规则命中日"或
+  /// "例外改期目标日"写入完成记录，防止非命中日产生孤儿完成记录
+  ///（此前命中检查散落在 UI 层，控制器/DB 无统一约束）。
+  /// 非重复任务走普通完成（completedAt）；重复任务返回 false = 未命中（未写入）。
+  Future<bool> completeInstanceIfHit(int taskId, DateTime instanceDate) async {
+    final t = await getTask(taskId);
+    if (t == null) return false;
+    if (t.rrule.isEmpty) {
+      await completeTask(taskId);
+      return true;
+    }
+    final day = du.DateUtilsEx.normalizeInstanceDate(instanceDate);
+    final hit = await expandTaskForDate(t, day);
+    if (hit.isEmpty) return false;
+    await completeInstance(taskId, day);
+    return true;
+  }
+
   /// 重复任务：撤销实例完成（归一化）
   Future<void> uncompleteInstance(int taskId, DateTime instanceDate) async {
     final day = du.DateUtilsEx.normalizeInstanceDate(instanceDate);

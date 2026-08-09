@@ -1532,27 +1532,32 @@ class AppDatabase extends _$AppDatabase {
   Future<List<Setting>> allSettingsForBackup() => select(settings).get();
 
   // ---------- 合并导入支持（备份方案设计 3.4）----------
+  /// 同名清单（limit 1——本地存在多个同名清单时合并不得崩溃，取首行）
   Future<TaskList?> getListByName(String name) =>
-      (select(lists)..where((l) => l.name.equals(name))).getSingleOrNull();
+      (select(lists)..where((l) => l.name.equals(name))..limit(1))
+          .getSingleOrNull();
 
+  /// 同名习惯（limit 1——同上去重查询防崩溃）
   Future<Habit?> getHabitByName(String name) =>
-      (select(habits)..where((h) => h.name.equals(name))).getSingleOrNull();
+      (select(habits)..where((h) => h.name.equals(name))..limit(1))
+          .getSingleOrNull();
 
-  /// 非子任务按（清单, 标题）去重
-  Future<Task?> getTaskByListAndTitle(int listId, String title) =>
+  /// 非子任务按（清单, 标题）查所有同名候选（合并导入指纹去重用——
+  /// 同名但内容不同（计划时间/备注/重复规则等）须保留为独立任务）
+  Future<List<Task>> getTasksByListAndTitle(int listId, String title) =>
       (select(tasks)..where(
             (t) =>
                 t.listId.equals(listId) &
                 t.parentId.isNull() &
                 t.title.equals(title),
           ))
-          .getSingleOrNull();
+          .get();
 
-  /// 子任务按（父任务, 标题）去重
-  Future<Task?> getTaskByParentAndTitle(int parentId, String title) =>
+  /// 子任务按（父任务, 标题）查所有同名候选
+  Future<List<Task>> getTasksByParentAndTitle(int parentId, String title) =>
       (select(tasks)
             ..where((t) => t.parentId.equals(parentId) & t.title.equals(title)))
-          .getSingleOrNull();
+          .get();
 
   Future<Reminder?> getReminderByTriple(
     int taskId,
@@ -1564,7 +1569,7 @@ class AppDatabase extends _$AppDatabase {
                 r.taskId.equals(taskId) &
                 r.remindMinutesBefore.equals(remindMinutesBefore) &
                 r.remindAtMinutes.equalsNullable(remindAtMinutes),
-          ))
+          )..limit(1))
           .getSingleOrNull();
 
   Future<TaskException?> getExceptionByTaskDateAction(

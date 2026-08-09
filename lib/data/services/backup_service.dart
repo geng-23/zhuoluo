@@ -254,15 +254,19 @@ class BackupService {
         listIdMap[l.id.value] = newId;
       }
 
-      // 2) 任务：先父后子（子任务父必须已映射），按标题去重
+      // 2) 任务：先父后子（子任务父必须已映射），按内容指纹去重——
+      // 同名但内容不同（计划时间/备注/重复规则等）须保留为独立任务；
+      // 本地同清单存在多个同名任务时也不崩溃
       final taskIdMap = <int, int>{};
       Future<void> insertOne(TasksCompanion t, int listId, int? parentId) async {
-        final existing = parentId == null
-            ? await _db.getTaskByListAndTitle(listId, t.title.value)
-            : await _db.getTaskByParentAndTitle(parentId, t.title.value);
-        if (existing != null) {
-          taskIdMap[t.id.value] = existing.id;
-          return;
+        final candidates = parentId == null
+            ? await _db.getTasksByListAndTitle(listId, t.title.value)
+            : await _db.getTasksByParentAndTitle(parentId, t.title.value);
+        for (final c in candidates) {
+          if (_sameTaskFingerprint(c, t)) {
+            taskIdMap[t.id.value] = c.id;
+            return;
+          }
         }
         final newId = await _db.insertTaskFull(
           TasksCompanion(
@@ -434,6 +438,26 @@ class BackupService {
         await _db.setSetting(s.key.value, s.value.value);
       }
     });
+  }
+
+  /// 内容指纹判重：标题/备注/重复规则 + 计划开始/结束/截止时刻全部一致
+  /// 才视为同一任务（合并导入跳过）；任一不同则保留为独立任务。
+  /// 时刻用绝对时刻比较（isAtSameMomentAs），规避时区解释差异。
+  bool _sameTaskFingerprint(Task existing, TasksCompanion incoming) {
+    if (existing.title != incoming.title.value) return false;
+    if (existing.note != incoming.note.value) return false;
+    if (existing.rrule != incoming.rrule.value) return false;
+    if (!_sameMoment(existing.planStart, incoming.planStart.value)) {
+      return false;
+    }
+    if (!_sameMoment(existing.planEnd, incoming.planEnd.value)) return false;
+    if (!_sameMoment(existing.dueTime, incoming.dueTime.value)) return false;
+    return true;
+  }
+
+  bool _sameMoment(DateTime? a, DateTime? b) {
+    if (a == null || b == null) return a == b;
+    return a.isAtSameMomentAs(b);
   }
 
   // ---- 序列化 ----

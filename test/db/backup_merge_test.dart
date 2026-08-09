@@ -137,6 +137,94 @@ void main() {
       expect((await target.getPomodoros()).length, 2);
     });
 
+    test('同名但计划时间不同 → 都保留（不误去重）', () async {
+      await seed(db);
+      final backup = await BackupService(db).exportJson();
+      final target = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(target.close);
+      await target.ensureDefaultList();
+      final inbox = await target.getDefaultList();
+      // 目标库同名"交报告"（10:00 有计划时间），备份里同名无计划时间
+      await target.insertTask(TasksCompanion.insert(
+        listId: inbox.id,
+        title: '交报告',
+        planStart: Value(now),
+        planEnd: Value(now.add(const Duration(hours: 1))),
+        createdAt: now,
+      ));
+      await BackupService(target).importJson(backup, merge: true);
+      final tasks = await target.allTasksForBackup();
+      expect(
+        tasks.where((t) => t.title == '交报告').length,
+        2,
+        reason: '同名但计划时间不同应保留为两个独立任务（内容指纹去重）',
+      );
+    });
+
+    test('同名但备注不同 → 都保留（不误去重）', () async {
+      await seed(db);
+      final backup = await BackupService(db).exportJson();
+      final target = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(target.close);
+      await target.ensureDefaultList();
+      final inbox = await target.getDefaultList();
+      await target.insertTask(TasksCompanion.insert(
+        listId: inbox.id,
+        title: '交报告',
+        note: const Value('重要'),
+        createdAt: now,
+      ));
+      await BackupService(target).importJson(backup, merge: true);
+      final tasks = await target.allTasksForBackup();
+      expect(
+        tasks.where((t) => t.title == '交报告').length,
+        2,
+        reason: '同名但备注不同应保留为两个独立任务',
+      );
+    });
+
+    test('本地同清单多个同名 + 备份同名同内容 → 去重跳过不崩溃', () async {
+      await seed(db);
+      final backup = await BackupService(db).exportJson();
+      final target = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(target.close);
+      await target.ensureDefaultList();
+      final inbox = await target.getDefaultList();
+      // 本地同清单两个同名"交报告"（此前 getSingleOrNull 会抛 Too many elements）
+      for (var i = 0; i < 2; i++) {
+        await target.insertTask(TasksCompanion.insert(
+          listId: inbox.id,
+          title: '交报告',
+          createdAt: now,
+        ));
+      }
+      await BackupService(target).importJson(backup, merge: true);
+      final tasks = await target.allTasksForBackup();
+      expect(
+        tasks.where((t) => t.title == '交报告').length,
+        2,
+        reason: '本地多个同名任务 + 备份同名同内容：去重跳过，不崩溃不新增',
+      );
+    });
+
+    test('本地多个同名清单 → 合并不崩溃', () async {
+      await seed(db);
+      final backup = await BackupService(db).exportJson();
+      final target = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(target.close);
+      await target.ensureDefaultList();
+      // 本地两个同名"工作"清单
+      await target.insertList('工作', '#111111', 0);
+      await target.insertList('工作', '#222222', 1);
+      await BackupService(target).importJson(backup, merge: true);
+      final lists = await target.getAllLists();
+      expect(
+        lists.where((l) => l.name == '工作').length,
+        2,
+        reason: '本地多个同名清单 + 备份同名清单：去重取首行不崩溃',
+      );
+    });
+
     test('原子性：中途失败整体回滚（坏任务标题类型）', () async {
       await seed(db);
       final backup = jsonDecode(await BackupService(db).exportJson())

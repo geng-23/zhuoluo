@@ -384,13 +384,13 @@ void main() {
       createdAt: now,
     ));
 
-    // 系列拖动改期到 8/12 09:00（拖动进时间轴 → 非全天；
-    // 全天任务时长 1 天，C5-1 回退：09:00+1天 > 23:00 → 8/11 23:00）
+    // 系列拖动改期到 8/12 09:00（周三，非规则命中日→P1-3 吸附回最近
+    // 周一 8/10；全天任务时长 1 天，C5-1 回退：09:00+1天 > 23:00 → 8/10 23:00）
     await notifier.moveTaskToDateTimeSeries(id, DateTime(2026, 8, 12, 9, 0));
     var t = (await db.getTask(id))!;
     expect(t.isAllDay, isFalse, reason: '拖动改期后为时段任务');
-    expect(t.planStart, DateTime(2026, 8, 11, 23, 0),
-        reason: 'C5-1：时长 1 天不跨午夜，回退到 23:00 前');
+    expect(t.planStart, DateTime(2026, 8, 10, 23, 0),
+        reason: 'P1-3：非命中日拖动吸附回最近周一 + C5-1 时长不跨天回退到 23:00 前');
 
     // 撤销 → 恢复原计划时间与全天状态
     await notifier.undoMoveTaskSeries();
@@ -398,6 +398,60 @@ void main() {
     expect(t.isAllDay, isTrue,
         reason: 'P1-16：撤销系列改期必须恢复全天状态（此前变成时段任务）');
     expect(t.planStart, DateTime(2026, 8, 10));
+    // drain：等待 dataVersion 监听触发的异步刷新完成（避免 db 关闭后仍在用）
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+  });
+
+  test('P1-3：系列拖动到非命中日吸附回最近命中日，旧例外被清理且可撤销恢复', () async {
+    SoundService.enabled = false;
+    final container = ProviderContainer(
+      overrides: [dbProvider.overrideWithValue(db)],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(calendarControllerProvider.notifier);
+    await db.ensureDefaultList();
+    final list = await db.getDefaultList();
+    // 每周一 10:00 的系列，锚点在 8/10（周一）
+    final id = await db.insertTask(TasksCompanion.insert(
+      listId: list.id,
+      title: '周例会',
+      planStart: Value(DateTime(2026, 8, 10, 10, 0)),
+      planEnd: Value(DateTime(2026, 8, 10, 11, 0)),
+      rrule: const Value('FREQ=WEEKLY;BYDAY=MO'),
+      createdAt: now,
+    ));
+    // 既有例外：8/10（原锚点，周一）的实例被改期到 8/12（周二）
+    await db.insertException(
+      TaskExceptionsCompanion.insert(
+        taskId: id,
+        instanceDate: DateTime(2026, 8, 10),
+        action: const Value('edit'),
+        overrideScheduledDate: Value(DateTime(2026, 8, 12, 10, 0)),
+      ),
+    );
+    expect((await db.getExceptions(id)).length, 1);
+
+    // 拖动系列到 8/16（周日，非命中日）→ P1-3 吸附回最近周一 8/17
+    await notifier.moveTaskToDateTimeSeries(id, DateTime(2026, 8, 16, 9, 0));
+    var t = (await db.getTask(id))!;
+    expect(t.planStart, DateTime(2026, 8, 17, 9, 0),
+        reason: 'P1-3：非命中日拖动吸附到最近命中日（8/16→8/17），保留时分 09:00');
+    // 例外实例日 8/10 早于新锚点 8/17，不再命中新系列 → 应被清理
+    expect(await db.getExceptions(id), isEmpty,
+        reason: 'P1-3：例外实例日 8/10 早于新锚点，不命中新系列，应被清理');
+
+    // 撤销 → 恢复原锚点与旧例外（快照含例外）
+    await notifier.undoMoveTaskSeries();
+    t = (await db.getTask(id))!;
+    expect(t.planStart, DateTime(2026, 8, 10, 10, 0),
+        reason: '撤销恢复原锚点');
+    final exs = await db.getExceptions(id);
+    expect(exs.length, 1,
+        reason: 'P1-3：撤销系列改期恢复被清理的例外（快照含例外）');
+    expect(exs.first.instanceDate, DateTime(2026, 8, 10));
+    expect(exs.first.overrideScheduledDate, DateTime(2026, 8, 12, 10, 0),
+        reason: '撤销后例外内容完整恢复');
+
     // drain：等待 dataVersion 监听触发的异步刷新完成（避免 db 关闭后仍在用）
     await Future<void>.delayed(const Duration(milliseconds: 200));
   });

@@ -7,6 +7,7 @@ import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
+import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 
 class CalendarState {
@@ -288,7 +289,7 @@ class CalendarController extends StateNotifier<CalendarState> {
   /// 系列改期撤销快照
   _SeriesReschedule? _seriesUndo;
 
-  /// 重复任务拖动改期：整个系列（含清理旧完成记录，可撤销）
+  /// 重复任务拖动改期：整个系列（统一锚点吸附 + 清理完成记录与例外，可撤销）
   Future<void> moveTaskToDateTimeSeries(int taskId, DateTime target) async {
     final t = await _db.getTask(taskId);
     if (t == null || t.rrule.isEmpty) return;
@@ -303,7 +304,23 @@ class CalendarController extends StateNotifier<CalendarState> {
         ? oldEnd.difference(oldStart)
         : const Duration(hours: 1);
     // C5-1：系列改期同样应用"时长不跨天"约束（与预览端统一）
-    final start = DateUtilsEx.clampStartWithinDay(target, dur);
+    final clamped = DateUtilsEx.clampStartWithinDay(target, dur);
+    // P1-3：拖动目标日不命中规则时吸附到最近命中日——与任务创建/详情
+    // 改规则同口径（否则锚点落在非命中日，系列在当前窗口"消失"）。
+    // 先 clamp 再吸附日期部分（保留时分）：吸附只调整日期，
+    // 避免对长时长任务先吸附后 clamp 又把起点推回非命中日。
+    final anchorDay = DateTime(clamped.year, clamped.month, clamped.day);
+    final hit = RruleService.instance.nearestHitOnOrNear(anchorDay, t.rrule);
+    final start =
+        hit == null
+            ? clamped
+            : DateTime(
+                hit.year,
+                hit.month,
+                hit.day,
+                clamped.hour,
+                clamped.minute,
+              );
     await _db.updateTask(
       taskId,
       TasksCompanion(
@@ -312,14 +329,22 @@ class CalendarController extends StateNotifier<CalendarState> {
         isAllDay: const Value(false),
       ),
     );
-    // 清理不再匹配新系列的旧完成记录（保存快照供撤销恢复）
-    final removed = await _db.pruneCompletionsForTask(taskId, start, t.rrule);
+    // P1-3：统一走 applyRecurringChange 收口——清理不再匹配新系列的
+    // 完成记录与例外（此前仅 pruneCompletionsForTask，旧例外残留
+    // 会让已改期实例与系列语义不一致）
+    final removed = await _db.applyRecurringChange(
+      taskId,
+      oldRrule: t.rrule,
+      newRrule: t.rrule,
+      newStart: start,
+    );
     _seriesUndo = _SeriesReschedule(
       taskId: taskId,
       oldStart: oldStart,
       oldEnd: oldEnd,
       oldIsAllDay: t.isAllDay,
-      removedCompletions: removed,
+      removedCompletions: removed.removedCompletions,
+      removedExceptions: removed.removedExceptions,
     );
     final updated = await _db.getTask(taskId);
     if (updated != null) {
@@ -329,7 +354,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     load();
   }
 
-  /// 撤销系列改期（恢复原计划时间 + 被清理的完成记录）
+  /// 撤销系列改期（恢复原计划时间 + 被清理的完成记录与例外）
   Future<void> undoMoveTaskSeries() async {
     final s = _seriesUndo;
     if (s == null) return;
@@ -353,6 +378,21 @@ class CalendarController extends StateNotifier<CalendarState> {
           taskId: Value(c.taskId),
           instanceDate: Value(c.instanceDate),
           completedAt: Value(c.completedAt),
+        ),
+      );
+    }
+    // P1-3：撤销同样恢复被清理的例外（此前快照不存例外，
+    // 撤销后旧例外永久丢失，实例语义不一致）
+    for (final e in s.removedExceptions) {
+      await _db.insertExceptionRaw(
+        TaskExceptionsCompanion(
+          id: Value(e.id),
+          taskId: Value(e.taskId),
+          instanceDate: Value(e.instanceDate),
+          action: Value(e.action),
+          overrideScheduledDate: e.overrideScheduledDate == null
+              ? const Value(null)
+              : Value(e.overrideScheduledDate),
         ),
       );
     }
@@ -430,13 +470,14 @@ final calendarControllerProvider =
       );
     });
 
-/// 系列改期撤销快照（原计划时间 + 全天状态 + 被清理的完成记录）
+/// 系列改期撤销快照（原计划时间 + 全天状态 + 被清理的完成记录与例外）
 class _SeriesReschedule {
   final int taskId;
   final DateTime? oldStart;
   final DateTime? oldEnd;
   final bool oldIsAllDay;
   final List<TaskCompletion> removedCompletions;
+  final List<TaskException> removedExceptions;
 
   _SeriesReschedule({
     required this.taskId,
@@ -444,5 +485,6 @@ class _SeriesReschedule {
     required this.oldEnd,
     required this.oldIsAllDay,
     required this.removedCompletions,
+    this.removedExceptions = const [],
   });
 }

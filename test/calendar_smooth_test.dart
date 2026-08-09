@@ -1,4 +1,4 @@
-﻿import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,13 +42,15 @@ void main() {
     test('缓存窗口内翻页零 DB：loadCount 不增且数据就绪', () async {
       await db.ensureDefaultList();
       final list = await db.getDefaultList();
-      await db.insertTask(TasksCompanion.insert(
-        listId: list.id,
-        title: '任务A',
-        planStart: Value(now),
-        planEnd: Value(now.add(const Duration(hours: 1))),
-        createdAt: now,
-      ));
+      await db.insertTask(
+        TasksCompanion.insert(
+          listId: list.id,
+          title: '任务A',
+          planStart: Value(now),
+          planEnd: Value(now.add(const Duration(hours: 1))),
+          createdAt: now,
+        ),
+      );
 
       final container = makeContainer();
       final controller = container.read(calendarControllerProvider.notifier);
@@ -59,12 +61,12 @@ void main() {
 
       // 同周内翻页（选本周另一天，避免跨周边界）→ 命中缓存零 DB
       final monday = DateUtilsEx.mondayOf(now);
-      final nextInWeek =
-          monday.isBefore(now) ? monday : now.add(const Duration(days: 1));
+      final nextInWeek = monday.isBefore(now)
+          ? monday
+          : now.add(const Duration(days: 1));
       controller.setSelectedDay(nextInWeek);
       await controller.load();
-      expect(controller.loadCount, first,
-          reason: '缓存窗口内翻页不应触发 DB 查询');
+      expect(controller.loadCount, first, reason: '缓存窗口内翻页不应触发 DB 查询');
 
       // 周视图边界内（+6 天）：仍命中缓存（±31 天缓冲）
       controller.setSelectedDay(now.add(const Duration(days: 6)));
@@ -81,8 +83,11 @@ void main() {
 
       controller.setSelectedDay(now.add(const Duration(days: 60)));
       await controller.load();
-      expect(controller.loadCount, greaterThan(first),
-          reason: '超出 31 天缓冲应重新查询');
+      expect(
+        controller.loadCount,
+        greaterThan(first),
+        reason: '超出 31 天缓冲应重新查询',
+      );
     });
 
     test('周↔日视图切换命中缓存（不触发 DB）', () async {
@@ -111,8 +116,11 @@ void main() {
       // 模拟他页写操作（bump 数据版本 → 监听强制重载）
       container.read(dataVersionProvider.notifier).state++;
       await controller.load();
-      expect(controller.loadCount, greaterThan(first),
-          reason: '数据版本变化后缓存失效，必须重查');
+      expect(
+        controller.loadCount,
+        greaterThan(first),
+        reason: '数据版本变化后缓存失效，必须重查',
+      );
     });
   });
 
@@ -189,12 +197,20 @@ void main() {
       await tester.pumpAndSettle();
 
       // 中间区域 fling（PageView 翻周）
-      await tester.flingFrom(const Offset(400, 400), const Offset(-200, 0), 1000);
+      await tester.flingFrom(
+        const Offset(400, 400),
+        const Offset(-200, 0),
+        1000,
+      );
       await tester.pumpAndSettle();
       expect(left + right, 0, reason: '中间滑动翻周/日，不切 tab');
 
       // 反向
-      await tester.flingFrom(const Offset(400, 400), const Offset(200, 0), 1000);
+      await tester.flingFrom(
+        const Offset(400, 400),
+        const Offset(200, 0),
+        1000,
+      );
       await tester.pumpAndSettle();
       expect(left + right, 0);
     });
@@ -205,13 +221,15 @@ void main() {
       await db.ensureDefaultList();
       final list = await db.getDefaultList();
       final start = DateTime(now.year, now.month, now.day, 10, 0);
-      await db.insertTask(TasksCompanion.insert(
-        listId: list.id,
-        title: '拖拽任务',
-        planStart: Value(start),
-        planEnd: Value(start.add(const Duration(hours: 1))),
-        createdAt: now,
-      ));
+      await db.insertTask(
+        TasksCompanion.insert(
+          listId: list.id,
+          title: '拖拽任务',
+          planStart: Value(start),
+          planEnd: Value(start.add(const Duration(hours: 1))),
+          createdAt: now,
+        ),
+      );
 
       final container = makeContainer();
       await tester.pumpWidget(
@@ -222,8 +240,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final before =
-          container.read(calendarControllerProvider).selectedDay;
+      final before = container.read(calendarControllerProvider).selectedDay;
 
       // 长按任务块启动拖拽（600ms > 长按阈值）
       final block = find.text('拖拽任务');
@@ -242,24 +259,22 @@ void main() {
       await tester.pumpAndSettle();
 
       final after = container.read(calendarControllerProvider).selectedDay;
-      expect(
-        after.isAfter(before),
-        isTrue,
-        reason: '拖到右缘停留应翻到下一周',
-      );
+      expect(after.isAfter(before), isTrue, reason: '拖到右缘停留应翻到下一周');
     });
 
     testWidgets('拖动任务到屏幕左缘停留 300ms → 翻到上一周', (tester) async {
       await db.ensureDefaultList();
       final list = await db.getDefaultList();
       final start = DateTime(now.year, now.month, now.day, 10, 0);
-      await db.insertTask(TasksCompanion.insert(
-        listId: list.id,
-        title: '拖拽任务2',
-        planStart: Value(start),
-        planEnd: Value(start.add(const Duration(hours: 1))),
-        createdAt: now,
-      ));
+      await db.insertTask(
+        TasksCompanion.insert(
+          listId: list.id,
+          title: '拖拽任务2',
+          planStart: Value(start),
+          planEnd: Value(start.add(const Duration(hours: 1))),
+          createdAt: now,
+        ),
+      );
 
       final container = makeContainer();
       await tester.pumpWidget(
@@ -270,8 +285,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final before =
-          container.read(calendarControllerProvider).selectedDay;
+      final before = container.read(calendarControllerProvider).selectedDay;
 
       final block = find.text('拖拽任务2');
       final gesture = await tester.startGesture(tester.getCenter(block.first));
@@ -299,13 +313,15 @@ void main() {
       await db.ensureDefaultList();
       final list = await db.getDefaultList();
       final start = DateTime(now.year, now.month, now.day, 10, 0);
-      await db.insertTask(TasksCompanion.insert(
-        listId: list.id,
-        title: title,
-        planStart: Value(start),
-        planEnd: Value(start.add(const Duration(hours: 1))),
-        createdAt: now,
-      ));
+      await db.insertTask(
+        TasksCompanion.insert(
+          listId: list.id,
+          title: title,
+          planStart: Value(start),
+          planEnd: Value(start.add(const Duration(hours: 1))),
+          createdAt: now,
+        ),
+      );
       final container = makeContainer();
       await tester.pumpWidget(
         UncontrolledProviderScope(
@@ -342,8 +358,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 550));
       await tester.pumpAndSettle();
       final after2 = container.read(calendarControllerProvider).selectedDay;
-      expect(after2.isAfter(after1), isTrue,
-          reason: '边缘停留应自动续翻第二周（连续拖到多个周以后）');
+      expect(after2.isAfter(after1), isTrue, reason: '边缘停留应自动续翻第二周（连续拖到多个周以后）');
 
       await gesture.up();
       await tester.pumpAndSettle();
@@ -427,9 +442,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: MaterialApp(
-            home: CalendarPage(onNavigateLeft: () => left++),
-          ),
+          child: MaterialApp(home: CalendarPage(onNavigateLeft: () => left++)),
         ),
       );
       await tester.pumpAndSettle();
@@ -448,8 +461,11 @@ void main() {
       // 点击任务块（时间栏右侧的列区域）→ 实例操作层弹出
       await tester.tap(find.text('拖拽任务D').first);
       await tester.pumpAndSettle();
-      expect(find.text('完成本次'), findsWidgets,
-          reason: '任务块点击应正常弹出操作层（左缘手势区不遮挡）');
+      expect(
+        find.text('完成本次'),
+        findsWidgets,
+        reason: '任务块点击应正常弹出操作层（左缘手势区不遮挡）',
+      );
       expect(find.text('查看详情'), findsWidgets);
     });
   });
@@ -462,13 +478,15 @@ void main() {
       await db.ensureDefaultList();
       final list = await db.getDefaultList();
       final start = DateTime(now.year, now.month, now.day, 10, 0);
-      await db.insertTask(TasksCompanion.insert(
-        listId: list.id,
-        title: title,
-        planStart: Value(start),
-        planEnd: Value(start.add(const Duration(hours: 1))),
-        createdAt: now,
-      ));
+      await db.insertTask(
+        TasksCompanion.insert(
+          listId: list.id,
+          title: title,
+          planStart: Value(start),
+          planEnd: Value(start.add(const Duration(hours: 1))),
+          createdAt: now,
+        ),
+      );
       final container = makeContainer();
       await tester.pumpWidget(
         UncontrolledProviderScope(
@@ -522,9 +540,7 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: MaterialApp(
-            home: CalendarPage(onNavigateLeft: () => left++),
-          ),
+          child: MaterialApp(home: CalendarPage(onNavigateLeft: () => left++)),
         ),
       );
       await tester.pumpAndSettle();
@@ -557,8 +573,11 @@ void main() {
       await tester.pumpAndSettle();
       // 视图铺满：PageView 右缘应贴屏幕右缘（此前右缘 40px 收窄会留空白）
       final rect = tester.getRect(find.byType(PageView).last);
-      expect(rect.right, greaterThan(790),
-          reason: '视图应铺满（右缘=屏宽，实际 ${rect.right}）');
+      expect(
+        rect.right,
+        greaterThan(790),
+        reason: '视图应铺满（右缘=屏宽，实际 ${rect.right}）',
+      );
     });
 
     testWidgets('右缘连续翻页后拖回左缘：反向翻页（全局 route 驱动）', (tester) async {
@@ -583,8 +602,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
       final after2 = container.read(calendarControllerProvider).selectedDay;
-      expect(after2.isBefore(after1), isTrue,
-          reason: '拖回左缘应反向翻页（全局指针事件驱动）');
+      expect(after2.isBefore(after1), isTrue, reason: '拖回左缘应反向翻页（全局指针事件驱动）');
       await gesture.up();
       await tester.pumpAndSettle();
     });
@@ -612,14 +630,16 @@ void main() {
       }
       // 回归保护：跨页超过 5 次后虚影仍显示（onDraggableCanceled
       // 曾清共享状态导致任务块"闪退"回原位）
-      expect(find.text('兜底任务'), findsWidgets,
-          reason: '翻 6 页后虚影仍应显示（任务块不闪退）');
+      expect(find.text('兜底任务'), findsWidgets, reason: '翻 6 页后虚影仍应显示（任务块不闪退）');
       // 在边缘松手（无 DragTarget 命中——落点兜底执行改期）
       await gesture.up();
       await tester.pumpAndSettle();
       final updated = (await db.getTask(taskId))!;
-      expect(updated.planStart, isNot(original),
-          reason: '边缘松手应改期成功（落点兜底，任务不回退）');
+      expect(
+        updated.planStart,
+        isNot(original),
+        reason: '边缘松手应改期成功（落点兜底，任务不回退）',
+      );
     });
 
     testWidgets('胶囊在视口内且水平错开手指：不被上缘遮挡、不被手指挡住', (tester) async {
@@ -638,14 +658,23 @@ void main() {
       final rect = tester.getRect(capsule.first);
       // 视口内：胶囊 top 不低于时间轴区域顶部（AppBar 之后不再被遮挡）
       final viewTop = tester.getRect(find.byType(PageView).last).top;
-      expect(rect.top, greaterThanOrEqualTo(viewTop),
-          reason: '胶囊不应被上缘/AppBar 遮挡（top=${rect.top} < 视口顶 $viewTop）');
-      expect(rect.bottom, lessThanOrEqualTo(600),
-          reason: '胶囊不应超出屏幕下缘（实际 bottom=${rect.bottom}）');
+      expect(
+        rect.top,
+        greaterThanOrEqualTo(viewTop),
+        reason: '胶囊不应被上缘/AppBar 遮挡（top=${rect.top} < 视口顶 $viewTop）',
+      );
+      expect(
+        rect.bottom,
+        lessThanOrEqualTo(600),
+        reason: '胶囊不应超出屏幕下缘（实际 bottom=${rect.bottom}）',
+      );
       // 水平错开手指：胶囊中心与手指 x 距离 ≥ 24（手指不挡胶囊）
       final fingerX = 400.0;
-      expect((rect.center.dx - fingerX).abs(), greaterThanOrEqualTo(24),
-          reason: '胶囊应水平错开手指（中心 dx=${rect.center.dx}，手指 x=400）');
+      expect(
+        (rect.center.dx - fingerX).abs(),
+        greaterThanOrEqualTo(24),
+        reason: '胶囊应水平错开手指（中心 dx=${rect.center.dx}，手指 x=400）',
+      );
       await gesture.up();
       await tester.pumpAndSettle();
     });
@@ -669,8 +698,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 550)); // 链 500ms → 续翻
       await tester.pumpAndSettle();
       final after2 = container.read(calendarControllerProvider).selectedDay;
-      expect(after2.isAfter(after1), isTrue,
-          reason: '保持区内微漂移应继续翻页（不间断）');
+      expect(after2.isAfter(after1), isTrue, reason: '保持区内微漂移应继续翻页（不间断）');
       await gesture.up();
       await tester.pumpAndSettle();
     });
@@ -698,16 +726,17 @@ void main() {
       final scrollables = find.byType(Scrollable);
       final count = tester.widgetList(scrollables).length;
       for (var i = 0; i < count; i++) {
-        final pos = tester
-            .state<ScrollableState>(scrollables.at(i))
-            .position;
+        final pos = tester.state<ScrollableState>(scrollables.at(i)).position;
         if (pos.axis == Axis.vertical) {
           pixels = pos.pixels;
           break;
         }
       }
-      expect(pixels, greaterThan(0),
-          reason: '翻页后拖到视口顶部应自动滚动时间轴（实际 pixels=$pixels）');
+      expect(
+        pixels,
+        greaterThan(0),
+        reason: '翻页后拖到视口顶部应自动滚动时间轴（实际 pixels=$pixels）',
+      );
       await gesture.up();
       await tester.pumpAndSettle();
     });
@@ -741,8 +770,7 @@ void main() {
           (w) => w is Opacity && w.opacity == 0.3,
         ),
       );
-      expect(dimmed, findsWidgets,
-          reason: '跨页返回原任务块应保持半透明（与同页拖动一致）');
+      expect(dimmed, findsWidgets, reason: '跨页返回原任务块应保持半透明（与同页拖动一致）');
       await gesture.up();
       await tester.pumpAndSettle();
     });
@@ -777,8 +805,11 @@ void main() {
           break;
         }
       }
-      expect(pixels, closeTo(500, 60),
-          reason: '翻页后新页应继承滚动位置（实际 $pixels，修复前被污染为 0）');
+      expect(
+        pixels,
+        closeTo(500, 60),
+        reason: '翻页后新页应继承滚动位置（实际 $pixels，修复前被污染为 0）',
+      );
       await gesture.up();
       await tester.pumpAndSettle();
     });
@@ -812,8 +843,87 @@ void main() {
           break;
         }
       }
-      expect(pixels, closeTo(500, 60),
-          reason: '同页拖动松手后滚动位置应保持（实际 $pixels）');
+      expect(pixels, closeTo(500, 60), reason: '同页拖动松手后滚动位置应保持（实际 $pixels）');
+    });
+
+    testWidgets('普通翻页后仍可上下滚动时间轴', (tester) async {
+      await db.ensureDefaultList();
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      ScrollPosition visibleContentPosition() {
+        final scrollables = find.byType(Scrollable);
+        for (var i = 0; i < tester.widgetList(scrollables).length; i++) {
+          final position = tester
+              .state<ScrollableState>(scrollables.at(i))
+              .position;
+          if (position.axis != Axis.vertical || position.maxScrollExtent <= 0) {
+            continue;
+          }
+          final rect = tester.getRect(scrollables.at(i));
+          if (rect.left > 40 && rect.contains(const Offset(400, 450))) {
+            return position;
+          }
+        }
+        throw StateError('未找到当前页时间轴内容滚动器');
+      }
+
+      // 先横向翻到下一页，再在新页内容区上下滑动。
+      await tester.flingFrom(
+        const Offset(400, 250),
+        const Offset(-240, 0),
+        1200,
+      );
+      await tester.pumpAndSettle();
+      final afterPageTurn = visibleContentPosition();
+      final beforeUp = afterPageTurn.pixels;
+
+      await tester.dragFrom(const Offset(400, 450), const Offset(0, -220));
+      await tester.pumpAndSettle();
+      final afterUp = visibleContentPosition().pixels;
+      expect(afterUp, greaterThan(beforeUp), reason: '翻页后应能向上滚动时间轴');
+
+      await tester.dragFrom(const Offset(400, 300), const Offset(0, 220));
+      await tester.pumpAndSettle();
+      expect(
+        visibleContentPosition().pixels,
+        lessThan(afterUp),
+        reason: '翻页后应能向下滚回时间轴',
+      );
+    });
+
+    testWidgets('长按选时纵向拖动不触发边缘翻页', (tester) async {
+      await db.ensureDefaultList();
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final before = container.read(calendarControllerProvider).selectedDay;
+
+      // 右侧列靠近边缘，模拟周末/周五附近创建任务时的纵向拖选。
+      final gesture = await tester.startGesture(const Offset(760, 300));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await gesture.moveTo(const Offset(760, 460));
+      await tester.pump(const Duration(milliseconds: 450));
+      expect(
+        container.read(calendarControllerProvider).selectedDay,
+        before,
+        reason: '纯纵向长按选时不应触发边缘翻页',
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
     });
 
     testWidgets('远距离跳转停在目标位置：周/日/月视图不落在中间页', (tester) async {
@@ -860,10 +970,3 @@ void main() {
     });
   });
 }
-
-
-
-
-
-
-

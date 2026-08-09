@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -59,10 +59,12 @@ class WeekView extends ConsumerStatefulWidget {
   });
 
   final List<CalendarItem> items;
+
   /// 按天分组索引（P2-1：视图 build 不再全窗口扫描）
   final Map<int, List<CalendarItem>> byDay;
   final DateTime selectedDay;
   final ValueChanged<DateTime> onDayChanged;
+
   /// 跨视图共享的垂直滚动位置（周↔日切换时保持位置连续，不跳回顶部）
   final ValueNotifier<double>? sharedScrollOffset;
 
@@ -72,6 +74,7 @@ class WeekView extends ConsumerStatefulWidget {
 
 class _WeekViewState extends ConsumerState<WeekView> {
   final PageController _controller = PageController(initialPage: 500);
+  final ValueNotifier<int> _activePage = ValueNotifier<int>(500);
 
   /// 拖动/选时跨页时的目标日期（随翻页更新；初始=当前显示周的周一）
   final ValueNotifier<DateTime> _dragDay = ValueNotifier<DateTime>(
@@ -85,15 +88,20 @@ class _WeekViewState extends ConsumerState<WeekView> {
   // ---------- 共享拖拽状态（拖动任务改期跨页保持） ----------
   /// 拖动中最后已知的全局指针位置（虚影/胶囊渲染坐标换算用）
   final ValueNotifier<Offset?> dragGlobalPos = ValueNotifier<Offset?>(null);
+
   /// 拖动中的任务 id（null = 无拖动）
   final ValueNotifier<int?> dragTaskId = ValueNotifier<int?>(null);
+
   /// 虚影/胶囊显示列（边缘翻页后由 _edgeTurn 更新为新页边缘列）
   final ValueNotifier<DateTime?> dragActiveDay = ValueNotifier<DateTime?>(null);
+
   /// 拖动任务显示信息（跨周后视图 items 不含旧周任务，虚影据此渲染）
   final ValueNotifier<_DragGhostInfo?> dragGhostInfo =
       ValueNotifier<_DragGhostInfo?>(null);
+
   /// 共享边缘翻页控制器（连续翻周链跨页保持）
   final _EdgeTurnController _edgeTurnCtrl = _EdgeTurnController();
+
   /// 正常落点已处理标志（onAcceptWithDetails 设置——全局 route 的 up
   /// 兜底据此跳过，避免重复改期）
   final ValueNotifier<bool> dragDropped = ValueNotifier<bool>(false);
@@ -101,20 +109,26 @@ class _WeekViewState extends ConsumerState<WeekView> {
   // ---------- 全局指针事件驱动（跨页拖动：Draggable 被 evict 后仍可靠） ----------
   /// 拖动中注册到 pointerRouter 的指针（up/取消时移除）
   int? _dragPointer;
+
   /// 拖动任务 id 副本（松手/取消会清共享状态——落点兜底用）
   int? _dragTaskId;
+
   /// 拖动任务信息副本（同原因，落点兜底用）
   _DragGhostInfo? _dragInfo;
+
   /// 落点 y 换算基准：当前页时间轴主体顶部全局 y（各页 post-frame
   /// 上报 + 滚动修正，当前可见页最后写入）
   final ValueNotifier<double> dragAxisTopY = ValueNotifier<double>(0);
+
   /// 当前页时间轴 scrollController（各页 post-frame 上报——翻页后
   /// Draggable 被 evict 时全局 route 据此接管垂直自动滚动）
   final ValueNotifier<ScrollController?> dragScrollCtrl =
       ValueNotifier<ScrollController?>(null);
+
   /// 当前页时间轴视口顶部全局 y + 视口高（垂直自动滚动触发区换算用）
   final ValueNotifier<double> dragViewportTopY = ValueNotifier<double>(0);
   final ValueNotifier<double> dragViewportH = ValueNotifier<double>(0);
+
   /// 全局垂直自动滚动 Timer（16ms 步进 jumpTo ±8px；松手/取消停止）
   Timer? _autoScrollTimer;
 
@@ -122,7 +136,6 @@ class _WeekViewState extends ConsumerState<WeekView> {
   /// 优先使用外部传入的共享 notifier（周↔日切换连续）
   late final ValueNotifier<double> _sharedScrollOffset;
   ValueNotifier<double>? _ownScroll;
-
 
   /// P1-D：外部跳页目标页。跳页触发的 onPageChanged 只同步 _dragDay、
   /// 不回写 selectedDay（否则点"今天"后选中日被回归为周一）。
@@ -143,14 +156,15 @@ class _WeekViewState extends ConsumerState<WeekView> {
   void initState() {
     super.initState();
     _epochMonday = DateUtilsEx.mondayOf(AppClock.now());
+    _activePage.value = _pageForMonday(
+      DateUtilsEx.mondayOf(widget.selectedDay),
+    );
     _sharedScrollOffset =
         widget.sharedScrollOffset ?? (_ownScroll = ValueNotifier<double>(0));
     _dragDay.value = DateUtilsEx.mondayOf(widget.selectedDay);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _controller.hasClients) {
-        final target = _pageForMonday(
-          DateUtilsEx.mondayOf(widget.selectedDay),
-        );
+        final target = _pageForMonday(DateUtilsEx.mondayOf(widget.selectedDay));
         // 初始定位：jumpToPage 瞬跳（不产生 ScrollUpdateNotification，
         // 不触发 onPageChanged）——无需动画拦截；下一帧兜底清除 pending
         //（否则残留会误拦后续翻页的 onPageChanged 回写）
@@ -187,9 +201,9 @@ class _WeekViewState extends ConsumerState<WeekView> {
             curve: Curves.easeOutCubic,
           )
           .whenComplete(() {
-        // 动画结束（含被手势打断）→ 结束拦截，防 pending 残留
-        if (mounted) _pendingExternalPage = null;
-      });
+            // 动画结束（含被手势打断）→ 结束拦截，防 pending 残留
+            if (mounted) _pendingExternalPage = null;
+          });
       _dragDay.value = newMonday;
     }
   }
@@ -198,6 +212,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
   void dispose() {
     _unregisterDragRoute();
     _controller.dispose();
+    _activePage.dispose();
     _dragDay.dispose();
     _edgeState.dispose();
     dragGlobalPos.dispose();
@@ -250,7 +265,10 @@ class _WeekViewState extends ConsumerState<WeekView> {
     _dragPointer = pointer;
     _dragTaskId = taskId;
     _dragInfo = dragGhostInfo.value;
-    GestureBinding.instance.pointerRouter.addRoute(pointer, _onDragPointerEvent);
+    GestureBinding.instance.pointerRouter.addRoute(
+      pointer,
+      _onDragPointerEvent,
+    );
   }
 
   void _unregisterDragRoute() {
@@ -260,7 +278,6 @@ class _WeekViewState extends ConsumerState<WeekView> {
       _dragPointer = null;
     }
   }
-
 
   void _onDragPointerEvent(PointerEvent e) {
     if (e is PointerMoveEvent) {
@@ -420,10 +437,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
     final day = _dragDay.value.add(Duration(days: col));
     // 时间轴主体顶部全局 y（各页 post-frame 上报，当前页最后写入）
     final localDy = pos.dy - dragAxisTopY.value;
-    final startHour = effectiveStartHourFor(
-      byDay: widget.byDay,
-      days: [day],
-    );
+    final startHour = effectiveStartHourFor(byDay: widget.byDay, days: [day]);
     final minutes = (startHour * 60 + localDy / _pixelPerHour * 60)
         .roundToDouble()
         .clamp(startHour * 60.0, _endHour * 60.0);
@@ -491,6 +505,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
       // 触发 deactivate 时序问题（_NowLine Timer pending），暂不启用；
       // 丝滑翻页主要靠窗口缓存（翻页零 DB）+ byDay 分组 build 减负
       onPageChanged: (page) {
+        _activePage.value = page;
         final offset = page - 500;
         final weekMonday = _epochMonday.add(Duration(days: offset * 7));
         // P1-D：外部跳页（今天按钮/日期选择）动画期间——onPageChanged
@@ -514,6 +529,8 @@ class _WeekViewState extends ConsumerState<WeekView> {
         final weekStart = _epochMonday.add(Duration(days: offset * 7));
         return _KeepAlive(
           child: _TimeAxisView(
+            pageIndex: page,
+            activePage: _activePage,
             items: widget.items,
             byDay: widget.byDay,
             start: weekStart,
@@ -554,10 +571,12 @@ class DayView extends ConsumerStatefulWidget {
   });
 
   final List<CalendarItem> items;
+
   /// 按天分组索引（P2-1：视图 build 不再全窗口扫描）
   final Map<int, List<CalendarItem>> byDay;
   final DateTime selectedDay;
   final ValueChanged<DateTime> onDayChanged;
+
   /// 跨视图共享的垂直滚动位置（周↔日切换时保持位置连续）
   final ValueNotifier<double>? sharedScrollOffset;
 
@@ -567,9 +586,11 @@ class DayView extends ConsumerStatefulWidget {
 
 class _DayViewState extends ConsumerState<DayView> {
   late final PageController _controller;
+  late final ValueNotifier<int> _activePage;
   final ValueNotifier<DateTime> _dragDay = ValueNotifier<DateTime>(
     AppClock.now(),
   );
+
   /// 共享边缘滞回状态（同 WeekView）
   final ValueNotifier<int> _edgeState = ValueNotifier<int>(0);
 
@@ -577,22 +598,29 @@ class _DayViewState extends ConsumerState<DayView> {
   final ValueNotifier<Offset?> dragGlobalPos = ValueNotifier<Offset?>(null);
   final ValueNotifier<int?> dragTaskId = ValueNotifier<int?>(null);
   final ValueNotifier<DateTime?> dragActiveDay = ValueNotifier<DateTime?>(null);
+
   /// 拖动任务显示信息（同 WeekView）
   final ValueNotifier<_DragGhostInfo?> dragGhostInfo =
       ValueNotifier<_DragGhostInfo?>(null);
+
   /// 共享边缘翻页控制器（连续翻日链跨页保持）
   final _EdgeTurnController _edgeTurnCtrl = _EdgeTurnController();
+
   /// 正常落点已处理标志（同 WeekView）
   final ValueNotifier<bool> dragDropped = ValueNotifier<bool>(false);
+
   /// 落点 y 换算基准：当前页时间轴主体顶部全局 y（各页 post-frame 上报）
   final ValueNotifier<double> dragAxisTopY = ValueNotifier<double>(0);
+
   /// 当前页时间轴 scrollController（各页 post-frame 上报——翻页后
   /// Draggable 被 evict 时全局 route 据此接管垂直自动滚动，同 WeekView）
   final ValueNotifier<ScrollController?> dragScrollCtrl =
       ValueNotifier<ScrollController?>(null);
+
   /// 当前页时间轴视口顶部全局 y + 视口高（垂直自动滚动触发区换算用）
   final ValueNotifier<double> dragViewportTopY = ValueNotifier<double>(0);
   final ValueNotifier<double> dragViewportH = ValueNotifier<double>(0);
+
   /// 全局垂直自动滚动 Timer（16ms 步进 jumpTo ±8px；松手/取消停止）
   Timer? _autoScrollTimer;
 
@@ -610,6 +638,7 @@ class _DayViewState extends ConsumerState<DayView> {
     _sharedScrollOffset =
         widget.sharedScrollOffset ?? (_ownScroll = ValueNotifier<double>(0));
     _controller = PageController(initialPage: _pageFor(widget.selectedDay));
+    _activePage = ValueNotifier<int>(_pageFor(widget.selectedDay));
     _dragDay.value = widget.selectedDay;
   }
 
@@ -636,8 +665,8 @@ class _DayViewState extends ConsumerState<DayView> {
             curve: Curves.easeOutCubic,
           )
           .whenComplete(() {
-        if (mounted) _pendingExternalPage = null;
-      });
+            if (mounted) _pendingExternalPage = null;
+          });
       _dragDay.value = widget.selectedDay;
     }
   }
@@ -646,6 +675,7 @@ class _DayViewState extends ConsumerState<DayView> {
   void dispose() {
     _unregisterDragRoute();
     _controller.dispose();
+    _activePage.dispose();
     _dragDay.dispose();
     _edgeState.dispose();
     dragGlobalPos.dispose();
@@ -688,10 +718,13 @@ class _DayViewState extends ConsumerState<DayView> {
 
   // ---------- 全局指针事件驱动（跨页拖动，同 WeekView） ----------
   int? _dragPointer;
+
   /// 拖动任务 id 副本（松手/取消会清共享状态——落点兜底用）
   int? _dragTaskId;
+
   /// 拖动任务信息副本（同原因，落点兜底用）
   _DragGhostInfo? _dragInfo;
+
   /// 外部跳日目标页（今天/DatePicker/头部）——动画期间 onPageChanged
   /// 拦截回写 selectedDay，防回跳打断动画停在中间日
   int? _pendingExternalPage;
@@ -701,7 +734,10 @@ class _DayViewState extends ConsumerState<DayView> {
     _dragPointer = pointer;
     _dragTaskId = taskId;
     _dragInfo = dragGhostInfo.value;
-    GestureBinding.instance.pointerRouter.addRoute(pointer, _onDragPointerEvent);
+    GestureBinding.instance.pointerRouter.addRoute(
+      pointer,
+      _onDragPointerEvent,
+    );
   }
 
   void _unregisterDragRoute() {
@@ -711,7 +747,6 @@ class _DayViewState extends ConsumerState<DayView> {
       _dragPointer = null;
     }
   }
-
 
   void _onDragPointerEvent(PointerEvent e) {
     if (e is PointerMoveEvent) {
@@ -854,10 +889,7 @@ class _DayViewState extends ConsumerState<DayView> {
     final day = _dragDay.value;
     // 时间轴主体顶部全局 y（各页 post-frame 上报，当前页最后写入）
     final localDy = pos.dy - dragAxisTopY.value;
-    final startHour = effectiveStartHourFor(
-      byDay: widget.byDay,
-      days: [day],
-    );
+    final startHour = effectiveStartHourFor(byDay: widget.byDay, days: [day]);
     final minutes = (startHour * 60 + localDy / _pixelPerHour * 60)
         .roundToDouble()
         .clamp(startHour * 60.0, _endHour * 60.0);
@@ -922,6 +954,7 @@ class _DayViewState extends ConsumerState<DayView> {
       // 触发 deactivate 时序问题（_NowLine Timer pending），暂不启用；
       // 丝滑翻页主要靠窗口缓存（翻页零 DB）+ byDay 分组 build 减负
       onPageChanged: (page) {
+        _activePage.value = page;
         final day = DateTime(2000, 1, 1).add(Duration(days: page));
         // 外部跳日动画期间：onPageChanged 多次触发（round 变化），只同步
         // _dragDay 不回写 selectedDay（防回跳打断动画停在中间日）；到达
@@ -940,6 +973,8 @@ class _DayViewState extends ConsumerState<DayView> {
         final day = DateTime(2000, 1, 1).add(Duration(days: page));
         return _KeepAlive(
           child: _TimeAxisView(
+            pageIndex: page,
+            activePage: _activePage,
             items: widget.items,
             byDay: widget.byDay,
             start: day,
@@ -996,6 +1031,8 @@ class _KeepAliveState extends State<_KeepAlive>
 /// E3：红线仅显示在今天列
 class _TimeAxisView extends ConsumerStatefulWidget {
   const _TimeAxisView({
+    required this.pageIndex,
+    required this.activePage,
     required this.items,
     required this.byDay,
     required this.start,
@@ -1018,7 +1055,10 @@ class _TimeAxisView extends ConsumerStatefulWidget {
     this.onDragStartTracking,
   });
 
+  final int pageIndex;
+  final ValueNotifier<int> activePage;
   final List<CalendarItem> items;
+
   /// 按天分组索引（P2-1：build 不再全窗口扫描）
   final Map<int, List<CalendarItem>> byDay;
   final DateTime start;
@@ -1044,8 +1084,10 @@ class _TimeAxisView extends ConsumerStatefulWidget {
   final ValueNotifier<DateTime?>? dragActiveDay;
   final ValueNotifier<_DragGhostInfo?>? dragGhostInfo;
   final ValueNotifier<bool>? dragDropped;
+
   /// 本页时间轴主体顶部全局 y 上报（落点兜底换算基准）
   final ValueNotifier<double>? dragAxisTopY;
+
   /// 本页 scrollController + 视口顶全局 y + 视口高上报（翻页后
   /// Draggable evict 时全局 route 接管垂直自动滚动用）
   final ValueNotifier<ScrollController?>? dragScrollCtrl;
@@ -1065,8 +1107,11 @@ class _TimeAxisView extends ConsumerStatefulWidget {
 class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
   final _scrollController = ScrollController();
   final _timeBarController = ScrollController();
+
   /// 本页时间轴主体 Stack 的 key（落点基准上报用，每页独立）
   final GlobalKey _axisKey = GlobalKey();
+  bool _restoreScheduled = false;
+  int _restoreAttempts = 0;
 
   @override
   void initState() {
@@ -1076,22 +1121,64 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
     // 不自动定位到当前时间：任何自动滚动都会在切换周/日、拖动改期时
     // 造成视觉跳变。时间轴位置完全由用户控制。
     // 翻页后新页继承共享滚动位置（切周/切日不跳回顶部）
+    widget.activePage.addListener(_onActivePageChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final share = widget.scrollOffsetShare;
-      if (share != null && share.value > 0 && _scrollController.hasClients) {
-        _scrollController.jumpTo(
-          share.value.clamp(0.0, _scrollController.position.maxScrollExtent),
-        );
-      }
-      // 上报本页时间轴主体顶部全局 y（落点兜底换算基准；当前页最后写入）
-      _reportAxisTopY();
-      // 上报本页 scrollController + 视口顶/高（翻页后全局 route 接管
-      // 垂直自动滚动；当前页最后写入）
-      _reportScrollViewport();
+      _restoreSharedScroll();
     });
     // A7：移除每分钟整页 setState 的时钟 Timer——红线改由独立组件
     // _NowLine 自驱动，不再触发整个时间轴重建
+  }
+
+  bool get _isActivePage => widget.activePage.value == widget.pageIndex;
+
+  void _onActivePageChanged() {
+    if (!mounted) return;
+    if (!_isActivePage) {
+      // 当前页切走后，禁止全局拖动路由继续操作旧页控制器。
+      if (widget.dragScrollCtrl?.value == _scrollController) {
+        widget.dragScrollCtrl?.value = null;
+      }
+      return;
+    }
+    _restoreAttempts = 0;
+    _scheduleRestore();
+  }
+
+  void _scheduleRestore() {
+    if (_restoreScheduled || !mounted) return;
+    _restoreScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _restoreScheduled = false;
+      if (mounted) _restoreSharedScroll();
+    });
+  }
+
+  void _restoreSharedScroll() {
+    if (!_isActivePage) return;
+    final share = widget.scrollOffsetShare;
+    if (share == null || share.value <= 0) {
+      _reportAxisTopY();
+      _reportScrollViewport();
+      return;
+    }
+    if (!_scrollController.hasClients) {
+      if (_restoreAttempts++ < 4) _scheduleRestore();
+      return;
+    }
+    final max = _scrollController.position.maxScrollExtent;
+    if (max == 0 && _restoreAttempts++ < 4) {
+      _scheduleRestore();
+      return;
+    }
+    _restoreAttempts = 0;
+    final target = share.value.clamp(0.0, max).toDouble();
+    if ((_scrollController.offset - target).abs() > 0.5) {
+      _scrollController.jumpTo(target);
+    }
+    // 上报当前页基准和控制器，避免翻页后仍使用旧页的坐标/滚动对象。
+    _reportAxisTopY();
+    _reportScrollViewport();
   }
 
   /// 本页时间轴主体顶部全局 y（post-frame 布局完成后；滚动时由 _onScroll
@@ -1113,7 +1200,7 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
     // 伪事件——跳过它（否则共享位置被写 0，新页 post-frame 恢复逻辑
     // `if (share > 0)` 读到 0 不恢复 → 时间轴跳回顶部）
     final share = widget.scrollOffsetShare;
-    if (share != null) {
+    if (share != null && _isActivePage) {
       final off = _scrollController.offset;
       if (off > 0 || (off - _lastSharedOffset).abs() > 0.5) {
         _lastSharedOffset = off;
@@ -1129,6 +1216,7 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
 
   double? _baseAxisTopY;
   double _baseAxisOffset = 0;
+
   /// 上次写入共享滚动位置的值（_onScroll 防污染用）
   double _lastSharedOffset = 0;
 
@@ -1140,13 +1228,13 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
   void _reportScrollViewport() {
     final ctrl = widget.dragScrollCtrl;
     if (ctrl == null) return;
+    if (!_isActivePage) return;
     if (!_scrollController.hasClients) return;
     ctrl.value = _scrollController;
     final ctx = _scrollController.position.context.notificationContext;
     final scrollable = ctx?.findRenderObject() as RenderBox?;
     if (scrollable != null && scrollable.hasSize) {
-      widget.dragViewportTopY?.value =
-          scrollable.localToGlobal(Offset.zero).dy;
+      widget.dragViewportTopY?.value = scrollable.localToGlobal(Offset.zero).dy;
       widget.dragViewportH?.value = scrollable.size.height;
     }
   }
@@ -1163,7 +1251,8 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
   void dispose() {
     // 页面 State 销毁（如 PageView GC/keepalive 重建）前把本页滚动位置
     // 写回共享值——重建后 post-frame 据此恢复，时间轴不跳回顶部
-    if (_scrollController.hasClients) {
+    widget.activePage.removeListener(_onActivePageChanged);
+    if (_isActivePage && _scrollController.hasClients) {
       final share = widget.scrollOffsetShare;
       if (share != null) {
         share.value = _scrollController.offset;
@@ -1195,248 +1284,263 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
       builder: (context, constraints) {
         final axisWidth = constraints.maxWidth;
         return Column(
-      children: [
-        // 星期/日期头部
-        Row(
           children: [
-            const SizedBox(width: 44),
-            for (final d in days)
-              Expanded(
-                child: InkWell(
-                  onTap: widget.isWeek
-                      // P2：合并为一次 load（此前 setSelectedDay+setView 两次）
-                      ? () => notifier.setSelectedDayWithView(d, 'day')
-                      // P2：日视图头部可点击跳转其他日期（此前点击无反应）
-                      : () async {
-                          final now = AppClock.now();
-                          // P1-27：日视图可翻至 2000-01-01，当前显示日超界
-                          // 会触发 DatePicker 断言崩溃，钳制到 [first, last]
-                          //（前后各 60 年，覆盖日视图可翻范围）
-                          final first = DateTime(now.year - 60);
-                          final last = DateTime(now.year + 60);
-                          final initial = widget.start;
-                          final clamped = initial.isBefore(first)
-                              ? first
-                              : (initial.isAfter(last) ? last : initial);
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: clamped,
-                            firstDate: first,
-                            lastDate: last,
-                            helpText: '跳转到日期',
-                          );
-                          if (picked != null && context.mounted) {
-                            notifier.setSelectedDay(picked);
-                          }
-                        },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Column(
-                      children: [
-                        if (widget.isWeek) ...[
-                          Text(
-                            DateUtilsEx.weekdayCn[d.weekday - 1],
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: DateUtilsEx.sameDay(d, today)
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Colors.grey.shade600,
-                            ),
-                          ),
-                          Text(
-                            '${d.day}',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: DateUtilsEx.sameDay(d, today)
-                                  ? FontWeight.bold
-                                  : null,
-                              color: DateUtilsEx.sameDay(d, today)
-                                  ? Theme.of(context).colorScheme.primary
-                                  : null,
-                            ),
-                          ),
-                        ] else
-                          Text(
-                            DateUtilsEx.dateCn(d),
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                      ],
+            // 星期/日期头部
+            Row(
+              children: [
+                const SizedBox(width: 44),
+                for (final d in days)
+                  Expanded(
+                    child: InkWell(
+                      onTap: widget.isWeek
+                          // P2：合并为一次 load（此前 setSelectedDay+setView 两次）
+                          ? () => notifier.setSelectedDayWithView(d, 'day')
+                          // P2：日视图头部可点击跳转其他日期（此前点击无反应）
+                          : () async {
+                              final now = AppClock.now();
+                              // P1-27：日视图可翻至 2000-01-01，当前显示日超界
+                              // 会触发 DatePicker 断言崩溃，钳制到 [first, last]
+                              //（前后各 60 年，覆盖日视图可翻范围）
+                              final first = DateTime(now.year - 60);
+                              final last = DateTime(now.year + 60);
+                              final initial = widget.start;
+                              final clamped = initial.isBefore(first)
+                                  ? first
+                                  : (initial.isAfter(last) ? last : initial);
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: clamped,
+                                firstDate: first,
+                                lastDate: last,
+                                helpText: '跳转到日期',
+                              );
+                              if (picked != null && context.mounted) {
+                                notifier.setSelectedDay(picked);
+                              }
+                            },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Column(
+                          children: [
+                            if (widget.isWeek) ...[
+                              Text(
+                                DateUtilsEx.weekdayCn[d.weekday - 1],
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: DateUtilsEx.sameDay(d, today)
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Colors.grey.shade600,
+                                ),
+                              ),
+                              Text(
+                                '${d.day}',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: DateUtilsEx.sameDay(d, today)
+                                      ? FontWeight.bold
+                                      : null,
+                                  color: DateUtilsEx.sameDay(d, today)
+                                      ? Theme.of(context).colorScheme.primary
+                                      : null,
+                                ),
+                              ),
+                            ] else
+                              Text(
+                                DateUtilsEx.dateCn(d),
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
+                  ),
+              ],
+            ),
+            const Divider(height: 1),
+            // 5.8/P1-8：时间轴可见范围说明（动态起始小时，06:00 前有任务时
+            // 起始点扩展；超出时间轴范围的夜间任务仍不显示）
+            Padding(
+              padding: const EdgeInsets.fromLTRB(48, 1, 12, 1),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  // 截图②：明确"可滚动"——消除"标注 06-23 但屏内只看到部分"的困惑
+                  '可滚动 · 时间轴 ${startEff.toString().padLeft(2, '0')}:00-23:00',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Theme.of(context).colorScheme.outline,
                   ),
                 ),
               ),
-          ],
-        ),
-        const Divider(height: 1),
-        // 5.8/P1-8：时间轴可见范围说明（动态起始小时，06:00 前有任务时
-        // 起始点扩展；超出时间轴范围的夜间任务仍不显示）
-        Padding(
-          padding: const EdgeInsets.fromLTRB(48, 1, 12, 1),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              // 截图②：明确"可滚动"——消除"标注 06-23 但屏内只看到部分"的困惑
-              '可滚动 · 时间轴 ${startEff.toString().padLeft(2, '0')}:00-23:00',
-              style: TextStyle(
-                fontSize: 10,
-                color: Theme.of(context).colorScheme.outline,
-              ),
             ),
-          ),
-        ),
-        Expanded(
-          child: Column(
-            children: [
-              // 全天区固定在顶部（不随滚动，保证左右时间栏与网格线严格对齐）
-              if (days.any((d) => _allDayItems(d).isNotEmpty)) ...[
-                _AllDayBar(days: days, byDay: widget.byDay, axisWidth: axisWidth),
-                Divider(
-                  height: 1,
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.outlineVariant.withValues(alpha: 0.5),
-                ),
-              ],
-              Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // E5：左侧时间刻度（跟随右侧滚动同步）
-                    SizedBox(
-                      width: 44,
-                      child: ListView.builder(
-                        controller: _timeBarController,
-                        physics: const NeverScrollableScrollPhysics(),
-                        // 上下各留半行高（与右侧内容对称），让首尾标签（6:00/23:00）完整显示
-                        padding: const EdgeInsets.symmetric(vertical: 32),
-                        itemCount: totalHours + 1,
-                        itemBuilder: (context, i) {
-                          final hour = startEff + i;
-                          return SizedBox(
-                            height: _pixelPerHour,
-                            // 标签中心对齐小时线（文字上下各 5px，跨线居中）
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                Positioned(
-                                  right: 0,
-                                  top: -5,
-                                  child: Text(
-                                    '${hour.toString().padLeft(2, '0')}:00',
-                                    textAlign: TextAlign.right,
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      height: 1,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
+            Expanded(
+              child: Column(
+                children: [
+                  // 全天区固定在顶部（不随滚动，保证左右时间栏与网格线严格对齐）
+                  if (days.any((d) => _allDayItems(d).isNotEmpty)) ...[
+                    _AllDayBar(
+                      days: days,
+                      byDay: widget.byDay,
+                      axisWidth: axisWidth,
                     ),
-                    // E5：右侧内容（同一滚动控制器）
-                    Expanded(
-                      child: ListView(
-                        controller: _scrollController,
-                        // 与左侧时间栏同步偏移，保持线对齐；
-                        // 上下各留半行（32px），6:00 上方与 23:00 下方留白对称
-                        padding: const EdgeInsets.symmetric(vertical: 32),
-                        children: [
-                          // 时间轴主体（18 行，6:00~23:00 线）
-                          SizedBox(
-                            key: _axisKey,
-                            height: totalHours * _pixelPerHour,
-                            child: Stack(
-                              children: [
-                                // 时间网格线（暗色适配）
-                                for (var h = 0; h <= totalHours; h++)
-                                  Positioned(
-                                    top: h * _pixelPerHour - 0.5,
-                                    left: 0,
-                                    right: 0,
-                                    child: Divider(
-                                      height: 1,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .outlineVariant
-                                          .withValues(alpha: 0.5),
-                                    ),
-                                  ),
-                                // 日期列 + 任务块
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                    Divider(
+                      height: 1,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.outlineVariant.withValues(alpha: 0.5),
+                    ),
+                  ],
+                  Expanded(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // E5：左侧时间刻度（跟随右侧滚动同步）
+                        SizedBox(
+                          width: 44,
+                          child: ListView.builder(
+                            controller: _timeBarController,
+                            physics: const NeverScrollableScrollPhysics(),
+                            // 上下各留半行高（与右侧内容对称），让首尾标签（6:00/23:00）完整显示
+                            padding: const EdgeInsets.symmetric(vertical: 32),
+                            itemCount: totalHours + 1,
+                            itemBuilder: (context, i) {
+                              final hour = startEff + i;
+                              return SizedBox(
+                                height: _pixelPerHour,
+                                // 标签中心对齐小时线（文字上下各 5px，跨线居中）
+                                child: Stack(
+                                  clipBehavior: Clip.none,
                                   children: [
-                                    // 与 _DayColumnState.columnWidth 同口径
-                                    // （扣除时间栏 44px 后均分）
-                                    for (var i = 0; i < days.length; i++) ...[
-                                      Expanded(
-                                        child: _DayColumn(
-                                          day: days[i],
-                                          items: _timedItems(days[i]),
-                                          isWeek: widget.isWeek,
-                                          startHour: startEff,
-                                          axisWidth: axisWidth,
-                                          dragDay: widget.dragDay,
-                                          edgeState: widget.edgeState,
-                                          scrollController: _scrollController,
-                                          onEdgeTurn: widget.onEdgeTurn,
-                                          dragGlobalPos: widget.dragGlobalPos,
-                                          dragTaskId: widget.dragTaskId,
-                                          dragActiveDay: widget.dragActiveDay,
-                                          dragGhostInfo: widget.dragGhostInfo,
-                                          dragDropped: widget.dragDropped,
-                                          edgeTurnCtrl: widget.edgeTurnCtrl,
-                                          onDragStartTracking:
-                                              widget.onDragStartTracking,
-                                          // A13：列在视口内的左偏移（含分隔线）
-                                          viewportLeft:
-                                              i *
-                                              ((axisWidth - 44) /
-                                                  days.length +
-                                                  1),
+                                    Positioned(
+                                      right: 0,
+                                      top: -5,
+                                      child: Text(
+                                        '${hour.toString().padLeft(2, '0')}:00',
+                                        textAlign: TextAlign.right,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          height: 1,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
                                         ),
                                       ),
-                                      if (days[i] != days.last)
-                                        Container(
-                                          width: 1,
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        // E5：右侧内容（同一滚动控制器）
+                        Expanded(
+                          child: ListView(
+                            controller: _scrollController,
+                            // 与左侧时间栏同步偏移，保持线对齐；
+                            // 上下各留半行（32px），6:00 上方与 23:00 下方留白对称
+                            padding: const EdgeInsets.symmetric(vertical: 32),
+                            children: [
+                              // 时间轴主体（18 行，6:00~23:00 线）
+                              SizedBox(
+                                key: _axisKey,
+                                height: totalHours * _pixelPerHour,
+                                child: Stack(
+                                  children: [
+                                    // 时间网格线（暗色适配）
+                                    for (var h = 0; h <= totalHours; h++)
+                                      Positioned(
+                                        top: h * _pixelPerHour - 0.5,
+                                        left: 0,
+                                        right: 0,
+                                        child: Divider(
+                                          height: 1,
                                           color: Theme.of(context)
                                               .colorScheme
                                               .outlineVariant
                                               .withValues(alpha: 0.5),
                                         ),
-                                    ],
+                                      ),
+                                    // 日期列 + 任务块
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        // 与 _DayColumnState.columnWidth 同口径
+                                        // （扣除时间栏 44px 后均分）
+                                        for (
+                                          var i = 0;
+                                          i < days.length;
+                                          i++
+                                        ) ...[
+                                          Expanded(
+                                            child: _DayColumn(
+                                              day: days[i],
+                                              items: _timedItems(days[i]),
+                                              isWeek: widget.isWeek,
+                                              startHour: startEff,
+                                              axisWidth: axisWidth,
+                                              dragDay: widget.dragDay,
+                                              edgeState: widget.edgeState,
+                                              scrollController:
+                                                  _scrollController,
+                                              onEdgeTurn: widget.onEdgeTurn,
+                                              dragGlobalPos:
+                                                  widget.dragGlobalPos,
+                                              dragTaskId: widget.dragTaskId,
+                                              dragActiveDay:
+                                                  widget.dragActiveDay,
+                                              dragGhostInfo:
+                                                  widget.dragGhostInfo,
+                                              dragDropped: widget.dragDropped,
+                                              edgeTurnCtrl: widget.edgeTurnCtrl,
+                                              onDragStartTracking:
+                                                  widget.onDragStartTracking,
+                                              // A13：列在视口内的左偏移（含分隔线）
+                                              viewportLeft:
+                                                  i *
+                                                  ((axisWidth - 44) /
+                                                          days.length +
+                                                      1),
+                                            ),
+                                          ),
+                                          if (days[i] != days.last)
+                                            Container(
+                                              width: 1,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .outlineVariant
+                                                  .withValues(alpha: 0.5),
+                                            ),
+                                        ],
+                                      ],
+                                    ),
+                                    // E3+E4：当前时间线（仅今天列，平滑走秒）
+                                    // A7：独立组件自驱动，不再每分钟重建整页
+                                    _NowLine(
+                                      todayIndex: days.indexWhere(
+                                        (d) => DateUtilsEx.sameDay(d, today),
+                                      ),
+                                      columnWidth:
+                                          (axisWidth - 44) / days.length,
+                                      startHour: startEff,
+                                    ),
                                   ],
                                 ),
-                                // E3+E4：当前时间线（仅今天列，平滑走秒）
-                                // A7：独立组件自驱动，不再每分钟重建整页
-                                _NowLine(
-                                  todayIndex: days.indexWhere(
-                                    (d) => DateUtilsEx.sameDay(d, today),
-                                  ),
-                                  columnWidth: (axisWidth - 44) /
-                                      days.length,
-                                  startHour: startEff,
-                                ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-      ],
-    );
+            ),
+          ],
+        );
       },
     );
   }
@@ -1446,10 +1550,8 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
 
   /// P1-8：显示范围内（当周/当天）timed 任务的最早开始小时，
   /// 与默认 6 取小——只扩展不收缩（多数情况保持 06:00 起点）。
-  int _effectiveStartHour(List<DateTime> days) => effectiveStartHourFor(
-    byDay: widget.byDay,
-    days: days,
-  );
+  int _effectiveStartHour(List<DateTime> days) =>
+      effectiveStartHourFor(byDay: widget.byDay, days: days);
 
   List<CalendarItem> _allDayItems(DateTime day) =>
       (widget.byDay[_dayKey(day)] ?? const <CalendarItem>[])
@@ -1460,7 +1562,6 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
       (widget.byDay[_dayKey(day)] ?? const <CalendarItem>[])
           .where((i) => !_isTopArea(i))
           .toList();
-
 }
 
 /// A7/A8：当前时间红线独立组件。
@@ -1476,6 +1577,7 @@ class _NowLine extends StatefulWidget {
   /// 今天列索引（-1 = 不在今天，不显示）
   final int todayIndex;
   final double columnWidth;
+
   /// P1-8：时间轴起始小时（与 _TimeAxisView 动态起始一致，红线随之下移）
   final int startHour;
 
@@ -1587,8 +1689,10 @@ class _AllDayBar extends ConsumerWidget {
   });
 
   final List<DateTime> days;
+
   /// 按天分组索引（P2-1：不再全窗口扫描）
   final Map<int, List<CalendarItem>> byDay;
+
   /// 内容区实际可用宽度（含左侧时间栏 44px；布局收窄后 ≠ 屏宽）
   final double axisWidth;
 
@@ -1603,9 +1707,7 @@ class _AllDayBar extends ConsumerWidget {
   }
 
   List<CalendarItem> _allDayItems(DateTime day) =>
-      (byDay[_dayKey(day)] ?? const <CalendarItem>[])
-          .where(isTopArea)
-          .toList();
+      (byDay[_dayKey(day)] ?? const <CalendarItem>[]).where(isTopArea).toList();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1655,6 +1757,7 @@ class _EdgeTurnController {
   Timer? timer;
   int dir = 0;
   double lastGlobalX = 0;
+
   /// 连续翻页链已启动（首次翻页 fire 后置位）：保持区内触摸点微漂移
   /// 不断链（"不间断翻页"）；移出保持区停链；松手/取消复位
   bool armed = false;
@@ -1733,6 +1836,7 @@ class _DayColumn extends ConsumerStatefulWidget {
   final ValueNotifier<int?>? dragTaskId;
   final ValueNotifier<DateTime?>? dragActiveDay;
   final ValueNotifier<_DragGhostInfo?>? dragGhostInfo;
+
   /// 正常落点已处理标志（onAcceptWithDetails 设置——全局 route 的 up
   /// 兜底据此跳过，避免重复改期）
   final ValueNotifier<bool>? dragDropped;
@@ -1749,8 +1853,7 @@ class _DayColumn extends ConsumerStatefulWidget {
 
 class _DayColumnState extends ConsumerState<_DayColumn> {
   /// 单列宽度（周视图 7 列、日视图 1 列，扣除左侧时间栏 44px）
-  double get columnWidth =>
-      (widget.axisWidth - 44) / (widget.isWeek ? 7 : 1);
+  double get columnWidth => (widget.axisWidth - 44) / (widget.isWeek ? 7 : 1);
 
   /// dragGlobalPos 为 null（无共享状态）时的兜底 notifier
   static final ValueNotifier<Offset?> _noopPos = ValueNotifier<Offset?>(null);
@@ -1765,6 +1868,8 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   bool _dragSelecting = false;
   double? _dragStartY;
   double? _dragCurrentY;
+  double? _selectionStartGlobalX;
+  double? _selectionStartGlobalY;
 
   /// 拖选胶囊位置（列内局部坐标；拖动任务路径的胶囊/虚影由共享状态
   /// dragGlobalPos 驱动，见 Stack 渲染层）
@@ -1881,6 +1986,30 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     }
   }
 
+  /// 长按选时默认是纵向动作。只有水平位移明显且确实是水平意图时，
+  /// 才允许进入边缘翻页，避免周边列的轻微手抖触发翻页。
+  void _maybeEdgeTurnForSelection(Offset globalPosition) {
+    final startX = _selectionStartGlobalX;
+    final startY = _selectionStartGlobalY;
+    if (startX == null || startY == null) return;
+    final dx = globalPosition.dx - startX;
+    final dy = globalPosition.dy - startY;
+    if (dx.abs() < 36 || dx.abs() <= dy.abs()) {
+      _cancelSelectionEdgeTurn();
+      return;
+    }
+    _maybeEdgeTurn(globalPosition.dx);
+  }
+
+  void _cancelSelectionEdgeTurn() {
+    final ctrl = widget.edgeTurnCtrl;
+    ctrl?.timer?.cancel();
+    ctrl?.timer = null;
+    ctrl?.dir = 0;
+    ctrl?.armed = false;
+    widget.edgeState?.value = 0;
+  }
+
   /// 调度边缘翻页：首次 300ms 延迟（快速拖过定位不误翻）；
   /// 同向已有计时（含连续链）则不重复调度
   void _armEdgeTimer(int dir, double w, _EdgeTurnController ctrl) {
@@ -1921,9 +2050,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     // （列 evict 后连续翻页链继续由全局 route 续链，松手时统一取消），
     // 此处不取消——否则手指不动时翻页链在 evict 处中断。
     if (_dragSelecting) {
-      widget.edgeTurnCtrl?.timer?.cancel();
-      widget.edgeTurnCtrl?.dir = 0;
-      widget.edgeTurnCtrl?.armed = false;
+      _cancelSelectionEdgeTurn();
     }
     super.dispose();
   }
@@ -2124,11 +2251,14 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
           // E7：长按拖动选择时间区间（10 分钟粒度）
           onLongPressStart: (details) {
             if (candidate.isNotEmpty) return;
+            _cancelSelectionEdgeTurn();
             Haptics.select();
             setState(() {
               _dragSelecting = true;
               _dragStartY = details.localPosition.dy;
               _dragCurrentY = details.localPosition.dy;
+              _selectionStartGlobalX = details.globalPosition.dx;
+              _selectionStartGlobalY = details.globalPosition.dy;
             });
             // A13：悬浮时间胶囊跟随手指
             _hintPos.value = Offset(
@@ -2139,7 +2269,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
           onLongPressMoveUpdate: (details) {
             if (!_dragSelecting) return;
             // 边缘自动翻页（选时跨周/跨天）
-            _maybeEdgeTurn(details.globalPosition.dx);
+            _maybeEdgeTurnForSelection(details.globalPosition);
             // 实时吸附：预览高亮区跟随 10 分钟粒度，松手结果一致
             setState(() {
               final (sy, ey) = _snappedYRange(
@@ -2156,6 +2286,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
             );
           },
           onLongPressEnd: (_) {
+            _cancelSelectionEdgeTurn();
             if (!_dragSelecting) return;
             final start = _dragStartY ?? 0;
             final end = _dragCurrentY ?? start;
@@ -2164,6 +2295,8 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
               _dragSelecting = false;
               _dragStartY = null;
               _dragCurrentY = null;
+              _selectionStartGlobalX = null;
+              _selectionStartGlobalY = null;
             });
             // P2：长按未拖动（位移过小）→ 等价点击空白，打开默认时长
             // 快速添加（此前有震动但无任何动作）
@@ -2193,10 +2326,13 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                     // 曾误用 bottom 导致钉到整列底部而"消失"）
                     // A10：加 key（按任务实例匹配，避免排序变化后错位滑动）
                     AnimatedPositioned(
-                      key: ValueKey('more-${b.item.task.id}-${b.item.instanceDate}'),
+                      key: ValueKey(
+                        'more-${b.item.task.id}-${b.item.instanceDate}',
+                      ),
                       duration: const Duration(milliseconds: 400),
                       curve: Curves.easeOutCubic,
-                      top: (b.spanEnd != null
+                      top:
+                          (b.spanEnd != null
                               ? _topForSpan(b.spanEnd!)
                               : _topFor(b.item) + _heightFor(b.item)) +
                           2,
@@ -2215,7 +2351,9 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                     // A10：加 key（此前按 index 匹配，改期/增删后"错误的块
                     // 滑到错误位置"，观感像闪烁）
                     AnimatedPositioned(
-                      key: ValueKey('blk-${b.item.task.id}-${b.item.instanceDate}'),
+                      key: ValueKey(
+                        'blk-${b.item.task.id}-${b.item.instanceDate}',
+                      ),
                       duration: const Duration(milliseconds: 400),
                       curve: Curves.easeOutCubic,
                       top: _topFor(b.item),
@@ -2339,10 +2477,11 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                     );
                     return _buildHintCapsule(
                       local: local,
-                      anchorY: ((gStart.hour * 60 + gStart.minute) -
-                                  widget.startHour * 60) /
-                              60 *
-                              _pixelPerHour,
+                      anchorY:
+                          ((gStart.hour * 60 + gStart.minute) -
+                              widget.startHour * 60) /
+                          60 *
+                          _pixelPerHour,
                       text: DateUtilsEx.timeCn(gStart),
                     );
                   },
@@ -2484,8 +2623,10 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   /// 此前顶部/底部 padding 区拖动可得 5:30/23:30，预览与结果不一致
   /// C5-2：两端同 clamp 到 23:00 时保证至少 10 分钟跨度
   (DateTime, DateTime) _snapRange(double y1, double y2) {
-    final minutes1 = widget.startHour * 60 + (y1 < y2 ? y1 : y2) / _pixelPerHour * 60;
-    final minutes2 = widget.startHour * 60 + (y1 < y2 ? y2 : y1) / _pixelPerHour * 60;
+    final minutes1 =
+        widget.startHour * 60 + (y1 < y2 ? y1 : y2) / _pixelPerHour * 60;
+    final minutes2 =
+        widget.startHour * 60 + (y1 < y2 ? y2 : y1) / _pixelPerHour * 60;
     var snapped1 = ((minutes1 / 10).round() * 10)
         .clamp(widget.startHour * 60, _endHour * 60)
         .toInt();
@@ -2566,20 +2707,20 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     }
     final axisTopGlobal = box.localToGlobal(Offset.zero).dy;
     final screenH = MediaQuery.sizeOf(context).height;
-    final scrollable = Scrollable.of(context).context.findRenderObject()
-        as RenderBox?;
-    final viewportTop =
-        scrollable != null && scrollable.hasSize
-            ? scrollable.localToGlobal(Offset.zero).dy
-            : axisTopGlobal;
+    final scrollable =
+        Scrollable.of(context).context.findRenderObject() as RenderBox?;
+    final viewportTop = scrollable != null && scrollable.hasSize
+        ? scrollable.localToGlobal(Offset.zero).dy
+        : axisTopGlobal;
     // 垂直可见区 = 视口顶 ∩ 列 Stack 顶（取靠下者）+ 安全边 4px
     final visibleTop = viewportTop + 4 > axisTopGlobal + 4
         ? viewportTop + 4
         : axisTopGlobal + 4;
     final axisBottom = axisTopGlobal + maxY;
     final screenBottom = screenH - capH - safeBottom;
-    final visibleBottom =
-        axisBottom - 4 < screenBottom ? axisBottom - 4 : screenBottom;
+    final visibleBottom = axisBottom - 4 < screenBottom
+        ? axisBottom - 4
+        : screenBottom;
     final anchorScreenY = axisTopGlobal + anchorY;
     var topScreen = anchorScreenY - capH - capGap;
     if (topScreen < visibleTop) topScreen = anchorScreenY + capGap;
@@ -2597,9 +2738,9 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     final viewportW = columnWidth * (widget.isWeek ? 7 : 1);
     var left =
         (widget.viewportLeft + local.dx - capW / 2).clamp(
-              4.0,
-              viewportW - capW - 4,
-            ) -
+          4.0,
+          viewportW - capW - 4,
+        ) -
         widget.viewportLeft;
     // 水平错开：胶囊中心与手指水平重叠（< capOffsetX）时，向视口内
     // 空间大的一侧偏移（shift = 错开量 + 半宽——完全脱离手指投影）
@@ -2610,10 +2751,12 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
       final leftRoom = fingerX - capW / 2 - 4;
       final shift = capOffsetX + capW / 2;
       if (rightRoom >= leftRoom) {
-        left = (fingerX + shift).clamp(4.0, viewportW - capW - 4) -
+        left =
+            (fingerX + shift).clamp(4.0, viewportW - capW - 4) -
             widget.viewportLeft;
       } else {
-        left = (fingerX - shift - capW).clamp(4.0, viewportW - capW - 4) -
+        left =
+            (fingerX - shift - capW).clamp(4.0, viewportW - capW - 4) -
             widget.viewportLeft;
       }
     }
@@ -2643,11 +2786,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
             // 可超过胶囊可用宽，Flexible+ellipsis 兜底
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.schedule,
-                size: 13,
-                color: scheme.onInverseSurface,
-              ),
+              Icon(Icons.schedule, size: 13, color: scheme.onInverseSurface),
               const SizedBox(width: 4),
               Flexible(
                 child: Text(
@@ -2681,11 +2820,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (c) => QuickAddSheetWithDefaults(
-        day,
-        start: start,
-        end: end,
-      ),
+      builder: (c) => QuickAddSheetWithDefaults(day, start: start, end: end),
     );
   }
 
@@ -2752,13 +2887,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
       final s = ps == null
           ? DateTime(day.year, day.month, day.day)
           : dt != null
-          ? DateTime(
-              day.year,
-              day.month,
-              day.day,
-              dt.hour,
-              dt.minute,
-            )
+          ? DateTime(day.year, day.month, day.day, dt.hour, dt.minute)
           : DateTime(day.year, day.month, day.day, ps.hour, ps.minute);
       final endTime = pe ?? ps?.add(const Duration(hours: 1));
       var e = endTime == null
@@ -2815,18 +2944,15 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
       var minStart = intervals[members.first].start;
       var maxEnd = intervals[members.first].end;
       for (final i in members) {
-        if (intervals[i].start.isBefore(minStart)) minStart = intervals[i].start;
+        if (intervals[i].start.isBefore(minStart))
+          minStart = intervals[i].start;
         if (intervals[i].end.isAfter(maxEnd)) maxEnd = intervals[i].end;
       }
       if (members.length <= 2) {
         var col = 0;
         for (final i in members) {
           result.add(
-            OverlapBlock(
-              item: sorted[i],
-              left: col,
-              total: members.length,
-            ),
+            OverlapBlock(item: sorted[i], left: col, total: members.length),
           );
           col++;
         }
@@ -2867,9 +2993,11 @@ class OverlapBlock {
   final CalendarItem item;
   final int left;
   final int total;
+
   /// >0 表示这是「+N」折叠块（N=moreCount，区间用 spanStart）
   final int moreCount;
   final DateTime? spanStart;
+
   /// A13：+N 块组并集区间终点（徽标定位到组区间底部外沿用）
   final DateTime? spanEnd;
 
@@ -2936,24 +3064,32 @@ class _TaskBlock extends ConsumerWidget {
 
   final CalendarItem item;
   final bool allDay;
+
   /// C3-4：置顶区跨天任务显示起止时刻小字
   final bool showTime;
+
   /// 拖动中全局指针位置上报（边缘翻周/日检测用——Draggable 全局坐标
   /// 不依赖 DragTarget 命中，指针拖出列/屏幕边缘仍可靠）
   final ValueChanged<Offset>? onDragPosition;
+
   /// 拖动结束（松手）回调：清理边缘/自动滚动状态
   final VoidCallback? onDragEnd;
+
   /// 拖动被取消/任务列被 evict 时兜底（见 onDraggableCanceled；仅停本列
   /// 自动滚动——共享拖拽状态由全局 route 统一管理，此处不清）
   final VoidCallback? onDragCanceled;
+
   /// 拖动开始回调（上报任务 id——共享拖拽状态据此显示虚影/胶囊）
   final ValueChanged<int>? onDragStartedTask;
+
   /// 按下指针上报（全局 pointerRouter 事件驱动用）
   final ValueChanged<int>? onPointerDown;
+
   /// 共享拖动任务 id（null 兜底时用 _noopTaskId）：
   /// 拖动中原任务块半透明由共享状态驱动——跨页翻走再返回原页时
   /// Draggable 已死（childWhenDragging 失效），据此保持半透明一致
   final ValueNotifier<int?>? dragTaskId;
+
   /// dragTaskId 为 null 时的兜底 notifier
   static final ValueNotifier<int?> _noopTaskId = ValueNotifier<int?>(null);
 
@@ -3004,10 +3140,7 @@ class _TaskBlock extends ConsumerWidget {
               color: Colors.transparent,
               child: const SizedBox.shrink(),
             ),
-            childWhenDragging: Opacity(
-              opacity: 0.3,
-              child: block,
-            ),
+            childWhenDragging: Opacity(opacity: 0.3, child: block),
             child: shown,
           ),
         );
@@ -3221,9 +3354,7 @@ class _InstanceActionSheetState extends ConsumerState<InstanceActionSheet> {
             onTap: () {
               Navigator.pop(context);
               Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => TaskDetailPage(taskId: t.id),
-                ),
+                MaterialPageRoute(builder: (_) => TaskDetailPage(taskId: t.id)),
               );
             },
           ),
@@ -3338,7 +3469,9 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
                       padding: const EdgeInsets.all(16),
                       child: Text(
                         '当天没有任务',
-                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     )
                   else
@@ -3346,7 +3479,11 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
                       ListTile(
                         dense: true,
                         // 完成态：不明显的灰色
-                        tileColor: item.completed ? Theme.of(context).colorScheme.surfaceContainerHighest : null,
+                        tileColor: item.completed
+                            ? Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHighest
+                            : null,
                         leading: IconButton(
                           visualDensity: VisualDensity.compact,
                           icon: Icon(
@@ -3360,7 +3497,9 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
                         title: Text(
                           item.task.title,
                           style: TextStyle(
-                            color: item.completed ? Theme.of(context).colorScheme.onSurfaceVariant : null,
+                            color: item.completed
+                                ? Theme.of(context).colorScheme.onSurfaceVariant
+                                : null,
                             decoration: item.completed
                                 ? TextDecoration.lineThrough
                                 : null,
@@ -3460,10 +3599,7 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
       // 且更新既有例外时会覆盖之前带时分的改期）
       final pickedTime = await showTimePicker(
         context: context,
-        initialTime: TimeOfDay(
-          hour: ps?.hour ?? 9,
-          minute: ps?.minute ?? 0,
-        ),
+        initialTime: TimeOfDay(hour: ps?.hour ?? 9, minute: ps?.minute ?? 0),
         helpText: '选择实例时间',
       );
       if (pickedTime == null || !mounted) return;
@@ -3498,17 +3634,3 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
     return l?.name ?? '';
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-

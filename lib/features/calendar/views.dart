@@ -101,7 +101,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
   // ---------- 全局指针事件驱动（跨页拖动：Draggable 被 evict 后仍可靠） ----------
   /// 拖动中注册到 pointerRouter 的指针（up/取消时移除）
   int? _dragPointer;
-  /// 拖动任务 id 副本（onDraggableCanceled 会清共享状态——落点兜底用）
+  /// 拖动任务 id 副本（松手/取消会清共享状态——落点兜底用）
   int? _dragTaskId;
   /// 拖动任务信息副本（同原因，落点兜底用）
   _DragGhostInfo? _dragInfo;
@@ -277,7 +277,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
   void _maybeEdgeTurn(double globalX) {
     _edgeTurnCtrl.lastGlobalX = globalX;
     final w = MediaQuery.sizeOf(context).width;
-    if (globalX > w * 0.94) {
+    if (globalX > w * 0.85) {
       _armEdgeTimer(1, w);
     } else if (globalX < w * 0.06) {
       _armEdgeTimer(-1, w);
@@ -300,7 +300,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
   }
 
   void _armContinuation(int dir, double w) {
-    if (_edgeTurnCtrl.lastGlobalX > w * 0.94 ||
+    if (_edgeTurnCtrl.lastGlobalX > w * 0.85 ||
         _edgeTurnCtrl.lastGlobalX < w * 0.06) {
       _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 800), () {
         _edgeTurnCtrl.timer = null;
@@ -313,7 +313,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
   /// 落点兜底：Draggable 被 evict 后（正常 onAcceptWithDetails 未触发），
   /// 松手时按 route 上下文副本（taskId/时长）+ 指针位置精确换算落点并
   /// 执行改期——任务不再回退。
-  /// 不依赖共享 dragActiveDay/dragGhostInfo（onDraggableCanceled 会清它们）
+  /// 不依赖共享 dragActiveDay/dragGhostInfo（松手/取消会清它们）
   Future<void> _handleDragDrop(Offset pos) async {
     if (dragDropped.value) {
       // 正常路径已处理
@@ -328,7 +328,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
       return;
     }
     // 落点日期：指针 x → 列索引（当前周基准 _dragDay 随翻页更新，
-    // 不被 onDraggableCanceled 清理）——周视图 7 列
+    // 不被松手/取消清理）——周视图 7 列
     final colWidth = (MediaQuery.sizeOf(context).width - 44) / 7;
     final col = ((pos.dx - 44) / colWidth).floor().clamp(0, 6);
     final day = _dragDay.value.add(Duration(days: col));
@@ -569,7 +569,7 @@ class _DayViewState extends ConsumerState<DayView> {
 
   // ---------- 全局指针事件驱动（跨页拖动，同 WeekView） ----------
   int? _dragPointer;
-  /// 拖动任务 id 副本（onDraggableCanceled 会清共享状态——落点兜底用）
+  /// 拖动任务 id 副本（松手/取消会清共享状态——落点兜底用）
   int? _dragTaskId;
   /// 拖动任务信息副本（同原因，落点兜底用）
   _DragGhostInfo? _dragInfo;
@@ -621,7 +621,7 @@ class _DayViewState extends ConsumerState<DayView> {
   void _maybeEdgeTurn(double globalX) {
     _edgeTurnCtrl.lastGlobalX = globalX;
     final w = MediaQuery.sizeOf(context).width;
-    if (globalX > w * 0.94) {
+    if (globalX > w * 0.85) {
       _armEdgeTimer(1, w);
     } else if (globalX < w * 0.06) {
       _armEdgeTimer(-1, w);
@@ -644,7 +644,7 @@ class _DayViewState extends ConsumerState<DayView> {
   }
 
   void _armContinuation(int dir, double w) {
-    if (_edgeTurnCtrl.lastGlobalX > w * 0.94 ||
+    if (_edgeTurnCtrl.lastGlobalX > w * 0.85 ||
         _edgeTurnCtrl.lastGlobalX < w * 0.06) {
       _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 800), () {
         _edgeTurnCtrl.timer = null;
@@ -1545,7 +1545,8 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   /// 拖动中靠近屏幕边缘自动翻页（右缘→下一页/下一周，左缘→上一页/上一周）
   ///
   /// 三层防误触：
-  /// 1. 边缘区收紧到屏幕最外 6%/94%（周一/周日列约 14% 宽，拖任务到列内不误触）
+  /// 1. 边缘区：左缘收紧到屏幕最外 6%，右缘放宽到 15%（85% 外——周五列
+  ///    任务块右缘约 85%，手指够得着；此前 94% 太窄几乎无法触发）
   /// 2. 进入边缘区需持续停留 300ms 才触发（快速拖过定位不翻页）
   /// 3. 连续翻页链（Timer/方向/位置）存共享控制器（跨页保持，见 _EdgeTurnController）
 
@@ -1607,7 +1608,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     if (onEdgeTurn == null || state == null || ctrl == null) return;
     ctrl.lastGlobalX = globalX;
     final w = MediaQuery.of(context).size.width;
-    if (globalX > w * 0.94) {
+    if (globalX > w * 0.85) {
       _armEdgeTimer(1, w, ctrl);
     } else if (globalX < w * 0.06) {
       _armEdgeTimer(-1, w, ctrl);
@@ -1636,7 +1637,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
 
   /// 连续翻页链：翻页后指针仍停边缘 → 800ms 后再翻，递归续链
   void _armContinuation(int dir, double w, _EdgeTurnController ctrl) {
-    if (ctrl.lastGlobalX > w * 0.94 || ctrl.lastGlobalX < w * 0.06) {
+    if (ctrl.lastGlobalX > w * 0.85 || ctrl.lastGlobalX < w * 0.06) {
       ctrl.timer = Timer(const Duration(milliseconds: 800), () {
         ctrl.timer = null;
         widget.onEdgeTurn?.call(dir.toDouble());
@@ -1649,11 +1650,15 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   void dispose() {
     _stopAutoScroll();
     _hintPos.dispose();
-    // 兜底：列被销毁（跨多周拖动超 cacheExtent 被 evict）时取消
-    // 共享连续翻页链 Timer（防 pending/幽灵翻页）；共享拖拽状态
-    // 由 onDraggableCanceled 清理（此处不动，避免误清其他列活跃拖动）
-    widget.edgeTurnCtrl?.timer?.cancel();
-    widget.edgeTurnCtrl?.dir = 0;
+    // 选时路径（无全局 route 接管）：列被销毁（跨多周超 cacheExtent 被
+    // evict）时取消共享连续翻页链 Timer（防 pending/幽灵翻页）。
+    // 拖动任务路径的共享 timer 由全局 route 的 move/up 持续驱动与管理
+    // （列 evict 后连续翻页链继续由全局 route 续链，松手时统一取消），
+    // 此处不取消——否则手指不动时翻页链在 evict 处中断。
+    if (_dragSelecting) {
+      widget.edgeTurnCtrl?.timer?.cancel();
+      widget.edgeTurnCtrl?.dir = 0;
+    }
     super.dispose();
   }
 
@@ -1684,6 +1689,15 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   /// 拖动结束（松手）：统一清理（幂等，onAccept 后也会走）
   void _handleDragEnd() {
     _clearDragState();
+  }
+
+  /// Draggable 被 dispose（跨多周拖出 cacheExtent）/手势取消时的兜底：
+  /// 只停本列自动滚动；**不清共享拖拽状态**——否则翻页 4-5 页后任务块
+  /// 虚影/胶囊"闪退"回原位（Draggable State dispose 时 onDraggableCanceled
+  /// 无条件触发，与真实手势取消共用此回调）。真实手势取消由全局 route
+  /// 的 PointerCancelEvent → _clearDragSharedState 统一清理（不会残留）
+  void _handleDraggableCanceled() {
+    _stopAutoScroll();
   }
 
   /// 全局坐标 → 本列局部坐标（虚影/胶囊渲染换算）。
@@ -1953,7 +1967,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                           // 边缘翻周/日 + 垂直自动滚动：Draggable 全局坐标驱动
                           onDragPosition: _handleDragGlobal,
                           onDragEnd: _handleDragEnd,
-                          onDragCanceled: _clearDragState,
+                          onDragCanceled: _handleDraggableCanceled,
                           onPointerDown: (p) => _dragPointer = p,
                           onDragStartedTask: (id) {
                             widget.dragTaskId?.value = id;
@@ -2257,7 +2271,8 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
 
   /// 悬浮时间胶囊（拖动任务 + 长按拖选共用渲染）：
   /// [local] 胶囊锚定位置（列内局部），[anchorY] 垂直锚点（选区/虚影上端），
-  /// 顶部空间不足时翻到锚点下方；水平按整个时间轴视口宽钳制（允许跨列绘制）
+  /// 顶部空间不足时翻到锚点下方；水平按整个时间轴视口宽钳制（允许跨列绘制）。
+  /// 垂直以屏幕坐标定位并钳制在屏幕内（列表滚动后胶囊也不被上/下缘裁剪）。
   Widget _buildHintCapsule({
     required Offset local,
     required double anchorY,
@@ -2265,9 +2280,31 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   }) {
     const capH = 28.0;
     const capW = 78.0;
+    // 胶囊与锚点间距（防手指遮挡：手指接触半径约 22px，须大于半径 + 余量）
+    const capGap = 48.0;
     final maxY = (_endHour - widget.startHour) * _pixelPerHour;
-    var top = anchorY - capH - 28;
-    if (top < 4) top = anchorY + 28; // 顶部空间不足 → 贴锚点下方（留足间距防手指遮挡）
+    // 屏幕安全边（避开状态栏/底部手势条）
+    final safeTop = MediaQuery.paddingOf(context).top + 4;
+    final safeBottom = MediaQuery.paddingOf(context).bottom + 4;
+    var top = anchorY - capH - capGap;
+    // 屏幕内定位：列 Stack 顶部全局 y + 列内锚点 → 锚点屏幕 y，
+    // 胶囊放锚点上方，超屏幕顶则翻到锚点下方，再钳制在屏幕可见区
+    //（此前按列内坐标 clamp——列表滚动后时间轴主体滚出视口时胶囊
+    // 会落在屏幕外被裁剪）
+    final box = _columnKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box != null && box.hasSize) {
+      final axisTopGlobal = box.localToGlobal(Offset.zero).dy;
+      final screenH = MediaQuery.sizeOf(context).height;
+      final anchorScreenY = axisTopGlobal + anchorY;
+      var topScreen = anchorScreenY - capH - capGap;
+      if (topScreen < safeTop) topScreen = anchorScreenY + capGap;
+      final maxTopScreen = screenH - capH - safeBottom;
+      topScreen = topScreen.clamp(
+        safeTop,
+        maxTopScreen < safeTop ? safeTop : maxTopScreen,
+      );
+      top = topScreen - axisTopGlobal;
+    }
     top = top.clamp(4.0, maxY - capH - 4);
     // A13：水平按整个时间轴视口宽 clamp（周视图单列仅约 50px，
     // 按列 clamp 会因 min>max 抛 ArgumentError 使整列崩溃；
@@ -2606,7 +2643,8 @@ class _TaskBlock extends ConsumerWidget {
   final ValueChanged<Offset>? onDragPosition;
   /// 拖动结束（松手）回调：清理边缘/自动滚动状态
   final VoidCallback? onDragEnd;
-  /// 拖动被取消/任务列被 evict 时兜底清理（见 onDraggableCanceled）
+  /// 拖动被取消/任务列被 evict 时兜底（见 onDraggableCanceled；仅停本列
+  /// 自动滚动——共享拖拽状态由全局 route 统一管理，此处不清）
   final VoidCallback? onDragCanceled;
   /// 拖动开始回调（上报任务 id——共享拖拽状态据此显示虚影/胶囊）
   final ValueChanged<int>? onDragStartedTask;
@@ -2643,8 +2681,9 @@ class _TaskBlock extends ConsumerWidget {
         onDragEnd: (_) => onDragEnd?.call(),
         // 兜底：拖动中任务所在列被 PageView evict（跨多周后超 cacheExtent）
         // 导致 Draggable State dispose（mounted=false）时 onDragEnd 不回调
-        //（SDK 有 mounted 检查），onDraggableCanceled 无此限制——据此清理
-        // 共享拖拽状态与连续翻页链（否则 Timer pending/状态残留）
+        //（SDK 有 mounted 检查），onDraggableCanceled 无此限制——据此停
+        // 本列自动滚动；**不清共享拖拽状态**（否则翻页 4-5 页后虚影/胶囊
+        // 闪退）；共享状态由全局 route 的 up/cancel 统一清理
         onDraggableCanceled: (_, _) => onDragCanceled?.call(),
         // 拖动不显示悬浮块：目标位置由虚影（_dragGhost）实时预览
         feedback: Material(

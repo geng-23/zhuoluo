@@ -12,9 +12,9 @@ import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 丝滑交互：左右边缘 24dp 区域滑动切换底部 tab（左缘右滑 → 上一个，
 /// 右缘左滑 → 下一个），中间区域滑动翻月/翻周/翻日。
 /// 实现：视图铺满全屏，Stack 顶层为全屏透明监听层（_EdgeTabSwipeDetector，
-/// HitTestBehavior.translucent 零遮挡）——起点在屏幕左右 25% 区域内、
+/// HitTestBehavior.translucent 零遮挡）——起点在屏幕左右 15% 区域内、
 /// 非长按（首次移动距 down <350ms）、位移 ≥24px 的滑动切换底部 tab；
-/// 中间 50% 区域滑动仍由 PageView 翻月/翻周/翻日；
+/// 中间 70% 区域滑动仍由 PageView 翻月/翻周/翻日；
 /// 任务块点击/长按拖动完全不受影响。
 class CalendarPage extends ConsumerWidget {
   const CalendarPage({
@@ -126,7 +126,7 @@ class CalendarPage extends ConsumerWidget {
               ],
             ),
           ),
-        // 全屏透明监听层（零遮挡）：边缘 25% 区滑动切 tab
+        // 全屏透明监听层（零遮挡）：边缘 15% 区滑动切 tab
         Positioned.fill(
           child: _EdgeTabSwipeDetector(
             onSwipeRight: onNavigateLeft,
@@ -207,7 +207,7 @@ class CalendarPage extends ConsumerWidget {
 /// 边缘滑动切 tab 检测层（丝滑交互，零遮挡）：
 /// 全屏 Listener（HitTestBehavior.translucent——自身监听且下层正常交互），
 /// 判定条件（全部满足才切 tab）：
-/// 1. 指针起点在屏幕左右 25% 区域内（中间 50% 区域滑动仍由 PageView 翻页）
+/// 1. 指针起点在屏幕左右 15% 区域内（中间 70% 区域滑动仍由 PageView 翻页）
 /// 2. 非长按：首次位移距按下 <350ms（长按拖动任务/长按选时不受影响）
 /// 3. 累计位移 ≥24px（不依赖速度，慢速滑动也可触发）
 /// 右滑 → [onSwipeRight]（左缘），左滑 → [onSwipeLeft]（右缘）。
@@ -223,8 +223,8 @@ class _EdgeTabSwipeDetector extends StatefulWidget {
 }
 
 class _EdgeTabSwipeDetectorState extends State<_EdgeTabSwipeDetector> {
-  /// 起点判定区：屏幕左右各 25%
-  static const double _edgeZone = 0.25;
+  /// 起点判定区：屏幕左右各 15%（收窄——边缘区过大易与拖动任务/选时误触）
+  static const double _edgeZone = 0.15;
   /// 触发位移阈值（px）
   static const double _triggerDx = 24;
   /// 位移超过半屏视为翻页意图（交给 PageView），不切 tab
@@ -275,7 +275,7 @@ class _EdgeTabSwipeDetectorState extends State<_EdgeTabSwipeDetector> {
     // 位移过半屏 → 翻页意图，不切
     final w = MediaQuery.sizeOf(context).width;
     if (_dx.abs() >= w * _maxDx) return;
-    // 起点在左右 25% 区
+    // 起点在左右 15% 区
     if (down.dx < w * _edgeZone) {
       if (_dx > 0) widget.onSwipeRight?.call();
     } else if (down.dx > w * (1 - _edgeZone)) {

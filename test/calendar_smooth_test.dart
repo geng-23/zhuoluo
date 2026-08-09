@@ -233,8 +233,9 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
       }
 
-      // 拖到屏幕右缘（边缘手势区/PageView 外，依赖 Draggable 全局坐标检测）
-      await gesture.moveBy(const Offset(200, 0));
+      // 拖到屏幕右缘（85% 区外；固定目标坐标——任务列随星期变化，
+      // moveBy 只在任务恰在右数几列时才进入边缘区）
+      await gesture.moveTo(const Offset(760, 400));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350)); // 边缘停留 > 300ms
       await gesture.up();
@@ -330,7 +331,7 @@ void main() {
       final before = container.read(calendarControllerProvider).selectedDay;
 
       final gesture = await longPressDrag(tester, '拖拽任务A');
-      await gesture.moveBy(const Offset(200, 0)); // 到右缘
+      await gesture.moveTo(const Offset(760, 400)); // 右缘 85% 区外
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350)); // 首次 300ms 触发
       await tester.pumpAndSettle();
@@ -351,7 +352,7 @@ void main() {
     testWidgets('翻周后虚影跟随新周边缘列（跨页保持），松手消失', (tester) async {
       await pumpCalendarWithTask(tester, '拖拽任务B');
       final gesture = await longPressDrag(tester, '拖拽任务B');
-      await gesture.moveBy(const Offset(200, 0)); // 右缘
+      await gesture.moveTo(const Offset(760, 400)); // 右缘 85% 区外
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350)); // 翻周
       await tester.pumpAndSettle();
@@ -384,14 +385,14 @@ void main() {
     testWidgets('指针离开边缘后停止连续翻周', (tester) async {
       final container = await pumpCalendarWithTask(tester, '拖拽任务C');
       final gesture = await longPressDrag(tester, '拖拽任务C');
-      await gesture.moveBy(const Offset(200, 0)); // 右缘
+      await gesture.moveTo(const Offset(760, 400)); // 右缘 85% 区外
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350)); // 翻一周
       await tester.pumpAndSettle();
       final after1 = container.read(calendarControllerProvider).selectedDay;
 
-      // 拖回中间（离开边缘）→ 连续链应取消
-      await gesture.moveBy(const Offset(-200, 0));
+      // 拖回中间（离开边缘区）→ 连续链应取消
+      await gesture.moveTo(const Offset(400, 400));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 900)); // 超过 800ms 续翻间隔
       await tester.pumpAndSettle();
@@ -453,7 +454,7 @@ void main() {
     });
   });
 
-  group('全局指针事件驱动 + 边缘 25% 切 tab + 视图铺满', () {
+  group('全局指针事件驱动 + 边缘 15% 切 tab + 视图铺满', () {
     Future<ProviderContainer> pumpCalendarWithTask(
       WidgetTester tester,
       String title,
@@ -479,7 +480,7 @@ void main() {
       return container;
     }
 
-    testWidgets('25% 区滑动切 tab（左缘 x=150 右滑 / 右缘 x=650 左滑）', (tester) async {
+    testWidgets('15% 区滑动切 tab（左缘 x=100 右滑 / 右缘 x=700 左滑）', (tester) async {
       await db.ensureDefaultList();
       var left = 0;
       var right = 0;
@@ -497,21 +498,21 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // 左 25% 区内右滑（x=150 < 200）
-      final g1 = await tester.startGesture(const Offset(150, 400));
+      // 左 15% 区内右滑（x=100 < 120）
+      final g1 = await tester.startGesture(const Offset(100, 400));
       await g1.moveBy(const Offset(40, 0));
       await tester.pump();
       await g1.up();
       await tester.pumpAndSettle();
-      expect(left, 1, reason: '左 25% 区右滑应切上一个 tab');
+      expect(left, 1, reason: '左 15% 区右滑应切上一个 tab');
 
-      // 右 25% 区内左滑（x=650 > 600）
-      final g2 = await tester.startGesture(const Offset(650, 400));
+      // 右 15% 区内左滑（x=700 > 680）
+      final g2 = await tester.startGesture(const Offset(700, 400));
       await g2.moveBy(const Offset(-40, 0));
       await tester.pump();
       await g2.up();
       await tester.pumpAndSettle();
-      expect(right, 1, reason: '右 25% 区左滑应切下一个 tab');
+      expect(right, 1, reason: '右 15% 区左滑应切下一个 tab');
     });
 
     testWidgets('长按拖动任务不误触切 tab', (tester) async {
@@ -568,8 +569,8 @@ void main() {
       for (var i = 0; i < 6; i++) {
         await tester.pump(const Duration(milliseconds: 100));
       }
-      // 右缘首翻
-      await gesture.moveBy(const Offset(200, 0));
+      // 右缘首翻（固定目标坐标，避免任务列随星期变化）
+      await gesture.moveTo(const Offset(760, 400));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
@@ -599,7 +600,7 @@ void main() {
       for (var i = 0; i < 6; i++) {
         await tester.pump(const Duration(milliseconds: 100));
       }
-      await gesture.moveBy(const Offset(200, 0)); // 右缘
+      await gesture.moveTo(const Offset(760, 400)); // 右缘 85% 区外
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350)); // 首翻
       await tester.pumpAndSettle();
@@ -608,12 +609,37 @@ void main() {
         await tester.pump(const Duration(milliseconds: 850));
         await tester.pumpAndSettle();
       }
+      // 回归保护：跨页超过 5 次后虚影仍显示（onDraggableCanceled
+      // 曾清共享状态导致任务块"闪退"回原位）
+      expect(find.text('兜底任务'), findsWidgets,
+          reason: '翻 6 页后虚影仍应显示（任务块不闪退）');
       // 在边缘松手（无 DragTarget 命中——落点兜底执行改期）
       await gesture.up();
       await tester.pumpAndSettle();
       final updated = (await db.getTask(taskId))!;
       expect(updated.planStart, isNot(original),
           reason: '边缘松手应改期成功（落点兜底，任务不回退）');
+    });
+
+    testWidgets('胶囊始终在屏幕内：任务拖到屏幕顶部不被上缘裁剪', (tester) async {
+      await pumpCalendarWithTask(tester, '胶囊任务');
+      final block = find.text('胶囊任务');
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      // 拖到屏幕顶部（此前胶囊按列内坐标定位，可能超出屏幕上缘被裁剪）
+      await gesture.moveTo(const Offset(400, 60));
+      await tester.pump();
+      final capsule = find.byIcon(Icons.schedule);
+      expect(capsule, findsWidgets, reason: '拖动任务时应显示时间胶囊');
+      final rect = tester.getRect(capsule.first);
+      expect(rect.top, greaterThanOrEqualTo(0),
+          reason: '胶囊不应超出屏幕上缘（实际 top=${rect.top}）');
+      expect(rect.bottom, lessThanOrEqualTo(600),
+          reason: '胶囊不应超出屏幕下缘（实际 bottom=${rect.bottom}）');
+      await gesture.up();
+      await tester.pumpAndSettle();
     });
   });
 }

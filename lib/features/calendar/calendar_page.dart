@@ -69,8 +69,9 @@ class CalendarPage extends ConsumerWidget {
             child: Column(
               children: [
                 Expanded(
-                  // 修复：仅首次（无数据）显示 spinner；后续 load（改期/勾选/翻页）
-                  // 不整页替换——否则视图 State 销毁、滚动位置/翻页位置全部重置
+                  // 仅首次加载（loading 只在首载为 true）显示 spinner；后续
+                  // load（改期/勾选/翻页）不整页替换——否则视图 State 销毁、
+                  // 滚动位置/翻页位置全部重置，拖拽中翻页跨缓存点虚影/落点失效
                   child: (state.loading && state.items.isEmpty)
                       ? const Center(child: CircularProgressIndicator())
                       : AnimatedSwitcher(

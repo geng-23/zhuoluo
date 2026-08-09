@@ -15,10 +15,27 @@ import 'package:zhuoluo/features/calendar/providers.dart';
 /// - 数据版本变化 → 缓存失效重拉
 /// - 边缘手势条：左缘右滑切上一个 tab、右缘左滑切下一个 tab、中间滑动不切
 /// - 拖动任务块到屏幕边缘停留 → 翻周/日（Draggable 全局坐标驱动，不依赖列边界）
+
+/// 延迟日历 DB：模拟真机异步查询时序。drift 内存库在测试 pump 内同步
+/// 完成，loading:true→false 同帧合并，复现不了真机上"loading 提交 →
+/// spinner 整页替换 → WeekView State 销毁"的路径（空周翻页跨缓存点
+/// 拖动失效的根因）。override getCalendarItems 加 200ms 延迟来复现。
+class _DelayedCalendarDb extends AppDatabase {
+  _DelayedCalendarDb(super.e) : super.forTesting();
+
+  @override
+  Future<List<CalendarItem>> getCalendarItems(
+    DateTime from,
+    DateTime to,
+  ) async {
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    return super.getCalendarItems(from, to);
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final now = DateTime.now();
-
   late AppDatabase db;
 
   setUp(() {
@@ -1093,5 +1110,68 @@ void main() {
         reason: '月视图远距离跳转应停在目标月份（不落在中间月）',
       );
     });
+  });
+
+  testWidgets('空数据周翻页跨缓存点：不显示 spinner、WeekView 存活（拖拽不失效）', (tester) async {
+    final delayedDb = _DelayedCalendarDb(NativeDatabase.memory());
+    addTearDown(delayedDb.close);
+    await delayedDb.ensureDefaultList();
+    final list = await delayedDb.getDefaultList();
+    final today = DateTime.now();
+    await delayedDb.insertTask(
+      TasksCompanion.insert(
+        listId: list.id,
+        title: '本周任务',
+        planStart: Value(DateTime(today.year, today.month, today.day, 10)),
+        planEnd: Value(DateTime(today.year, today.month, today.day, 11)),
+        createdAt: today,
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [dbProvider.overrideWithValue(delayedDb)],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: CalendarPage()),
+      ),
+    );
+    // 首载：延迟 200ms → spinner → 完成
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget,
+        reason: '首载应显示 spinner');
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
+    expect(find.byType(CircularProgressIndicator), findsNothing,
+        reason: '首载完成 spinner 消失');
+    expect(find.text('本周任务'), findsWidgets, reason: '本周任务应显示');
+
+    final controller = container.read(calendarControllerProvider.notifier);
+    final monday = DateUtilsEx.mondayOf(today);
+    // 切到空周（+7 天，缓存窗口内命中，无延迟）——items 应空
+    controller.setSelectedDay(monday.add(const Duration(days: 7)));
+    await tester.pumpAndSettle();
+    expect(
+      container.read(calendarControllerProvider).items,
+      isEmpty,
+      reason: '翻到无任务的空周，items 应为空',
+    );
+    // 切到 +60 天（超出 ±45 天缓存窗口 → 未命中 → 延迟查询挂起）
+    // 修复前：items 空被误判"未加载"→ 置 loading → 挂起中 spinner 整页
+    // 替换 AnimatedSwitcher → WeekView State 销毁（拖拽共享状态全灭）
+    controller.setSelectedDay(monday.add(const Duration(days: 60)));
+    await tester.pump(const Duration(milliseconds: 50)); // 查询挂起中（<200ms）
+    expect(
+      find.byType(CircularProgressIndicator),
+      findsNothing,
+      reason: '空周翻页跨缓存点不应显示 spinner（修复前整页替换销毁 WeekView State）',
+    );
+    expect(find.text('06:00'), findsWidgets,
+        reason: 'WeekView 应保持存活（时间轴刻度仍在，未被 spinner 替换）');
+    // 查询完成后数据到位，视图正常
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
+    expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 }

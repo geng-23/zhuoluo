@@ -118,6 +118,13 @@ class CalendarController extends StateNotifier<CalendarState> {
   /// 加载请求序号：快速翻页/切换时丢弃过期结果，避免旧数据覆盖新数据
   int _loadSeq = 0;
 
+  /// 是否已完成首次加载（仅首载置 loading 显示 spinner）。
+  /// 此前用 `items.isEmpty` 判断——空数据周/天（该周无任务，items 为空）
+  /// 会被误判为"未加载"，下次未命中翻页时置 loading:true 挂起 → 真机上
+  /// spinner 整页替换 → WeekView State 销毁 → 拖拽状态全灭（仅周视图
+  /// 翻到缓存边界时复现）
+  bool _loadedOnce = false;
+
   // ---------- 丝滑翻页：窗口缓存（翻页/切视图命中缓存 = 零 DB） ----------
 
   /// 按天缓存：key = yyyymmdd 整数
@@ -178,9 +185,11 @@ class CalendarController extends StateNotifier<CalendarState> {
   Future<void> load({bool force = false}) async {
     final seq = ++_loadSeq;
     final (from, to) = _range;
-    // A13：仅首次（items 为空）置 loading——翻页/切视图的重复 load 不再
-    // 触发 loading:true → items 两次状态变更（每次 ref.watch 全页重建）
-    if (state.items.isEmpty && !force) {
+    // 仅首次加载置 loading——翻页/切视图的重复 load 不再触发 loading:true
+    // （items 两次状态变更每次 ref.watch 全页重建）。空数据周翻页也不得
+    // 误置（否则真机异步查库挂起时 spinner 整页替换销毁 WeekView State）
+    if (!_loadedOnce && !force) {
+      _loadedOnce = true;
       state = state.copyWith(loading: true);
     }
     // 命中缓存（且未强制）：直接从缓存出数据，零 DB

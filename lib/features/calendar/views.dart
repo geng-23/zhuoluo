@@ -469,9 +469,16 @@ class _WeekViewState extends ConsumerState<WeekView> {
 
   @override
   Widget build(BuildContext context) {
-    return PageView.builder(
-      controller: _controller,
-      // itemCount 随固定基准同步扩大（自 _epochMonday 起每周一页，
+    // 拖动任务期间禁用手指翻页（防御性：LongPress 已获胜，正常不生效；
+    // 边缘翻周/日为程序化 _controller 调用，不受影响）
+    return ValueListenableBuilder<int?>(
+      valueListenable: dragTaskId,
+      builder: (context, draggingId, _) => PageView.builder(
+        controller: _controller,
+        physics: draggingId != null
+            ? const NeverScrollableScrollPhysics()
+            : null,
+        // itemCount 随固定基准同步扩大（自 _epochMonday 起每周一页，
       // 与 DayView 的 40000 对称，自 2000-01-01 起共约 109 年）
       itemCount: 40000,
       // A13：allowImplicitScrolling 预构建页在 widget 测试 teardown 时
@@ -528,6 +535,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
           ),
         );
       },
+      ),
     );
   }
 }
@@ -935,10 +943,17 @@ class _DayViewState extends ConsumerState<DayView> {
 
   @override
   Widget build(BuildContext context) {
-    return PageView.builder(
-      controller: _controller,
-      itemCount: 40000,
-      // A13：allowImplicitScrolling 预构建页在 widget 测试 teardown 时
+    // 拖动任务期间禁用手指翻页（防御性：LongPress 已获胜，正常不生效；
+    // 边缘翻周/日为程序化 _controller 调用，不受影响）
+    return ValueListenableBuilder<int?>(
+      valueListenable: dragTaskId,
+      builder: (context, draggingId, _) => PageView.builder(
+        controller: _controller,
+        physics: draggingId != null
+            ? const NeverScrollableScrollPhysics()
+            : null,
+        itemCount: 40000,
+        // A13：allowImplicitScrolling 预构建页在 widget 测试 teardown 时
       // 触发 deactivate 时序问题（NowLine Timer pending），暂不启用；
       // 丝滑翻页主要靠窗口缓存（翻页零 DB）+ byDay 分组 build 减负
       onPageChanged: (page) {
@@ -987,6 +1002,7 @@ class _DayViewState extends ConsumerState<DayView> {
           ),
         );
       },
+      ),
     );
   }
 }

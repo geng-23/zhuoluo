@@ -215,7 +215,9 @@ class CalendarPage extends ConsumerWidget {
 /// 判定条件（全部满足才切 tab）：
 /// 1. 指针起点在屏幕左右 15% 区域内（中间 70% 区域滑动仍由 PageView 翻页）
 /// 2. 非长按：首次位移距按下 <350ms（长按拖动任务/长按选时不受影响）
-/// 3. 累计位移 ≥24px（不依赖速度，慢速滑动也可触发）
+/// 3. 累计绝对水平位移 ≥32px（不依赖速度，慢速滑动也可触发）
+/// 4. 横向意图：水平位移明显大于垂直位移（abs(dx) > abs(dy)*1.5），
+///    纵向滚动/斜向移动的横向抖动不视为切 tab 意图
 /// 右滑 → [onSwipeRight]（左缘），左滑 → [onSwipeLeft]（右缘）。
 /// 拖动任务到边缘翻周/日由 Draggable 全局坐标驱动（views.dart），互不干扰。
 class _EdgeTabSwipeDetector extends StatefulWidget {
@@ -232,7 +234,9 @@ class _EdgeTabSwipeDetectorState extends State<_EdgeTabSwipeDetector> {
   /// 起点判定区：屏幕左右各 15%（收窄——边缘区过大易与拖动任务/选时误触）
   static const double _edgeZone = 0.15;
   /// 触发位移阈值（px）
-  static const double _triggerDx = 24;
+  static const double _triggerDx = 32;
+  /// 横向意图比例：abs(dx) 须明显大于 abs(dy) 才视为切 tab（抗纵向抖动）
+  static const double _minDxRatio = 1.5;
   /// 位移超过半屏视为翻页意图（交给 PageView），不切 tab
   static const double _maxDx = 0.5;
   /// 长按判定窗口：首次移动距按下超过此值 = 长按（拖动/选时），不切 tab
@@ -242,12 +246,14 @@ class _EdgeTabSwipeDetectorState extends State<_EdgeTabSwipeDetector> {
   DateTime? _downTime;
   DateTime? _firstMoveAt;
   double _dx = 0;
+  double _dy = 0;
 
   void _reset() {
     _downPos = null;
     _downTime = null;
     _firstMoveAt = null;
     _dx = 0;
+    _dy = 0;
   }
 
   void _onDown(PointerDownEvent e) {
@@ -255,12 +261,16 @@ class _EdgeTabSwipeDetectorState extends State<_EdgeTabSwipeDetector> {
     _downTime = DateTime.now();
     _firstMoveAt = null;
     _dx = 0;
+    _dy = 0;
   }
 
   void _onMove(PointerMoveEvent e) {
-    if (_downPos == null) return;
+    final down = _downPos;
+    if (down == null) return;
     _firstMoveAt ??= DateTime.now();
-    _dx += e.delta.dx;
+    // 绝对位移（相对按下点）而非 delta 累加——抖动不会逐次累积
+    _dx = e.position.dx - down.dx;
+    _dy = e.position.dy - down.dy;
   }
 
   void _onUp(PointerUpEvent e) {
@@ -276,6 +286,9 @@ class _EdgeTabSwipeDetectorState extends State<_EdgeTabSwipeDetector> {
     final firstMove = _firstMoveAt;
     if (down == null || downTime == null || firstMove == null) return;
     if (_dx.abs() < _triggerDx) return;
+    // 横向意图：仅当水平位移明显大于垂直位移（纵向滚动/斜向移动的
+    // 横向抖动不视为切 tab 意图）
+    if (_dx.abs() <= _dy.abs() * _minDxRatio) return;
     // 长按（拖动任务/选时）：首次移动发生在按下后 350ms 以上 → 不切 tab
     if (firstMove.difference(downTime) >= _longPressWindow) return;
     // 位移过半屏 → 翻页意图，不切

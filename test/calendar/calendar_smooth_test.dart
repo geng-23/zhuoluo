@@ -454,7 +454,7 @@ void main() {
       expect(left, lessThan(12), reason: '左时间栏应贴屏幕左缘（实际 $left）');
     });
 
-    testWidgets('边缘慢速滑动（位移 24px，无速度）也能切 tab', (tester) async {
+    testWidgets('边缘慢速滑动（位移 36px，无速度）也能切 tab', (tester) async {
       await db.ensureDefaultList();
       var left = 0;
       final container = makeContainer();
@@ -466,13 +466,61 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // 左缘缓慢滑动 30px（低速度）
+      // 左缘缓慢滑动 36px（低速度）
       final gesture = await tester.startGesture(const Offset(12, 400));
-      await gesture.moveBy(const Offset(30, 0));
+      await gesture.moveBy(const Offset(36, 0));
       await tester.pump();
       await gesture.up();
       await tester.pumpAndSettle();
-      expect(left, 1, reason: '位移 ≥24px 即触发切 tab，不依赖速度');
+      expect(left, 1, reason: '位移 ≥32px 即触发切 tab，不依赖速度');
+    });
+
+    testWidgets('纵向滚动带横向抖动不切 tab（起点左缘）', (tester) async {
+      await db.ensureDefaultList();
+      var left = 0;
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(home: CalendarPage(onNavigateLeft: () => left++)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 起点在左缘 15% 区；纵向滚动 200px，途中多次轻微横向抖动
+      final gesture = await tester.startGesture(const Offset(12, 400));
+      for (var i = 0; i < 10; i++) {
+        await gesture.moveBy(const Offset(0, 20));
+        await tester.pump();
+        if (i.isEven) {
+          await gesture.moveBy(const Offset(8, 0));
+          await tester.pump();
+        }
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(left, 0, reason: '纵向滚动中的横向抖动不应切 tab');
+    });
+
+    testWidgets('轻微斜向移动不切 tab（dx 明显小于 dy）', (tester) async {
+      await db.ensureDefaultList();
+      var left = 0;
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(home: CalendarPage(onNavigateLeft: () => left++)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 起点左缘；斜向移动 dx=40、dy=50（纵向主导，非横向意图）
+      final gesture = await tester.startGesture(const Offset(12, 400));
+      await gesture.moveBy(const Offset(40, 50));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(left, 0, reason: '斜向移动（dx<dy）不应切 tab');
     });
 
     testWidgets('左缘手势区（44px 覆盖时间栏）不挡任务块点击', (tester) async {

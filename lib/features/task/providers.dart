@@ -259,8 +259,32 @@ class TasksController extends StateNotifier<TasksState> {
       if (doneSet.contains(_doneKey(t.id, inst))) continue;
       return inst;
     }
+    // 例外改期（edit）目标日也作为下次实例候选：改期本次到非规则日时
+    //（如每周一改到周三），任务页/详情页据此显示"下次实例已改到 X"
+    for (final ex in exceptions) {
+      final od = ex.overrideScheduledDate;
+      if (ex.action != 'edit' || od == null) continue;
+      if (od.isBefore(today)) continue;
+      if (doneSet.contains(_doneKey(t.id, od))) continue;
+      return od;
+    }
     // 系列已结束或未来实例全部完成 → 无下次实例（不回落今天）
     return null;
+  }
+
+  /// 供详情页显示"下次实例/改期目标"：返回窗口内下一次实例日期
+  ///（规则命中实例或例外改期目标日，未完成者优先）。
+  /// 详情页复用列表页的窗口口径，改期本次后能在详情页看到改到哪里。
+  Future<DateTime?> nextInstanceFor(Task t) async {
+    final now = AppClock.now();
+    final today = AppClock.at(now.year, now.month, now.day);
+    final exceptions = await _db.getExceptions(t.id);
+    final doneSet = await _db.getCompletedSetForTasks(
+      [t.id],
+      today,
+      today.add(Duration(days: RruleService.windowDaysFor(t.rrule))),
+    );
+    return _nextInstanceDate(t, today, exceptions, doneSet);
   }
 
   List<Task> _sort(List<Task> tasks) {
@@ -968,23 +992,26 @@ class TasksController extends StateNotifier<TasksState> {
 
   /// 撤销单次改期：删除该例外记录（原实例恢复到原日期，不新增反向例外）
   Future<void> undoEditException(int id, int exceptionId) async {
-    // 撤销改期前读取迁移信息——把完成记录从新日期迁回原日期
-    final ex = await _db.getException(exceptionId);
-    await _db.deleteException(exceptionId);
-    if (ex != null) {
-      final toDay = DateUtilsEx.normalizeInstanceDate(
-        ex.overrideScheduledDate ?? ex.instanceDate,
-      );
-      final comp = await _db.getInstanceCompletion(id, toDay);
-      if (comp != null) {
-        await _db.uncompleteInstance(id, toDay);
-        await _db.restoreInstanceCompletion(
-          id,
-          ex.instanceDate,
-          comp.completedAt,
+    // 撤销改期前读取迁移信息——把完成记录从新日期迁回原日期；
+    // 删除例外 + 迁移完成记录包进同一事务（中途失败整体回滚）
+    await _db.transaction(() async {
+      final ex = await _db.getException(exceptionId);
+      await _db.deleteException(exceptionId);
+      if (ex != null) {
+        final toDay = DateUtilsEx.normalizeInstanceDate(
+          ex.overrideScheduledDate ?? ex.instanceDate,
         );
+        final comp = await _db.getInstanceCompletion(id, toDay);
+        if (comp != null) {
+          await _db.uncompleteInstance(id, toDay);
+          await _db.restoreInstanceCompletion(
+            id,
+            ex.instanceDate,
+            comp.completedAt,
+          );
+        }
       }
-    }
+    });
     await _reloadTasks();
     final t = await _db.getTask(id);
     if (t != null) {

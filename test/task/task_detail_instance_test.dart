@@ -149,4 +149,54 @@ void main() {
     expect(find.text('今天已跳过'), findsNothing, reason: '撤销跳过后占位消失');
     expect(find.text('完成本次'), findsOneWidget, reason: '撤销跳过后完成选项恢复');
   });
+
+  testWidgets('跳过本次后「跳过本次」行显示下一次实例时间', (tester) async {
+    final id = await insertDailyTask();
+    await pumpDetail(tester, id);
+
+    await tester.scrollUntilVisible(find.text('跳过本次'), 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('跳过本次'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('下次'), findsOneWidget,
+        reason: '跳过后显示下一次实例时间');
+  });
+
+  testWidgets('今天已跳过占位点击直接撤销跳过（不顶掉撤销条）', (tester) async {
+    final id = await insertDailyTask();
+    await pumpDetail(tester, id);
+
+    await tester.scrollUntilVisible(find.text('跳过本次'), 200,
+        scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('跳过本次'));
+    await tester.pumpAndSettle();
+    expect(find.text('今天已跳过'), findsOneWidget);
+
+    // 点占位 tile → 直接撤销跳过 → 恢复"完成本次"（不再弹会顶掉撤销条的提示）
+    await tester.tap(find.text('今天已跳过'));
+    await tester.pumpAndSettle();
+    expect(find.text('今天已跳过'), findsNothing, reason: '占位撤销后消失');
+    expect(find.text('完成本次'), findsOneWidget, reason: '恢复完成本次');
+  });
+
+  testWidgets('改期本次后「改期本次」行显示改到的新日期时间，且今天不再可完成（兜底）', (tester) async {
+    final id = await insertDailyTask();
+    await db.insertException(TaskExceptionsCompanion.insert(
+      taskId: id,
+      instanceDate: today,
+      action: const Value('edit'),
+      overrideScheduledDate: Value(AppClock.at(
+        today.year,
+        today.month,
+        today.day,
+      ).add(const Duration(days: 1, hours: 15))),
+    ));
+    await pumpDetail(tester, id);
+    await tester.scrollUntilVisible(find.text('改期本次'), 200,
+        scrollable: find.byType(Scrollable).first);
+    expect(find.textContaining('已改到'), findsOneWidget,
+        reason: '改期本次后显示改到的新日期时间');
+    expect(find.text('今天非实例日'), findsOneWidget,
+        reason: '今天被例外移走 → 完成区显示兜底占位（不再消失）');
+  });
 }

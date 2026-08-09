@@ -23,11 +23,14 @@ void showAppSnackBar(
 
   final scheme = Theme.of(context).colorScheme;
   final messenger = ScaffoldMessenger.of(context);
-  messenger
-    // 即时替换（新条立即进入，撤销条反馈不延迟）；
-    // 闪烁由上面的同消息去抖抑制
-    ..removeCurrentSnackBar()
-    ..showSnackBar(
+  // 撤销条（actionLabel 非空）替换旧条优先显示；普通提示不顶掉现有条
+  //（排队等待）——避免"今天已跳过"等提示移除撤销入口，导致
+  // 跳过/改期撤销失效
+  if (actionLabel != null) {
+    // 即时替换（新条立即进入，撤销条反馈不延迟）；闪烁由同消息去抖抑制
+    messenger.removeCurrentSnackBar();
+  }
+  messenger.showSnackBar(
       SnackBar(
         content: Row(
           children: [

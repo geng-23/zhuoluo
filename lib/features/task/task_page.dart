@@ -1440,7 +1440,9 @@ class _TaskTile extends StatelessWidget {
       if (task.isAllDay) {
         parts.add(dayText);
       } else {
-        final base = ps ?? next ?? AppClock.now();
+        // 时间优先取 next（含例外改期目标日/时刻）——改期本次后任务页
+        // 能看到改到的新时刻，而非始终显示 planStart 的旧时分
+        final base = next ?? ps ?? AppClock.now();
         final pe = task.planEnd;
         parts.add(
           '$dayText '

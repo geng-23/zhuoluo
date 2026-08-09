@@ -43,6 +43,10 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
   bool _todayHas = true;
   /// 重复任务今天是否被跳过（显示"今天已跳过"占位）
   bool _todaySkipped = false;
+  /// 当前实例（今天）被"改期本次"到的目标日期/时间（改期行显示用）
+  DateTime? _instRescheduleTarget;
+  /// 下一次实例日期（含例外改期目标；跳过/改期行显示用）
+  DateTime? _nextInstance;
   bool _loaded = false;
   /// _load 请求序号——丢弃过期请求结果，防止旧数据覆盖新状态
   /// （用户输入标题/备注时，较慢的旧 _load 会把输入框回滚为旧值）
@@ -142,6 +146,20 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         if (!mounted || seq != _loadSeq) return;
         _todayHas = (await db.expandTaskForDate(task, today)).isNotEmpty;
         _todaySkipped = _isTodaySkipped(task, today);
+        // 当前实例的改期例外目标 + 下一次实例（实例操作行显示用）
+        final instDay = TasksController.currentInstanceDate(task);
+        final exceptions = await db.getExceptions(task.id);
+        if (!mounted || seq != _loadSeq) return;
+        _instRescheduleTarget = null;
+        for (final ex in exceptions) {
+          if (ex.action == 'edit' &&
+              DateUtilsEx.sameDay(ex.instanceDate, instDay)) {
+            _instRescheduleTarget = ex.overrideScheduledDate;
+            break;
+          }
+        }
+        _nextInstance = await _notifier.nextInstanceFor(task);
+        if (!mounted || seq != _loadSeq) return;
       }
     }
     if (!mounted || seq != _loadSeq) return;
@@ -385,18 +403,22 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                 label: done ? '撤销完成本次' : '完成本次',
                 value: done ? '今天已完成' : '今天待完成',
                 onTap: () async {
+                  // 记录点按前状态：撤销条按此精确恢复（completeTask 是
+                  // 切换语义，慢设备连点 + 未 await _load 会让 done 闭包
+                  // 与实际库状态漂移）
+                  final wasDone = done;
                   await _notifier.completeTask(t.id);
-                  _load();
+                  await _load();
                   // 仅"完成"弹撤销条；"撤销完成本次"本身就是撤销动作，
-                  // 不再弹（避免"撤销的撤销"）；撤销条撤销后刷新详情页
-                  if (!done && context.mounted) {
+                  // 不再弹（避免"撤销的撤销"）
+                  if (!wasDone && context.mounted) {
                     showAppSnackBar(
                       context,
                       '已完成今天的实例',
                       actionLabel: '撤销',
                       onAction: () async {
                         await _notifier.completeTask(t.id);
-                        _load();
+                        await _load();
                       },
                       icon: Icons.check_circle_outline,
                     );
@@ -408,10 +430,23 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                 icon: Icons.skip_next,
                 label: '今天已跳过',
                 value: '已跳过今天的实例',
+                onTap: () async {
+                  // 直接撤销跳过（不再弹会顶掉撤销条的提示）
+                  final now = AppClock.now();
+                  final day = AppClock.at(now.year, now.month, now.day);
+                  await _notifier.unskipInstance(t.id, day);
+                  await _load();
+                },
+              )
+            else
+              _ListTileRow(
+                icon: Icons.event_busy,
+                label: '今天非实例日',
+                value: '今天没有可完成的实例',
                 onTap: () {
                   showAppSnackBar(
                     context,
-                    '今天已跳过，撤销「跳过本次」后可再次完成',
+                    '今天不在重复规则内，或该日已改期/跳过',
                     icon: Icons.event_busy,
                   );
                 },
@@ -419,13 +454,18 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
             _ListTileRow(
               icon: Icons.event_repeat,
               label: '改期本次',
-              value: DateUtilsEx.dateCn(TasksController.currentInstanceDate(t)),
+              value: _instRescheduleTarget != null
+                  ? '已改到 ${DateUtilsEx.dateCn(_instRescheduleTarget!)} '
+                      '${DateUtilsEx.timeCn(_instRescheduleTarget!)}'
+                  : DateUtilsEx.dateCn(TasksController.currentInstanceDate(t)),
               onTap: () => _rescheduleInstance(t),
             ),
             _ListTileRow(
               icon: Icons.skip_next,
               label: '跳过本次',
-              value: '不再安排当天实例',
+              value: _nextInstance != null
+                  ? '下次 ${DateUtilsEx.dateCn(_nextInstance!)}'
+                  : '不再安排当天实例',
               onTap: () async {
                 final instDay = TasksController.currentInstanceDate(t);
                 await _notifier.skipInstance(t.id, instDay);

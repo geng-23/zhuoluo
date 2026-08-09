@@ -51,6 +51,7 @@ class Reminders extends Table {
   IntColumn get remindMinutesBefore =>
       integer().withDefault(const Constant(0))();
   BoolColumn get isPersistent => boolean().withDefault(const Constant(false))();
+
   /// 全天任务提醒时刻（当天 0 点起的分钟数，0-1439；null = 默认 09:00）。
   /// 定时任务忽略此字段，始终按 planStart 提前。
   IntColumn get remindAtMinutes => integer().nullable()();
@@ -292,10 +293,11 @@ class AppDatabase extends _$AppDatabase {
 
   /// 是否存在默认清单（合并导入判断是否可继承备份的默认标记）
   Future<bool> hasDefaultList() async {
-    final rows = await (select(lists)
-          ..where((l) => l.isDefault.equals(true))
-          ..limit(1))
-        .get();
+    final rows =
+        await (select(lists)
+              ..where((l) => l.isDefault.equals(true))
+              ..limit(1))
+            .get();
     return rows.isNotEmpty;
   }
 
@@ -452,8 +454,7 @@ class AppDatabase extends _$AppDatabase {
             day,
             exMap[t.id] ?? const [],
           );
-          if (hit.isNotEmpty &&
-              !doneSet.contains(_doneKey(t.id, day))) {
+          if (hit.isNotEmpty && !doneSet.contains(_doneKey(t.id, day))) {
             result.add(t);
             break;
           }
@@ -498,21 +499,19 @@ class AppDatabase extends _$AppDatabase {
       to.month,
       to.day,
     ).add(const Duration(days: 1));
-    final rows = await (select(
-      taskCompletions,
-    )..where(
-          (c) =>
-              c.taskId.isIn(ids) &
-              c.instanceDate.isBiggerOrEqualValue(start) &
-              c.instanceDate.isSmallerThanValue(end),
-        )).get();
-    return {
-      for (final c in rows) _doneKey(c.taskId, c.instanceDate),
-    };
+    final rows =
+        await (select(taskCompletions)..where(
+              (c) =>
+                  c.taskId.isIn(ids) &
+                  c.instanceDate.isBiggerOrEqualValue(start) &
+                  c.instanceDate.isSmallerThanValue(end),
+            ))
+            .get();
+    return {for (final c in rows) _doneKey(c.taskId, c.instanceDate)};
   }
 
   /// 完成记录集合的 key：与 getCalendarItems 的 doneSet 同格式。
-  /// P1-2：DB 读回值为系统时区解释，取字段前必须按应用时区重新解释，
+  /// ：DB 读回值为系统时区解释，取字段前必须按应用时区重新解释，
   /// 否则与写入侧（应用时区 00:00 基准）key 不一致，完成状态错位。
   static String _doneKey(int taskId, DateTime d) {
     final a = AppClock.asApp(d);
@@ -626,7 +625,7 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
-  /// P1-4：命中校验的实例完成——重复任务只允许在"规则命中日"或
+  /// 命中校验的实例完成——重复任务只允许在"规则命中日"或
   /// "例外改期目标日"写入完成记录，防止非命中日产生孤儿完成记录
   ///（此前命中检查散落在 UI 层，控制器/DB 无统一约束）。
   /// 非重复任务走普通完成（completedAt）；重复任务返回 false = 未命中（未写入）。
@@ -647,10 +646,9 @@ class AppDatabase extends _$AppDatabase {
   /// 重复任务：撤销实例完成（归一化）
   Future<void> uncompleteInstance(int taskId, DateTime instanceDate) async {
     final day = du.DateUtilsEx.normalizeInstanceDate(instanceDate);
-    await (delete(taskCompletions)..where(
-          (t) => t.taskId.equals(taskId) & t.instanceDate.equals(day),
-        ))
-        .go();
+    await (delete(
+      taskCompletions,
+    )..where((t) => t.taskId.equals(taskId) & t.instanceDate.equals(day))).go();
   }
 
   /// 查询单条实例完成记录（跳过实例时暂存完成时间，撤销时恢复）
@@ -660,9 +658,7 @@ class AppDatabase extends _$AppDatabase {
   ) async {
     final day = du.DateUtilsEx.normalizeInstanceDate(instanceDate);
     return (select(taskCompletions)
-          ..where(
-            (t) => t.taskId.equals(taskId) & t.instanceDate.equals(day),
-          )
+          ..where((t) => t.taskId.equals(taskId) & t.instanceDate.equals(day))
           ..limit(1))
         .getSingleOrNull();
   }
@@ -709,10 +705,7 @@ class AppDatabase extends _$AppDatabase {
     );
     if (instances.isEmpty) return const []; // 展开失败则保守不清理
     final keepDays = instances
-        .map(
-          (d) =>
-              AppClock.at(d.year, d.month, d.day).millisecondsSinceEpoch,
-        )
+        .map((d) => AppClock.at(d.year, d.month, d.day).millisecondsSinceEpoch)
         .toSet();
     // 例外改期日期同样保留（其上的完成记录合法）
     final exceptions = await (select(
@@ -721,7 +714,7 @@ class AppDatabase extends _$AppDatabase {
     for (final ex in exceptions) {
       final od = ex.overrideScheduledDate;
       if (od != null) {
-        // P1-2：DB 读回值为系统时区字段，取字段前按应用时区解释
+        // ：DB 读回值为系统时区字段，取字段前按应用时区解释
         final a = AppClock.asApp(od);
         keepDays.add(
           AppClock.at(a.year, a.month, a.day).millisecondsSinceEpoch,
@@ -733,7 +726,7 @@ class AppDatabase extends _$AppDatabase {
     )..where((c) => c.taskId.equals(taskId))).get();
     final removed = <TaskCompletion>[];
     for (final c in all) {
-      // P1-2：DB 读回值为系统时区字段，取字段前按应用时区解释
+      // ：DB 读回值为系统时区字段，取字段前按应用时区解释
       final a = AppClock.asApp(c.instanceDate);
       final d = AppClock.at(a.year, a.month, a.day);
       if (!keepDays.contains(d.millisecondsSinceEpoch)) {
@@ -767,10 +760,12 @@ class AppDatabase extends _$AppDatabase {
       final removedEx = await (select(
         taskExceptions,
       )..where((e) => e.taskId.equals(taskId))).get();
-      await (delete(taskCompletions)..where((c) => c.taskId.equals(taskId)))
-          .go();
-      await (delete(taskExceptions)..where((e) => e.taskId.equals(taskId)))
-          .go();
+      await (delete(
+        taskCompletions,
+      )..where((c) => c.taskId.equals(taskId))).go();
+      await (delete(
+        taskExceptions,
+      )..where((e) => e.taskId.equals(taskId))).go();
       return RecurringChangeResult(
         removedCompletions: removed,
         removedExceptions: removedEx,
@@ -1000,16 +995,16 @@ class AppDatabase extends _$AppDatabase {
       exceptionsByTask.putIfAbsent(ex.taskId, () => []).add(ex);
     }
     // 预取：窗口内已完成实例（避免逐实例查库）
-    final completions = await (select(
-      taskCompletions,
-    )..where(
-          (c) =>
-              c.taskId.isIn(taskIds) &
-              c.instanceDate.isBiggerOrEqualValue(start) &
-              c.instanceDate.isSmallerThanValue(end),
-        )).get();
+    final completions =
+        await (select(taskCompletions)..where(
+              (c) =>
+                  c.taskId.isIn(taskIds) &
+                  c.instanceDate.isBiggerOrEqualValue(start) &
+                  c.instanceDate.isSmallerThanValue(end),
+            ))
+            .get();
     final doneSet = <String>{
-      // P1-2：DB 读回值取字段前按应用时区解释（与 _doneKey 同口径）
+      // ：DB 读回值取字段前按应用时区解释（与 _doneKey 同口径）
       for (final c in completions) _doneKey(c.taskId, c.instanceDate),
     };
 
@@ -1024,7 +1019,7 @@ class AppDatabase extends _$AppDatabase {
           // 仅截止时间的任务 → 在截止日展示一个实例
           final due = t.dueTime;
           if (due == null) continue;
-          // P1-2：DB 读回值为系统时区字段，取字段前按应用时区解释
+          // ：DB 读回值为系统时区字段，取字段前按应用时区解释
           final a = AppClock.asApp(due);
           final dueDay = AppClock.at(a.year, a.month, a.day);
           if (!dueDay.isBefore(start) && dueDay.isBefore(end)) {
@@ -1040,7 +1035,7 @@ class AppDatabase extends _$AppDatabase {
           continue;
         }
         final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
-        // P1-2：DB 读回值为系统时区字段，取字段前按应用时区解释
+        // ：DB 读回值为系统时区字段，取字段前按应用时区解释
         final pa = AppClock.asApp(ps);
         var d = AppClock.at(pa.year, pa.month, pa.day);
         while (d.isBefore(end) && d.isBefore(pe)) {
@@ -1114,9 +1109,7 @@ class AppDatabase extends _$AppDatabase {
       if (ps == null) continue;
       final hit = RruleService.instance.nearestHitOnOrNear(ps, t.rrule);
       if (hit == null) continue;
-      if (hit.year == ps.year &&
-          hit.month == ps.month &&
-          hit.day == ps.day) {
+      if (hit.year == ps.year && hit.month == ps.month && hit.day == ps.day) {
         continue; // 锚点已命中规则，无需调整
       }
       final newStart = AppClock.at(
@@ -1131,10 +1124,7 @@ class AppDatabase extends _$AppDatabase {
           ? newStart.add(const Duration(hours: 1))
           : newStart.add(pe.difference(ps));
       await (update(tasks)..where((x) => x.id.equals(t.id))).write(
-        TasksCompanion(
-          planStart: Value(newStart),
-          planEnd: Value(newEnd),
-        ),
+        TasksCompanion(planStart: Value(newStart), planEnd: Value(newEnd)),
       );
     }
   }
@@ -1172,7 +1162,7 @@ class AppDatabase extends _$AppDatabase {
     DateTime date,
     List<TaskException> exceptions,
   ) async {
-    // P1-2：date 可能是循环 day（应用时区）或外部传入值，统一按应用时区
+    // ：date 可能是循环 day（应用时区）或外部传入值，统一按应用时区
     // 解释后再取字段（asApp 对已是应用时区的 TZDateTime 幂等）
     final da = AppClock.asApp(date);
     if (t.rrule.isEmpty) {
@@ -1194,15 +1184,13 @@ class AppDatabase extends _$AppDatabase {
           .toList();
     } catch (_) {}
     final dateKey = AppClock.at(da.year, da.month, da.day);
-    if (skipped.any(
-      (s) => du.DateUtilsEx.sameDay(s, dateKey),
-    )) {
+    if (skipped.any((s) => du.DateUtilsEx.sameDay(s, dateKey))) {
       return [];
     }
     for (final ex in exceptions) {
       final od = ex.overrideScheduledDate;
       // 例外改期：overrideScheduledDate 指向的日期视为有实例（原日期不再显示）
-      // P1-2：例外为 DB 读回值，字段按应用时区解释后比较
+      // ：例外为 DB 读回值，字段按应用时区解释后比较
       if (ex.action == 'edit' &&
           od != null &&
           du.DateUtilsEx.sameDay(od, dateKey)) {
@@ -1236,7 +1224,6 @@ class AppDatabase extends _$AppDatabase {
   // ---------- 提醒 ----------
   Future<List<Reminder>> getReminders(int taskId) =>
       (select(reminders)..where((r) => r.taskId.equals(taskId))).get();
-
 
   Future<int> insertReminder(RemindersCompanion r) => into(reminders).insert(r);
 
@@ -1318,7 +1305,7 @@ class AppDatabase extends _$AppDatabase {
       );
 
   Future<bool> isHabitDone(int habitId, DateTime date) async {
-    // P1-2：入参可能是 DB 读回值，统一按应用时区解释后取字段
+    // ：入参可能是 DB 读回值，统一按应用时区解释后取字段
     final a = AppClock.asApp(date);
     final d = AppClock.at(a.year, a.month, a.day);
     final found =
@@ -1332,7 +1319,7 @@ class AppDatabase extends _$AppDatabase {
   /// 第二次调用看到第一次的提交结果（查→删/插），不会并发插入重复记录
   ///（配合 habit_records 唯一索引双保险）
   Future<void> checkHabit(int habitId, DateTime date) async {
-    // P1-2：入参可能是 DB 读回值，统一按应用时区解释后取字段
+    // ：入参可能是 DB 读回值，统一按应用时区解释后取字段
     final a = AppClock.asApp(date);
     final d = AppClock.at(a.year, a.month, a.day);
     await transaction(() async {
@@ -1349,9 +1336,9 @@ class AppDatabase extends _$AppDatabase {
           ),
         );
       } else {
-        await (delete(habitRecords)
-              ..where((h) => h.id.equals(existing.id)))
-            .go();
+        await (delete(
+          habitRecords,
+        )..where((h) => h.id.equals(existing.id))).go();
       }
     });
   }
@@ -1443,7 +1430,7 @@ class AppDatabase extends _$AppDatabase {
     }
     for (final c in completions) {
       if (!topLevelTaskIds.contains(c.taskId)) continue;
-      // P1-2：completedAt 为 DB 读回值，字段按应用时区解释后分组
+      // ：completedAt 为 DB 读回值，字段按应用时区解释后分组
       final a = AppClock.asApp(c.completedAt);
       final d = AppClock.at(a.year, a.month, a.day);
       result[d] = (result[d] ?? 0) + 1;
@@ -1460,7 +1447,7 @@ class AppDatabase extends _$AppDatabase {
             ))
             .get();
     for (final t in doneTasks) {
-      // P1-2：completedAt 为 DB 读回值，字段按应用时区解释后分组
+      // ：completedAt 为 DB 读回值，字段按应用时区解释后分组
       final a = AppClock.asApp(t.completedAt!);
       final d = AppClock.at(a.year, a.month, a.day);
       result[d] = (result[d] ?? 0) + 1;
@@ -1484,7 +1471,7 @@ class AppDatabase extends _$AppDatabase {
     final result = <DateTime, int>{};
 
     void add(DateTime d) {
-      // P1-2：d 可能是 DB 读回值（planStart/dueTime），统一按应用时区
+      // ：d 可能是 DB 读回值（planStart/dueTime），统一按应用时区
       // 解释后取字段分组
       final a = AppClock.asApp(d);
       final key = AppClock.at(a.year, a.month, a.day);
@@ -1521,8 +1508,7 @@ class AppDatabase extends _$AppDatabase {
         await (select(tasks)..where(
               (t) =>
                   t.rrule.isNotValue('') &
-                  (t.planStart.isNull() |
-                      t.planStart.isSmallerThanValue(end)) &
+                  (t.planStart.isNull() | t.planStart.isSmallerThanValue(end)) &
                   t.parentId.isNull(),
             ))
             .get();
@@ -1578,21 +1564,18 @@ class AppDatabase extends _$AppDatabase {
 
   /// 非子任务按（清单, 标题）去重
   Future<Task?> getTaskByListAndTitle(int listId, String title) =>
-      (select(tasks)
-            ..where(
-              (t) =>
-                  t.listId.equals(listId) &
-                  t.parentId.isNull() &
-                  t.title.equals(title),
-            ))
+      (select(tasks)..where(
+            (t) =>
+                t.listId.equals(listId) &
+                t.parentId.isNull() &
+                t.title.equals(title),
+          ))
           .getSingleOrNull();
 
   /// 子任务按（父任务, 标题）去重
   Future<Task?> getTaskByParentAndTitle(int parentId, String title) =>
       (select(tasks)
-            ..where(
-              (t) => t.parentId.equals(parentId) & t.title.equals(title),
-            ))
+            ..where((t) => t.parentId.equals(parentId) & t.title.equals(title)))
           .getSingleOrNull();
 
   Future<Reminder?> getReminderByTriple(
@@ -1600,13 +1583,12 @@ class AppDatabase extends _$AppDatabase {
     int remindMinutesBefore,
     int? remindAtMinutes,
   ) =>
-      (select(reminders)
-            ..where(
-              (r) =>
-                  r.taskId.equals(taskId) &
-                  r.remindMinutesBefore.equals(remindMinutesBefore) &
-                  r.remindAtMinutes.equalsNullable(remindAtMinutes),
-            ))
+      (select(reminders)..where(
+            (r) =>
+                r.taskId.equals(taskId) &
+                r.remindMinutesBefore.equals(remindMinutesBefore) &
+                r.remindAtMinutes.equalsNullable(remindAtMinutes),
+          ))
           .getSingleOrNull();
 
   Future<TaskException?> getExceptionByTaskDateAction(
@@ -1614,13 +1596,12 @@ class AppDatabase extends _$AppDatabase {
     DateTime instanceDate,
     String action,
   ) =>
-      (select(taskExceptions)
-            ..where(
-              (e) =>
-                  e.taskId.equals(taskId) &
-                  e.instanceDate.equals(instanceDate) &
-                  e.action.equals(action),
-            ))
+      (select(taskExceptions)..where(
+            (e) =>
+                e.taskId.equals(taskId) &
+                e.instanceDate.equals(instanceDate) &
+                e.action.equals(action),
+          ))
           .getSingleOrNull();
 
   Future<HabitRecord?> getHabitRecordByDate(int habitId, DateTime date) =>
@@ -1649,7 +1630,6 @@ class AppDatabase extends _$AppDatabase {
 
   Future<int> insertPomodoroFull(PomodoroRecordsCompanion c) =>
       into(pomodoroRecords).insert(c);
-
 
   /// 全量替换（备份恢复用，原子操作）：
   /// 清空 + 逐表插入在同一个事务内，任何解析/外键/唯一约束失败自动回滚，

@@ -10,7 +10,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
-import 'package:zhuoluo/features/profile/profile_page.dart';
+import 'package:zhuoluo/features/profile/pomodoro_page.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 
 import '../support/fake_notification_scheduler.dart';

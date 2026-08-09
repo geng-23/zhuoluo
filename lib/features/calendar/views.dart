@@ -22,7 +22,7 @@ const _startHour = 6;
 const _endHour = 23;
 const _pixelPerHour = 64.0;
 
-/// 按天索引 key（与 CalendarController 的 byDay 同口径；P1-2 统一按应用时区）
+/// 按天索引 key（与 CalendarController 的 byDay 同口径； 统一按应用时区）
 int _dayKey(DateTime d) {
   final a = AppClock.asApp(d);
   return a.year * 10000 + a.month * 100 + a.day;
@@ -42,7 +42,7 @@ int effectiveStartHourFor({
   for (final d in days) {
     for (final it in byDay[_dayKey(d)] ?? const <CalendarItem>[]) {
       if (_AllDayBar.isTopArea(it)) continue;
-      // P1-2：planStart 为 DB 读回值，取字段前按应用时区解释
+      // ：planStart 为 DB 读回值，取字段前按应用时区解释
       final ps = it.task.planStart;
       final h = ps == null ? defaultStart : AppClock.asApp(ps).hour;
       if (h < earliest) earliest = h;
@@ -635,11 +635,13 @@ class _DayViewState extends ConsumerState<DayView> {
   ValueNotifier<double>? _ownScroll;
 
   int _pageFor(DateTime d) {
-    // P1-2：按应用时区日期字段计算页号（两侧同口径，跨时区不偏移）
+    // ：按应用时区日期字段计算页号（两侧同口径，跨时区不偏移）
     final a = AppClock.asApp(d);
-    return AppClock.at(a.year, a.month, a.day)
-        .difference(AppClock.at(2000, 1, 1))
-        .inDays;
+    return AppClock.at(
+      a.year,
+      a.month,
+      a.day,
+    ).difference(AppClock.at(2000, 1, 1)).inDays;
   }
 
   @override
@@ -2850,7 +2852,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
 
   /// 任务块顶部位置：例外改期目标时刻（displayTime）优先，否则 planStart 时分
   double _topFor(CalendarItem item) {
-    // P1-2：displayTime/planStart 为 DB 读回值，取时分前按应用时区解释
+    // ：displayTime/planStart 为 DB 读回值，取时分前按应用时区解释
     final dt = item.displayTime;
     final ps = item.task.planStart;
     final minutes = dt != null
@@ -2892,9 +2894,13 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
       );
     final intervals = <_Interval>[];
     for (final i in sorted) {
-      // P1-2：DB 读回值取字段前统一按应用时区解释
-      final psA = i.task.planStart == null ? null : AppClock.asApp(i.task.planStart!);
-      final peA = i.task.planEnd == null ? null : AppClock.asApp(i.task.planEnd!);
+      // ：DB 读回值取字段前统一按应用时区解释
+      final psA = i.task.planStart == null
+          ? null
+          : AppClock.asApp(i.task.planStart!);
+      final peA = i.task.planEnd == null
+          ? null
+          : AppClock.asApp(i.task.planEnd!);
       final da = AppClock.asApp(i.instanceDate);
       final dtA = i.displayTime == null ? null : AppClock.asApp(i.displayTime!);
       final s = psA == null

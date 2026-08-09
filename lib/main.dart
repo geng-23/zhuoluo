@@ -12,32 +12,56 @@ import 'package:zhuoluo/shell/home_shell.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final container = ProviderContainer();
+  // runApp 前仅执行首屏必需且轻量的初始化：
+  // 1. 通知初始化：时区数据 + 插件 + 渠道 + 冷启动深链捕获（HomeShell 同步消费）
+  // 2. 默认清单：首次查询触发 DB 惰性打开与迁移（任务页依赖默认清单存在）
   await container.read(notificationServiceProvider).init();
   await container.read(dbProvider).ensureDefaultList();
-  // 存量数据修复：重复任务锚点不匹配规则时自动吸附（旧版本创建的数据）
-  await container.read(dbProvider).fixOrphanRecurringAnchors();
-  // 启动时请求通知权限（Android 13+ 必须授予才显示通知）
-  await container.read(notificationServiceProvider).requestPermission();
-  // 全量重排提醒：App 重装/系统清理后已排的通知会丢失，启动时恢复
-  await container.read(reminderSchedulerProvider).rescheduleAll();
-  // 恢复主题设置（I1：#31 主题持久化）
-  final savedTheme = await container.read(dbProvider).getSetting('themeMode');
+  // 轻量设置并行读取，runApp 前应用（主题/时区影响首帧渲染，音效/震动影响交互反馈）
+  final settings = container.read(settingsProvider);
+  final (savedTheme, appTimezone, soundEnabled, hapticsEnabled) = await (
+    container.read(dbProvider).getSetting('themeMode'),
+    settings.getAppTimezone(),
+    settings.getSoundEnabled(),
+    settings.getHapticsEnabled(),
+  ).wait;
   if (savedTheme != null && savedTheme.isNotEmpty) {
     container.read(themeModeProvider.notifier).state = savedTheme;
   }
-  // 恢复音效/震动开关
-  final settings = container.read(settingsProvider);
-  SoundService.soundsEnabled = await settings.getSoundEnabled();
-  Haptics.hapticsEnabled = await settings.getHapticsEnabled();
-  // 恢复应用时区（偏好设置组：出差/旅行保持家乡时间）。
+  SoundService.soundsEnabled = soundEnabled;
+  Haptics.hapticsEnabled = hapticsEnabled;
   // 时区数据已由 notificationService.init() 初始化；未设置 = 跟随系统。
-  AppClock.setTimezone(await settings.getAppTimezone());
+  AppClock.setTimezone(appTimezone);
   runApp(
     UncontrolledProviderScope(container: container, child: const ZhuoluoApp()),
   );
-  // 每天首次打开自动备份（备份方案设计 3.2）：
-  // runApp 之后异步执行（fire-and-forget），不阻塞启动流程
+  // runApp 之后异步执行（fire-and-forget），不阻塞首屏：
+  // 存量锚点修复 → 通知权限请求 → 全量提醒重排，按依赖顺序串行；
+  // 重排依赖权限结果（schedule 在权限未知时也会自动请求，顺序保证尽早弹窗）。
+  // 任一步失败不阻塞后续与启动流程。
+  unawaited(_runStartupBackground(container));
+  // 每天首次打开自动备份（备份方案设计 3.2），不阻塞启动流程
   unawaited(container.read(backupServiceProvider).autoBackup());
+}
+
+/// 启动后台任务链：锚点修复（数据正确性）→ 权限请求 → 全量重排（最重）。
+/// 单步异常吞掉并记录，保证启动不崩溃、后续步骤继续。
+Future<void> _runStartupBackground(ProviderContainer container) async {
+  try {
+    await container.read(dbProvider).fixOrphanRecurringAnchors();
+  } catch (e) {
+    debugPrint('启动后台：锚点修复失败 $e');
+  }
+  try {
+    await container.read(notificationServiceProvider).requestPermission();
+  } catch (e) {
+    debugPrint('启动后台：通知权限请求失败 $e');
+  }
+  try {
+    await container.read(reminderSchedulerProvider).rescheduleAll();
+  } catch (e) {
+    debugPrint('启动后台：全量提醒重排失败 $e');
+  }
 }
 
 class ZhuoluoApp extends ConsumerWidget {

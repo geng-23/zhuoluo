@@ -545,7 +545,7 @@ class TasksController extends StateNotifier<TasksState> {
       if (done) {
         await _db.uncompleteInstance(id, inst);
       } else {
-        // P1-4：命中校验统一收口——非规则命中日不写入完成记录
+        // 命中校验统一收口——非规则命中日不写入完成记录
         final hit = await _db.completeInstanceIfHit(id, inst);
         if (!hit) return null;
       }
@@ -587,7 +587,7 @@ class TasksController extends StateNotifier<TasksState> {
     SoundService.instance.play(SoundKind.complete);
     Haptics.medium();
     if (t.rrule.isNotEmpty) {
-      // P1-4：命中校验统一收口——非规则命中日不写入完成记录
+      // 命中校验统一收口——非规则命中日不写入完成记录
       await _db.completeInstanceIfHit(id, instanceDate);
       // 完成实例后重排：取消该实例已排提醒，其余未完成实例保留
       final fresh = await _db.getTask(id);

@@ -94,7 +94,7 @@ final settingsProvider = Provider<SettingsController>(
 );
 
 /// 主题模式全局状态（system/light/dark）
-/// P3：从 profile_page 移至 core——main.dart 启动时恢复主题，
+/// 从 profile_page 移至 core——main.dart 启动时恢复主题，
 /// 此前 main 反向依赖 feature 页面文件
 final themeModeProvider = StateProvider<String>((ref) => 'system');
 

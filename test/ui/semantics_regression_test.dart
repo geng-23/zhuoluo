@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
-import 'package:zhuoluo/features/profile/profile_page.dart';
+import 'package:zhuoluo/features/profile/habit_page.dart';
 import 'package:zhuoluo/features/task/task_page.dart';
 
 /// 语义行为回归测试：重复任务已完成视图 / 习惯通知定位 / 快速添加入口

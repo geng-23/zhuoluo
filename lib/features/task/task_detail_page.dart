@@ -176,10 +176,12 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
 
   @override
   Widget build(BuildContext context) {
-    final t = _task;
+    // 先检查加载标志再访问 _task：_load 异步完成前（导航动画第一帧）
+    // 直接访问 late _task 会抛 LateInitializationError（深链/快速进入时）
     if (!_loaded) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    final t = _task;
     // 任务被其他入口删除后显示空态（此前无限转圈）
     if (t == null) {
       return Scaffold(

@@ -5,7 +5,7 @@ import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 参考设计文档：完整 RRULE（自定义间隔 + 结束 + 单次例外）
 /// 例外由数据库层（task_exceptions）处理，此处仅判断"某日期是否命中规则"。
 ///
-/// P1-2 统一时间模型：所有入口参数先经 `AppClock.asApp()` 按应用时区解释，
+///  统一时间模型：所有入口参数先经 `AppClock.asApp()` 按应用时区解释，
 /// 内部日期字段（year/month/day/weekday）与构造（AppClock.at）均按应用时区，
 /// 绝对时刻运算（Duration/difference）不受影响；未设置时区时行为不变。
 class RruleService {
@@ -52,7 +52,8 @@ class RruleService {
     return cycleDays > 370 ? cycleDays + 1 : 370;
   }
 
-  DateTime? _parseUntil(String s) {    if (s.contains('T')) {
+  DateTime? _parseUntil(String s) {
+    if (s.contains('T')) {
       return DateTime.tryParse(s);
     }
     // YYYYMMDD 格式：解析为当日结束（23:59:59.999）。
@@ -79,7 +80,7 @@ class RruleService {
     DateTime? to,
     int limit = 400,
   }) {
-    // P1-2：入口统一按应用时区解释（未设置时区 = 原样）
+    // ：入口统一按应用时区解释（未设置时区 = 原样）
     final s = AppClock.asApp(start);
     final f = from == null ? null : AppClock.asApp(from);
     final t = to == null ? null : AppClock.asApp(to);
@@ -100,10 +101,7 @@ class RruleService {
     }
 
     // 遍历上限：覆盖窗口跨度 + 目标数量，并防 INTERVAL=0 等非法规则死循环
-    final spanDays = (t ?? f ?? s)
-        .difference(s)
-        .inDays
-        .clamp(0, 1 << 31);
+    final spanDays = (t ?? f ?? s).difference(s).inDays.clamp(0, 1 << 31);
     final step = switch (rule.freq) {
       'WEEKLY' => (rule.interval > 0 ? rule.interval : 1) * 7,
       'MONTHLY' => (rule.interval > 0 ? rule.interval : 1) * 31,
@@ -115,9 +113,7 @@ class RruleService {
     if (rule.freq == 'DAILY') {
       for (var i = 0; i < maxIter; i++) {
         if (!emit(
-          s.add(
-            Duration(days: i * (rule.interval > 0 ? rule.interval : 1)),
-          ),
+          s.add(Duration(days: i * (rule.interval > 0 ? rule.interval : 1))),
         )) {
           break;
         }
@@ -222,7 +218,7 @@ class RruleService {
 
   /// 判断 [date] 是否命中规则（含 COUNT/UNTIL 边界）
   bool hitsOn(String rrule, DateTime start, DateTime date) {
-    // P1-2：入口统一按应用时区解释（绝对时刻不变）
+    // ：入口统一按应用时区解释（绝对时刻不变）
     final s = AppClock.asApp(start);
     final d = AppClock.asApp(date);
     final rule = parse(rrule);
@@ -278,9 +274,7 @@ class RruleService {
       case 'YEARLY':
         return d.month == s.month &&
             d.day == s.day &&
-            (d.year - s.year) %
-                    (rule.interval > 0 ? rule.interval : 1) ==
-                0;
+            (d.year - s.year) % (rule.interval > 0 ? rule.interval : 1) == 0;
     }
     return false;
   }

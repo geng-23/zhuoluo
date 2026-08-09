@@ -10,7 +10,6 @@ import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/task_page.dart';
 
-/// 第二版审查（docs/01-code-audit-v2.md）P1 修复回归测试
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final now = DateTime.now();

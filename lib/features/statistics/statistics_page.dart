@@ -22,6 +22,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
   List<Habit> _habits = [];
   Map<int, Map<DateTime, bool>> _habitHeatByHabit = {};
   bool _loading = true;
+
   /// _load 请求序号——丢弃过期结果（快速切换周/月/年时旧请求
   /// 不得覆盖新选择）
   int _loadSeq = 0;
@@ -85,7 +86,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
     }
     final records = await db.getAllHabitRecords();
     for (final r in records) {
-      // P1-2：r.date 为 DB 读回值，字段按应用时区解释后与热力图 key 对齐
+      // ：r.date 为 DB 读回值，字段按应用时区解释后与热力图 key 对齐
       final a = AppClock.asApp(r.date);
       final day = AppClock.at(a.year, a.month, a.day);
       final map = heatByHabit[r.habitId];
@@ -109,7 +110,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
   Map<DateTime, int> _pomodoroDayMap(List<PomodoroRecord> records) {
     final map = <DateTime, int>{};
     for (final r in records) {
-      // P1-2：completedAt 为 DB 读回值，字段按应用时区解释后分组
+      // ：completedAt 为 DB 读回值，字段按应用时区解释后分组
       final a = AppClock.asApp(r.completedAt);
       final d = AppClock.at(a.year, a.month, a.day);
       map[d] = (map[d] ?? 0) + r.durationMinutes;
@@ -173,10 +174,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                   ),
                 // key 随加载序号变化 → 数据刷新时重建（此前 State 复用
                 // 不重跑 initState，热力图在页面存活期间不更新）
-                _YearHeatmap(
-                  key: ValueKey(_loadSeq),
-                  db: ref.read(dbProvider),
-                ),
+                _YearHeatmap(key: ValueKey(_loadSeq), db: ref.read(dbProvider)),
               ],
             ),
     );
@@ -235,7 +233,10 @@ class _CompletionCard extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               '说明：完成数按完成时间统计、计划数按计划日统计（子任务不计入）',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 11),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 11,
+              ),
             ),
             const SizedBox(height: 12),
             if (days.isEmpty)
@@ -266,20 +267,22 @@ class _CompletionCard extends StatelessWidget {
                                           .clamp(1, 20)
                                           .toDouble()),
                                       decoration: BoxDecoration(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primaryContainer,
-                                        borderRadius: const BorderRadius.vertical(
-                                          top: Radius.circular(2),
-                                        ),
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primaryContainer,
+                                        borderRadius:
+                                            const BorderRadius.vertical(
+                                              top: Radius.circular(2),
+                                            ),
                                       ),
                                     ),
                                     if ((planned[d] ?? 0) > 0)
                                       Container(
                                         width: 4,
-                                        height: ((planned[d] ?? 0)
-                                                    .clamp(1, 20)
-                                                    .toDouble()) *
+                                        height:
+                                            ((planned[d] ?? 0)
+                                                .clamp(1, 20)
+                                                .toDouble()) *
                                             ((completed[d] ?? 0) /
                                                     (planned[d] ?? 0))
                                                 .clamp(0.0, 1.0),
@@ -396,10 +399,15 @@ class _HabitHeatmap extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: done
                           ? Theme.of(context).colorScheme.primary
-                          : Theme.of(context).colorScheme.surfaceContainerHighest,
+                          : Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
                       shape: BoxShape.circle,
                       border: isToday
-                          ? Border.all(color: Theme.of(context).colorScheme.error, width: 1.5)
+                          ? Border.all(
+                              color: Theme.of(context).colorScheme.error,
+                              width: 1.5,
+                            )
                           : null,
                     ),
                   );
@@ -455,9 +463,11 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
         .clamp(1, 10)
         .toInt();
     // 闰年 366 天（此前固定 365 格漏掉 12/31）
-    final daysInYear = AppClock.at(now.year + 1, 1, 1).difference(
-      AppClock.at(now.year, 1, 1),
-    ).inDays;
+    final daysInYear = AppClock.at(
+      now.year + 1,
+      1,
+      1,
+    ).difference(AppClock.at(now.year, 1, 1)).inDays;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -474,7 +484,10 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
             const SizedBox(height: 2),
             Text(
               '说明：颜色越深表示当天完成的任务越多',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 11),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 11,
+              ),
             ),
             const SizedBox(height: 12),
             // 高度自适应——26 列下全年 365/366 天需 14~15 行，
@@ -484,8 +497,8 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
               builder: (context, constraints) {
                 const cols = 26;
                 const spacing = 3.0;
-                final cell = (constraints.maxWidth - spacing * (cols - 1)) /
-                    cols;
+                final cell =
+                    (constraints.maxWidth - spacing * (cols - 1)) / cols;
                 final rows = (daysInYear / cols).ceil();
                 final height = rows * cell + spacing * (rows - 1);
                 return SizedBox(
@@ -500,16 +513,16 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
                         ),
                     itemCount: daysInYear,
                     itemBuilder: (context, i) {
-                      final day =
-                          AppClock.at(now.year, 1, 1).add(Duration(days: i));
+                      final day = AppClock.at(
+                        now.year,
+                        1,
+                        1,
+                      ).add(Duration(days: i));
                       if (day.isAfter(now)) {
                         return Container(color: Colors.transparent);
                       }
-                      final c = counts[AppClock.at(
-                            day.year,
-                            day.month,
-                            day.day,
-                          )] ??
+                      final c =
+                          counts[AppClock.at(day.year, day.month, day.day)] ??
                           0;
                       final level = c == 0
                           ? 0.0
@@ -524,9 +537,7 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
                                   Theme.of(
                                     context,
                                   ).colorScheme.primaryContainer,
-                                  Theme.of(
-                                    context,
-                                  ).colorScheme.primary,
+                                  Theme.of(context).colorScheme.primary,
                                   level,
                                 ),
                           shape: BoxShape.circle,

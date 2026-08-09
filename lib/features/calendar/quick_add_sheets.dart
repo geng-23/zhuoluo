@@ -20,7 +20,7 @@ Future<int> _defaultListId(WidgetRef ref) async {
 }
 
 /// 日历快速添加（带起止时间）与默认日期快速添加。
-/// P3：从 calendar_page 抽离——此前 views.dart ↔ calendar_page.dart 循环 import。
+/// 从 calendar_page 抽离——此前 views.dart ↔ calendar_page.dart 循环 import。
 
 /// 拖动选时区间创建（预填 planStart/planEnd）
 class QuickAddSheetWithRange extends ConsumerStatefulWidget {

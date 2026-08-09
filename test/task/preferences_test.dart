@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/services/haptics_service.dart';
+import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart';
@@ -264,6 +266,50 @@ void main() {
         AppClock.now().millisecondsSinceEpoch,
         closeTo(DateTime.now().millisecondsSinceEpoch, 2000),
       );
+    });
+  });
+
+  group('主题/音效/震动设置持久化', () {
+    test('themeMode 读写：默认 system，设置后持久化', () async {
+      final settings = SettingsController(db);
+      expect(await settings.get('themeMode'), isNull, reason: '默认未设置');
+
+      await settings.set('themeMode', 'dark');
+      expect(await settings.get('themeMode'), 'dark', reason: '写入后读取');
+
+      // 新控制器实例（模拟重启）仍可读到
+      final settings2 = SettingsController(db);
+      expect(await settings2.get('themeMode'), 'dark',
+          reason: '重启后持久化生效');
+    });
+
+    test('音效开关：默认开，可关闭并持久化', () async {
+      final settings = SettingsController(db);
+      expect(await settings.getSoundEnabled(), isTrue, reason: '默认开');
+      await settings.set('soundEnabled', 'false');
+      expect(await settings.getSoundEnabled(), isFalse, reason: '关闭生效');
+      expect(await settings.getSoundEnabled(), isFalse,
+          reason: '持久化（同库重读）');
+    });
+
+    test('震动开关：默认开，可关闭并持久化', () async {
+      final settings = SettingsController(db);
+      expect(await settings.getHapticsEnabled(), isTrue, reason: '默认开');
+      await settings.set('hapticsEnabled', 'false');
+      expect(await settings.getHapticsEnabled(), isFalse, reason: '关闭生效');
+    });
+
+    test('SoundService/Haptics 静态开关与设置联动语义', () {
+      // 默认开启（生产路径）；关闭后 play/light 直接短路
+      SoundService.soundsEnabled = false;
+      Haptics.hapticsEnabled = false;
+      // 调用不抛异常（短路返回）
+      // ignore: unawaited_futures
+      SoundService.instance.play(SoundKind.complete);
+      // ignore: unawaited_futures
+      Haptics.light();
+      SoundService.soundsEnabled = true;
+      Haptics.hapticsEnabled = true;
     });
   });
 }

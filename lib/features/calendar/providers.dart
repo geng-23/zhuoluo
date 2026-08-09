@@ -121,6 +121,7 @@ class CalendarController extends StateNotifier<CalendarState> {
 
   /// 按天缓存：key = yyyymmdd 整数
   final Map<int, List<CalendarItem>> _cache = {};
+
   /// 缓存覆盖的天区间（闭区间，dayKey 整数）；null = 无缓存
   int? _cacheFromKey;
   int? _cacheToKey;
@@ -204,7 +205,11 @@ class CalendarController extends StateNotifier<CalendarState> {
     _cacheFromKey = _dayKey(bufFrom);
     _cacheToKey = _dayKey(bufTo);
     final items = _itemsInRange(from, to);
-    state = state.copyWith(items: items, byDay: _byDayFor(items), loading: false);
+    state = state.copyWith(
+      items: items,
+      byDay: _byDayFor(items),
+      loading: false,
+    );
   }
 
   void setView(String view) {
@@ -308,22 +313,21 @@ class CalendarController extends StateNotifier<CalendarState> {
         : const Duration(hours: 1);
     // C5-1：系列改期同样应用"时长不跨天"约束（与预览端统一）
     final clamped = DateUtilsEx.clampStartWithinDay(target, dur);
-    // P1-3：拖动目标日不命中规则时吸附到最近命中日——与任务创建/详情
+    // ：拖动目标日不命中规则时吸附到最近命中日——与任务创建/详情
     // 改规则同口径（否则锚点落在非命中日，系列在当前窗口"消失"）。
     // 先 clamp 再吸附日期部分（保留时分）：吸附只调整日期，
     // 避免对长时长任务先吸附后 clamp 又把起点推回非命中日。
     final anchorDay = AppClock.at(clamped.year, clamped.month, clamped.day);
     final hit = RruleService.instance.nearestHitOnOrNear(anchorDay, t.rrule);
-    final start =
-        hit == null
-            ? clamped
-            : AppClock.at(
-                hit.year,
-                hit.month,
-                hit.day,
-                clamped.hour,
-                clamped.minute,
-              );
+    final start = hit == null
+        ? clamped
+        : AppClock.at(
+            hit.year,
+            hit.month,
+            hit.day,
+            clamped.hour,
+            clamped.minute,
+          );
     await _db.updateTask(
       taskId,
       TasksCompanion(
@@ -332,7 +336,7 @@ class CalendarController extends StateNotifier<CalendarState> {
         isAllDay: const Value(false),
       ),
     );
-    // P1-3：统一走 applyRecurringChange 收口——清理不再匹配新系列的
+    // ：统一走 applyRecurringChange 收口——清理不再匹配新系列的
     // 完成记录与例外（此前仅 pruneCompletionsForTask，旧例外残留
     // 会让已改期实例与系列语义不一致）
     final removed = await _db.applyRecurringChange(
@@ -384,7 +388,7 @@ class CalendarController extends StateNotifier<CalendarState> {
         ),
       );
     }
-    // P1-3：撤销同样恢复被清理的例外（此前快照不存例外，
+    // ：撤销同样恢复被清理的例外（此前快照不存例外，
     // 撤销后旧例外永久丢失，实例语义不一致）
     for (final e in s.removedExceptions) {
       await _db.insertExceptionRaw(
@@ -424,7 +428,7 @@ class CalendarController extends StateNotifier<CalendarState> {
       Haptics.light();
     } else {
       if (item.task.rrule.isNotEmpty) {
-        // P1-4：命中校验统一收口（日历条目本身来自规则展开，正常必命中；
+        // 命中校验统一收口（日历条目本身来自规则展开，正常必命中；
         // 兜底防御未来新增入口绕过 UI 检查）
         await _db.completeInstanceIfHit(item.task.id, item.instanceDate);
         // 完成实例后重排：取消该实例已排提醒，其余未完成实例保留

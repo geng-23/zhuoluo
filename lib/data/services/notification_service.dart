@@ -182,7 +182,14 @@ class NotificationService {
     return p;
   }
 
+  /// 通知点击深链流（HomeShell 订阅消费 payload）
   Stream<String?> get tapStream => _tapController.stream;
+
+  /// 测试用：模拟一次通知点击（向深链流注入 payload）。
+  /// 生产代码不使用——与 [debugOverrideScheduler] 同属测试替身通道。
+  void debugSimulateTap(String? payload) {
+    _tapController.add(payload);
+  }
 
   /// 请求通知权限（Android 13+；Web = 浏览器通知权限）。
   /// 结果缓存：后续 schedule() 直接读缓存，不再重复请求。

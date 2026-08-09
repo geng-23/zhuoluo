@@ -918,9 +918,6 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
-  /// 移除子任务（删除整个子树）
-  Future<void> removeSubtree(int taskId) => _deleteTaskRecursive(taskId);
-
   /// 批量完成/删除/移动
   Future<void> batchComplete(List<int> ids) async {
     for (final id in ids) {
@@ -942,25 +939,6 @@ class AppDatabase extends _$AppDatabase {
         );
       }
     });
-  }
-
-  /// 获取某日期范围内的所有任务（日历用，含完成状态）
-  Future<List<Task>> getTasksInRange(DateTime from, DateTime to) async {
-    final start = AppClock.at(from.year, from.month, from.day);
-    final end = AppClock.at(
-      to.year,
-      to.month,
-      to.day,
-    ).add(const Duration(days: 1));
-    return (select(tasks)..where(
-          (t) =>
-              (t.planStart.isSmallerThanValue(end) &
-                  t.planEnd.isBiggerOrEqualValue(start)) |
-              (t.planStart.isNull() &
-                  t.dueTime.isBiggerOrEqualValue(start) &
-                  t.dueTime.isSmallerThanValue(end)),
-        ))
-        .get();
   }
 
   /// 日历：某日期范围内所有任务（含重复任务实例展开 + 跨天任务覆盖多日，限定 3 个月）
@@ -1262,17 +1240,6 @@ class AppDatabase extends _$AppDatabase {
       (update(taskExceptions)..where((t) => t.id.equals(id))).write(
         TaskExceptionsCompanion(overrideScheduledDate: Value(toDate)),
       );
-
-  /// 清单重排序
-  Future<void> reorderLists(List<int> orderedIds) async {
-    await transaction(() async {
-      for (var i = 0; i < orderedIds.length; i++) {
-        await (update(lists)..where((l) => l.id.equals(orderedIds[i]))).write(
-          ListsCompanion(sortOrder: Value(i)),
-        );
-      }
-    });
-  }
 
   // ---------- 习惯 ----------
   Future<List<Habit>> getHabits() async {
@@ -1686,9 +1653,6 @@ class AppDatabase extends _$AppDatabase {
   }
 
   // 原始插入（备份恢复用，保留原 ID）
-  Future<void> insertTaskRaw(TasksCompanion t) =>
-      into(tasks).insert(t, mode: InsertMode.insertOrReplace);
-
   Future<void> insertReminderRaw(RemindersCompanion r) =>
       into(reminders).insert(r, mode: InsertMode.insertOrReplace);
 
@@ -1697,12 +1661,6 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> insertExceptionRaw(TaskExceptionsCompanion e) =>
       into(taskExceptions).insert(e, mode: InsertMode.insertOrReplace);
-
-  Future<void> insertHabitRaw(HabitsCompanion h) =>
-      into(habits).insert(h, mode: InsertMode.insertOrReplace);
-
-  Future<void> insertHabitRecordRaw(HabitRecordsCompanion h) =>
-      into(habitRecords).insert(h, mode: InsertMode.insertOrReplace);
 
   Future<void> insertPomodoroRaw(PomodoroRecordsCompanion p) =>
       into(pomodoroRecords).insert(p, mode: InsertMode.insertOrReplace);

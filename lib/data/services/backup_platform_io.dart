@@ -88,25 +88,6 @@ Future<String> exportToFileImpl(
   return file.path;
 }
 
-/// 列出可恢复的备份文件（下载目录 + 应用文档目录，仅 zhuoluo_backup_ 前缀）
-Future<List<String>> listBackupFilesImpl() async {
-  final files = <String>[];
-  for (final dir in await _backupDirs()) {
-    try {
-      if (!await dir.exists()) continue;
-      await for (final f in dir.list()) {
-        if (f is File &&
-            f.path.endsWith('.json') &&
-            f.path.split('/').last.startsWith('zhuoluo_backup_')) {
-          files.add(f.path);
-        }
-      }
-    } catch (_) {}
-  }
-  files.sort((a, b) => b.compareTo(a)); // 最新的在前
-  return files;
-}
-
 /// 读取备份文件内容
 Future<String> readFileImpl(String path) => File(path).readAsString();
 

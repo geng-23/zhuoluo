@@ -26,13 +26,6 @@ class Haptics {
     } catch (_) {}
   }
 
-  static Future<void> heavy() async {
-    if (!enabled || !hapticsEnabled) return;
-    try {
-      await HapticFeedback.heavyImpact();
-    } catch (_) {}
-  }
-
   static Future<void> select() async {
     if (!enabled || !hapticsEnabled) return;
     try {

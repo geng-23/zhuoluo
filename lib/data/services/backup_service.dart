@@ -8,7 +8,7 @@ import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 
 /// 备份/恢复服务（JSON 格式，设计文档 §9）
-/// 文件系统操作按平台实现：native=真实文件，web=浏览器下载导出。
+/// 文件系统操作按平台实现（当前仅 Android/native 路径）。
 class BackupService {
   BackupService(this._db);
 
@@ -56,9 +56,6 @@ class BackupService {
     final json = await exportJson();
     return exportToFileImpl(json, toDownloads: toDownloads);
   }
-
-  /// 列出可恢复的备份文件（native：下载目录 + 应用文档目录；web：空列表）
-  Future<List<String>> listBackupFiles() => listBackupFilesImpl();
 
   /// 读取备份文件内容
   Future<String> readFile(String path) => readFileImpl(path);

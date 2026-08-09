@@ -580,28 +580,6 @@ class TasksController extends StateNotifier<TasksState> {
     return null;
   }
 
-  /// 重复任务实例完成
-  Future<void> completeInstance(int id, DateTime instanceDate) async {
-    final t = await _db.getTask(id);
-    if (t == null) return;
-    SoundService.instance.play(SoundKind.complete);
-    Haptics.medium();
-    if (t.rrule.isNotEmpty) {
-      // 命中校验统一收口——非规则命中日不写入完成记录
-      await _db.completeInstanceIfHit(id, instanceDate);
-      // 完成实例后重排：取消该实例已排提醒，其余未完成实例保留
-      final fresh = await _db.getTask(id);
-      if (fresh != null) {
-        await _scheduler.scheduleTask(fresh, AppClock.now());
-      }
-    } else {
-      await _db.completeTask(id);
-      await _scheduler.cancelTask(id);
-    }
-    await _reloadTasks();
-    _bump();
-  }
-
   DateTime _currentInstanceDate(Task t) {
     final now = AppClock.now();
     final today = AppClock.at(now.year, now.month, now.day);
@@ -646,20 +624,6 @@ class TasksController extends StateNotifier<TasksState> {
     if (fresh != null) {
       await _scheduler.scheduleTask(fresh, AppClock.now());
     }
-    _bump();
-  }
-
-  Future<void> deleteTask(int id) async {
-    SoundService.instance.play(SoundKind.delete);
-    // 批4-1：删除震动 heavy→medium（heavy 过强）
-    Haptics.medium();
-    // 整棵子树的通知全部取消（子任务的提醒不再残留）
-    final subs = await _collectSubtree(id);
-    for (final tid in [id, ...subs.map((s) => s.id)]) {
-      await _scheduler.cancelTask(tid);
-    }
-    await _db.deleteTask(id);
-    await _reloadTasks();
     _bump();
   }
 
@@ -1052,12 +1016,6 @@ class TasksController extends StateNotifier<TasksState> {
 
   Future<void> toggleListCalendar(int id, bool show) async {
     await _db.updateList(id, showInCalendar: show);
-    await _reloadLists();
-    _bump();
-  }
-
-  Future<void> reorderLists(List<int> orderedIds) async {
-    await _db.reorderLists(orderedIds);
     await _reloadLists();
     _bump();
   }

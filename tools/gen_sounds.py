@@ -9,7 +9,6 @@ v2（UX 改进计划第三批）：圆润、动听、多样。
 - 响度 RMS 归一化（替代手写 amp 的不一致）
 
 输出：
-  - android/app/src/main/res/raw/notify.wav   通知提示音
   - assets/sounds/add.wav                     添加任务
   - assets/sounds/complete.wav                完成任务
   - assets/sounds/reopen.wav                  恢复/撤销
@@ -108,13 +107,6 @@ def main():
     base = os.path.dirname(os.path.abspath(__file__))
     root = os.path.abspath(os.path.join(base, ".."))
     sounds_dir = os.path.join(root, "assets", "sounds")
-    raw_dir = os.path.join(root, "android", "app", "src", "main", "res", "raw")
-
-    # 通知提示音：柔和双音上行（C5→G5），稍响
-    write_wav(
-        os.path.join(raw_dir, "notify.wav"),
-        rms_norm(note([523.25, 783.99], 0.5, 0.04, amp=0.4), target=0.34),
-    )
 
     # 添加任务：短促上行双音（C5→G5，120ms 级）
     write_wav(
@@ -163,7 +155,6 @@ def main():
     )
 
     for name in [
-        "notify",
         "add",
         "complete",
         "reopen",
@@ -172,10 +163,9 @@ def main():
         "drop",
         "skip",
     ]:
-        for d in [raw_dir, sounds_dir]:
-            p = os.path.join(d, name + ".wav")
-            if os.path.exists(p):
-                print(f"{os.path.getsize(p):6d} B  {os.path.relpath(p, root)}")
+        p = os.path.join(sounds_dir, name + ".wav")
+        if os.path.exists(p):
+            print(f"{os.path.getsize(p):6d} B  {os.path.relpath(p, root)}")
 
 
 if __name__ == "__main__":

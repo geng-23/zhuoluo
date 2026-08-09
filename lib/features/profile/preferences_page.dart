@@ -68,7 +68,6 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
     60 => '提前 1 小时',
     120 => '提前 2 小时',
     1440 => '提前 1 天',
-    2880 => '提前 2 天',
     _ => '提前 $m 分钟',
   };
 

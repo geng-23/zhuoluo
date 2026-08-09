@@ -86,8 +86,6 @@ class AppRadius {
 
   static final card = BorderRadius.circular(16);
   static final tile = BorderRadius.circular(12);
-  static final block = BorderRadius.circular(8);
-  static final badge = BorderRadius.circular(12);
   static final snackbar = BorderRadius.circular(12);
   static final field = BorderRadius.circular(12);
 }
@@ -96,22 +94,16 @@ class AppRadius {
 class AppSpacing {
   AppSpacing._();
 
-  static const xs = 4.0;
   static const sm = 8.0;
   static const md = 12.0;
   static const lg = 16.0;
-  static const xl = 24.0;
 }
 
 /// 统一字号 Token
 class AppTextSizes {
   AppTextSizes._();
 
-  static const pageTitle = 20.0;
-  static const cardTitle = 16.0;
   static const body = 14.0;
-  static const caption = 12.0;
-  static const timeLabel = 11.0;
 }
 
 /// 清单颜色解析（十六进制 → Color）

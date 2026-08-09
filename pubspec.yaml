@@ -1,5 +1,5 @@
 name: zhuoluo
-description: "A new Flutter project."
+description: "A local to-do app that helps make sure nothing falls through the cracks: tasks, calendar, and Eisenhower Matrix—all stored on your device, with no account or cloud dependency."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

@@ -3,7 +3,7 @@
 import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 日期工具（周一为一周开始，中文格式化）
 ///
-/// P1-2 统一时间模型：所有取字段（year/month/day/hour/min）前先经
+/// 统一时间模型：所有取字段（year/month/day/hour/min）前先经
 /// `AppClock.asApp()` 按应用时区解释——未设置应用时区时 asApp 原样返回，
 /// 行为与之前完全一致；设置后字段按应用时区解释，避免跨时区偏移。
 class DateUtilsEx {

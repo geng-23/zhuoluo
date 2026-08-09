@@ -96,7 +96,7 @@ class HabitRecords extends Table {
   DateTimeColumn get date => dateTime()();
   DateTimeColumn get completedAt => dateTime()();
 
-  // P1-20：同一习惯同一天只能有一条记录——双击打卡竞态并发插入
+  // 同一习惯同一天只能有一条记录——双击打卡竞态并发插入
   // 多条会导致 isHabitDone 的 getSingleOrNull 抛 "Too many elements"
   // 习惯列表加载崩溃（旧库由 v5 迁移去重并建索引）
   @override
@@ -252,7 +252,7 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
-  /// v5 迁移（P1-20）：删除 habit_records 中同一 (habit_id, date) 的
+  /// v5 迁移：删除 habit_records 中同一 (habit_id, date) 的
   /// 重复行（双击打卡竞态历史残留），再建唯一索引
   Future<void> _dedupeHabitRecordsAndIndex() async {
     await customStatement(
@@ -290,7 +290,7 @@ class AppDatabase extends _$AppDatabase {
   Future<TaskList> getDefaultList() =>
       (select(lists)..where((l) => l.isDefault.equals(true))).getSingle();
 
-  /// P1-22：是否存在默认清单（合并导入判断是否可继承备份的默认标记）
+  /// 是否存在默认清单（合并导入判断是否可继承备份的默认标记）
   Future<bool> hasDefaultList() async {
     final rows = await (select(lists)
           ..where((l) => l.isDefault.equals(true))
@@ -352,7 +352,7 @@ class AppDatabase extends _$AppDatabase {
     await (delete(lists)..where((l) => l.id.equals(listId))).go();
   }
 
-  /// 撤销删除清单：按原 ID 恢复清单行（连带删除撤销用，P0-9）
+  /// 撤销删除清单：按原 ID 恢复清单行（连带删除撤销用，）
   Future<void> restoreList(TaskList l) => into(lists).insertOnConflictUpdate(
     ListsCompanion(
       id: Value(l.id),
@@ -366,7 +366,7 @@ class AppDatabase extends _$AppDatabase {
   );
 
   Future<void> _deleteTaskRecursive(int taskId) async {
-    // P0-3.4：整棵子树在同一事务内删除，中途失败自动回滚（避免部分删除）
+    // 整棵子树在同一事务内删除，中途失败自动回滚（避免部分删除）
     await transaction(() async {
       await _deleteSubtree(taskId);
     });
@@ -382,7 +382,7 @@ class AppDatabase extends _$AppDatabase {
     await (delete(reminders)..where((r) => r.taskId.equals(taskId))).go();
     await (delete(taskCompletions)..where((t) => t.taskId.equals(taskId))).go();
     await (delete(taskExceptions)..where((t) => t.taskId.equals(taskId))).go();
-    // P0-3.4：删除关联番茄记录（外键引用 Tasks，不删会触发外键错误）
+    // 删除关联番茄记录（外键引用 Tasks，不删会触发外键错误）
     await (delete(pomodoroRecords)..where((p) => p.taskId.equals(taskId))).go();
     await (delete(tasks)..where((t) => t.id.equals(taskId))).go();
   }
@@ -435,7 +435,7 @@ class AppDatabase extends _$AppDatabase {
                           t.planStart.isSmallerThanValue(end))),
             ))
             .get();
-    // P2-1：批量预取例外与完成记录（此前逐任务逐日查库 = N×D 次查询，
+    // 批量预取例外与完成记录（此前逐任务逐日查库 = N×D 次查询，
     // 重复任务多时智能清单卡顿；与日历 getCalendarItems 预取模式一致）
     final taskIds = rows.map((t) => t.id).toList();
     final exMap = await getExceptionsForTasks(taskIds);
@@ -467,7 +467,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   /// 批量预取例外：一次 IN 查询返回 {taskId: [例外]}。
-  /// P2-1：与 getCalendarItems 预取模式同源（例外表通常很小，全量预取）。
+  /// 与 getCalendarItems 预取模式同源（例外表通常很小，全量预取）。
   /// 防空：ids 为空直接返回空 map（drift isIn([]) 会生成非法 SQL）。
   Future<Map<int, List<TaskException>>> getExceptionsForTasks(
     List<int> ids,
@@ -485,7 +485,7 @@ class AppDatabase extends _$AppDatabase {
 
   /// 批量预取完成记录：一次 IN + 日期范围查询（[to] 排他，内部 +1 天），
   /// 返回 'taskId_年_月_日' 集合（与 isInstanceCompleted 的 00:00 基准一致）。
-  /// P2-1：防空同 getExceptionsForTasks。
+  /// 防空同 getExceptionsForTasks。
   Future<Set<String>> getCompletedSetForTasks(
     List<int> ids,
     DateTime from,
@@ -515,7 +515,7 @@ class AppDatabase extends _$AppDatabase {
   static String _doneKey(int taskId, DateTime d) =>
       '${taskId}_${d.year}_${d.month}_${d.day}';
 
-  /// 智能清单：全部（未完成，不含子任务；P1-4.6：排除已结束的有限重复系列）
+  /// 智能清单：全部（未完成，不含子任务；排除已结束的有限重复系列）
   Future<List<Task>> getAllUncompleted() async {
     final rows = await select(tasks).get();
     final result = rows.where((t) => t.parentId == null && !isCompleted(t));
@@ -528,12 +528,12 @@ class AppDatabase extends _$AppDatabase {
     return active;
   }
 
-  /// P1-4.6：重复系列是否还有未来实例（COUNT/UNTIL 未耗尽；非重复恒为 true）
+  /// 重复系列是否还有未来实例（COUNT/UNTIL 未耗尽；非重复恒为 true）
   Future<bool> hasFutureInstances(Task t) async {
     if (t.rrule.isEmpty) return true;
     final base = t.planStart ?? t.createdAt;
     final now = AppClock.now();
-    // P0-7：窗口至少覆盖一个完整周期——长间隔任务（如每 2 年）
+    // 窗口至少覆盖一个完整周期——长间隔任务（如每 2 年）
     // 固定 370 天窗口内无实例会被误判"系列结束"，数据从视图消失
     final hits = RruleService.instance.expand(
       base,
@@ -565,7 +565,7 @@ class AppDatabase extends _$AppDatabase {
       if (t.rrule.isEmpty) {
         if (t.completedAt != null) done.add(t);
       } else {
-        // P2-1：重复任务"今天已完成"直接用已预取的今日完成记录判断
+        // 重复任务"今天已完成"直接用已预取的今日完成记录判断
         //（此前逐任务 isInstanceCompleted 再查一次库）
         if (completedAtByTask.containsKey(t.id)) done.add(t);
       }
@@ -584,7 +584,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   /// 重复任务某实例是否完成（limit 1 容错：脏数据存在重复行也不崩）
-  /// P0-3.1：实例日期归一化到当天 00:00（与完成记录存储基准一致）
+  /// 实例日期归一化到当天 00:00（与完成记录存储基准一致）
   Future<bool> isInstanceCompleted(int taskId, DateTime instanceDate) async {
     final day = du.DateUtilsEx.normalizeInstanceDate(instanceDate);
     final found =
@@ -598,7 +598,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   /// 重复任务：完成实例（幂等：已存在同实例则更新完成时间，不重复插入）
-  /// P0-3.1：实例日期归一化到当天 00:00，避免同一实例产生多条不同时刻的记录
+  /// 实例日期归一化到当天 00:00，避免同一实例产生多条不同时刻的记录
   Future<void> completeInstance(int taskId, DateTime instanceDate) async {
     final day = du.DateUtilsEx.normalizeInstanceDate(instanceDate);
     final existing =
@@ -622,7 +622,7 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
-  /// 重复任务：撤销实例完成（P0-3.1：归一化）
+  /// 重复任务：撤销实例完成（归一化）
   Future<void> uncompleteInstance(int taskId, DateTime instanceDate) async {
     final day = du.DateUtilsEx.normalizeInstanceDate(instanceDate);
     await (delete(taskCompletions)..where(
@@ -631,7 +631,7 @@ class AppDatabase extends _$AppDatabase {
         .go();
   }
 
-  /// P0-2：查询单条实例完成记录（跳过实例时暂存完成时间，撤销时恢复）
+  /// 查询单条实例完成记录（跳过实例时暂存完成时间，撤销时恢复）
   Future<TaskCompletion?> getInstanceCompletion(
     int taskId,
     DateTime instanceDate,
@@ -645,7 +645,7 @@ class AppDatabase extends _$AppDatabase {
         .getSingleOrNull();
   }
 
-  /// P0-2：恢复实例完成记录（幂等：已存在则更新完成时间，不重复插入）
+  /// 恢复实例完成记录（幂等：已存在则更新完成时间，不重复插入）
   Future<void> restoreInstanceCompletion(
     int taskId,
     DateTime instanceDate,
@@ -719,12 +719,12 @@ class AppDatabase extends _$AppDatabase {
 
   Future<int> insertTask(TasksCompanion t) => into(tasks).insert(t);
 
-  /// 修改/清除重复规则统一收口（P0-3.8）：
+  /// 修改/清除重复规则统一收口：
   /// - 清除重复（newRrule 为空）：删除全部实例完成记录与例外（重复实例语义失效，
   ///   避免旧完成记录继续参与统计、旧例外继续影响展开）
   /// - 更换规则：清理不再匹配新系列的完成记录（过去仍命中新规则的实例保留），
   ///   并移除例外实例日不再命中新规则的例外记录
-  /// 返回被删除的完成记录与例外（供撤销恢复，P2-52：任务页改期撤销时
+  /// 返回被删除的完成记录与例外（供撤销恢复，任务页改期撤销时
   /// 恢复原锚点数据，与日历系列改期撤销 undoMoveTaskSeries 行为一致）。
   Future<RecurringChangeResult> applyRecurringChange(
     int taskId, {
@@ -954,7 +954,7 @@ class AppDatabase extends _$AppDatabase {
       to.day,
     ).add(const Duration(days: 1));
     final listIds = await getVisibleCalendarListIds();
-    // P2-1 防空：全部清单都从日历隐藏时 listIds 为空，
+    // 防空：全部清单都从日历隐藏时 listIds 为空，
     // isIn([]) 会生成非法 SQL（IN ()）——直接返回空
     if (listIds.isEmpty) return const [];
     final tasksAll = await (select(
@@ -994,7 +994,7 @@ class AppDatabase extends _$AppDatabase {
         // 非重复任务：计划区间覆盖窗口内的每一天（跨天任务多日显示）
         final ps = t.planStart;
         if (ps == null) {
-          // P1-4.2：仅截止时间的任务 → 在截止日展示一个实例
+          // 仅截止时间的任务 → 在截止日展示一个实例
           final due = t.dueTime;
           if (due == null) continue;
           final dueDay = DateTime(due.year, due.month, due.day);
@@ -1037,7 +1037,7 @@ class AppDatabase extends _$AppDatabase {
           exceptionsByTask[t.id] ?? const [],
         );
         if (hit.isNotEmpty) {
-          // P1-B：例外改期到当天的实例 → 携带目标时刻（带时分），
+          // 例外改期到当天的实例 → 携带目标时刻（带时分），
           // 时间轴据此渲染位置（此前所有实例统一 00:00，改期时分不生效）
           DateTime? displayTime;
           for (final ex in exceptionsByTask[t.id] ?? const []) {
@@ -1151,7 +1151,7 @@ class AppDatabase extends _$AppDatabase {
       if (ps.isBefore(dayEnd) && pe.isAfter(dayStart)) return [t];
       return [];
     }
-    // P1-12：skippedDates 非法 JSON（损坏备份导入）静默视为无跳过，
+    // skippedDates 非法 JSON（损坏备份导入）静默视为无跳过，
     // 避免打开日历/判断实例时抛 FormatException 导致整个视图异常
     List<DateTime> skipped = const [];
     try {
@@ -1223,7 +1223,7 @@ class AppDatabase extends _$AppDatabase {
       );
 
   // ---------- 例外 ----------
-  /// P0-3.1：例外实例日期归一化到当天 00:00（与规则展开/完成记录基准一致）。
+  /// 例外实例日期归一化到当天 00:00（与规则展开/完成记录基准一致）。
   /// 返回新例外记录 ID。
   Future<int> insertException(TaskExceptionsCompanion e) {
     return into(taskExceptions).insert(
@@ -1241,7 +1241,7 @@ class AppDatabase extends _$AppDatabase {
   Future<void> deleteException(int id) =>
       (delete(taskExceptions)..where((t) => t.id.equals(id))).go();
 
-  /// P1-25：按 id 查单条例外（撤销改期时读取迁移信息）
+  /// 按 id 查单条例外（撤销改期时读取迁移信息）
   Future<TaskException?> getException(int id) =>
       (select(taskExceptions)..where((t) => t.id.equals(id))).getSingleOrNull();
 
@@ -1300,7 +1300,7 @@ class AppDatabase extends _$AppDatabase {
     return found != null;
   }
 
-  /// 打卡/取消（toggle 语义）。P1-20：事务化——双击并发时串行执行，
+  /// 打卡/取消（toggle 语义）。事务化——双击并发时串行执行，
   /// 第二次调用看到第一次的提交结果（查→删/插），不会并发插入重复记录
   ///（配合 habit_records 唯一索引双保险）
   Future<void> checkHabit(int habitId, DateTime date) async {
@@ -1352,7 +1352,7 @@ class AppDatabase extends _$AppDatabase {
       q.where((p) => p.completedAt.isBiggerOrEqualValue(from));
     }
     if (to != null) {
-      // P1-B：与 getCompletedCountByDay 口径一致——to 排他 + 内部 +1 天，
+      // 与 getCompletedCountByDay 口径一致——to 排他 + 内部 +1 天，
       // 否则统计页传"周日/月末/12-31 00:00"时当天记录全部漏计
       final end = DateTime(
         to.year,
@@ -1399,7 +1399,7 @@ class AppDatabase extends _$AppDatabase {
                   c.completedAt.isSmallerThanValue(end),
             ))
             .get();
-    // P1-4.1：与计划数口径一致——仅计顶层任务，子任务不计入完成数
+    // 与计划数口径一致——仅计顶层任务，子任务不计入完成数
     // （重复子任务的实例完成记录也需过滤）
     final completionTaskIds = completions.map((c) => c.taskId).toSet();
     final topLevelTaskIds = <int>{};
@@ -1421,7 +1421,7 @@ class AppDatabase extends _$AppDatabase {
       result[d] = (result[d] ?? 0) + 1;
     }
     // 普通任务完成（completedAt，rrule 为空，避免与实例表重复计数；
-    // P1-4.1：排除子任务）
+    // 排除子任务）
     final doneTasks =
         await (select(tasks)..where(
               (t) =>
@@ -1497,7 +1497,7 @@ class AppDatabase extends _$AppDatabase {
                   t.parentId.isNull(),
             ))
             .get();
-    // P2-1：批量预取例外（此前逐任务逐日查库 = N×D 次，统计月/年视图
+    // 批量预取例外（此前逐任务逐日查库 = N×D 次，统计月/年视图
     // 在重复任务多时秒级假死）
     final exMap = await getExceptionsForTasks(
       recRows.map((t) => t.id).toList(),
@@ -1622,7 +1622,7 @@ class AppDatabase extends _$AppDatabase {
       into(pomodoroRecords).insert(c);
 
 
-  /// 全量替换（备份恢复用，P0-3.6 原子操作）：
+  /// 全量替换（备份恢复用，原子操作）：
   /// 清空 + 逐表插入在同一个事务内，任何解析/外键/唯一约束失败自动回滚，
   /// 恢复前数据不会被部分清空。
   Future<void> replaceAll({
@@ -1699,7 +1699,7 @@ class AppDatabase extends _$AppDatabase {
       into(pomodoroRecords).insert(p, mode: InsertMode.insertOrReplace);
 }
 
-/// 重复规则变更结果：被清理的完成记录与例外（撤销恢复用，P2-52）
+/// 重复规则变更结果：被清理的完成记录与例外（撤销恢复用，）
 class RecurringChangeResult {
   final List<TaskCompletion> removedCompletions;
   final List<TaskException> removedExceptions;
@@ -1717,7 +1717,7 @@ class CalendarItem {
   final bool completed;
   final String listColor;
 
-  /// P1-B：例外改期目标时刻（带时分）。规则实例为 null（用 planStart 时分），
+  /// 例外改期目标时刻（带时分）。规则实例为 null（用 planStart 时分），
   /// 例外改期到当天的实例携带目标时刻，时间轴渲染据此定位。
   final DateTime? displayTime;
 

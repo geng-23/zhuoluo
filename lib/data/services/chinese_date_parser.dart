@@ -106,7 +106,7 @@ class ChineseDateParser {
         if (unit == '天') {
           rrule = 'FREQ=DAILY;INTERVAL=$n';
         } else if (unit == '周') {
-          // P0-16：无 BYDAY 的 WEEKLY 会被展开器按默认周一解析 → 实例错落周一；
+          // 无 BYDAY 的 WEEKLY 会被展开器按默认周一解析 → 实例错落周一；
           // 补 BYDAY=起始星期（"每2周"从今天起；"每2周三"显式星期三）
           final wd =
               m.group(3) != null ? _weekdayNames[m.group(3)!]! : today.weekday;
@@ -152,7 +152,7 @@ class ChineseDateParser {
       matched = true;
       rest = rest.replaceAll('明天', '');
     }
-    // 大后天（P1-4.7：必须先于"后天"匹配，否则"大后天"会先命中"后天"）
+    // 大后天（必须先于"后天"匹配，否则"大后天"会先命中"后天"）
     if (rest.contains('大后天') && date == null) {
       date = today.add(const Duration(days: 3));
       matched = true;
@@ -164,7 +164,7 @@ class ChineseDateParser {
       matched = true;
       rest = rest.replaceAll('后天', '');
     }
-    // N天后（P2-21：仅显式"后/之后"才解析为相对日期，裸"N天"不吞语义；
+    // N天后（仅显式"后/之后"才解析为相对日期，裸"N天"不吞语义；
     // 数字或中文数字均可："3天后"、"三天后"）
     if (date == null) {
       final m = RegExp(r'(' + _numAll + r')天(?:之)?后').firstMatch(rest);
@@ -218,7 +218,7 @@ class ChineseDateParser {
         final month = _toInt(m.group(1)!);
         final day = _toInt(m.group(2)!);
         if (month != null && day != null) {
-          // P1-4.7：校验非法日期（如 13月40号），Dart DateTime 会自动进位，
+          // 校验非法日期（如 13月40号），Dart DateTime 会自动进位，
           // 必须构造后回读校验，非法则忽略该匹配
           final v = _tryDate(base.year, month, day);
           if (v != null) {
@@ -245,7 +245,7 @@ class ChineseDateParser {
       }
     }
     // 下个月月底 / 下个月底 / 下月底 → 下月最后一天
-    // P1-16：必须先于"月底"分支，否则"下个月月底"命中当月月底
+    // 必须先于"月底"分支，否则"下个月月底"命中当月月底
     if (date == null) {
       final m = RegExp(r'下个月?月底|下个月?底').firstMatch(rest);
       if (m != null) {
@@ -308,7 +308,7 @@ class ChineseDateParser {
     // 上午/下午/晚上/中午/早上 + N点半 / N点N分 / N点 / N:N
     // 数字与中文数字均可（五点、五点半、下午三点、晚上十二点）
     // 注意"半"分支必须带捕获组，否则匹配"半"时 group(3) 为 null
-    // P0-12：`下` 视为"下午"的缩写（"下3点"=15:00），需排在"下午"之后避免抢先
+    // `下` 视为"下午"的缩写（"下3点"=15:00），需排在"下午"之后避免抢先
     String? startPeriod;
     var startIsMidnight = false;
     final m2 = RegExp(
@@ -326,7 +326,7 @@ class ChineseDateParser {
       } else {
         hour = _toInt(m2.group(2)!);
         if (hour != null) {
-          // P1-4.7：支持"点半"（如 3点半 = 03:30）；中文"五点半"=05:30
+          // 支持"点半"（如 3点半 = 03:30）；中文"五点半"=05:30
           final g3 = m2.group(3);
           final g4 = m2.group(4);
           minute = g4 != null ? 30 : (g3 == null ? 0 : (_toInt(g3) ?? 0));
@@ -336,7 +336,7 @@ class ChineseDateParser {
       if (hour != null && hour <= 23 && minute <= 59) {
         time = TimeOfDay(hour: hour, minute: minute);
         startPeriod = m2.group(1);
-        // P2-22：起始为午夜（晚上/傍晚/凌晨 12 点转 0 点）时，结束不继承 +12
+        // 起始为午夜（晚上/傍晚/凌晨 12 点转 0 点）时，结束不继承 +12
         startIsMidnight =
             (m2.group(1) == '晚上' ||
                     m2.group(1) == '傍晚' ||
@@ -361,7 +361,7 @@ class ChineseDateParser {
     }
 
     // ---- 结束时间（用于时长）----
-    // P0-11：结束时间默认继承起始时段（"下午3点到5点"=15:00-17:00，
+    // 结束时间默认继承起始时段（"下午3点到5点"=15:00-17:00，
     // 此前 5 点被当凌晨 → 生成跨天 14+ 小时任务）；
     // 仅当继承后仍 <= 起始才视为次日凌晨（"晚上11点到1点"=23:00-01:00）。
     // 起始为午夜（"晚上12点"）时结束不继承 +12，保持凌晨语义。
@@ -403,7 +403,7 @@ class ChineseDateParser {
     return map[wd] ?? 'MO';
   }
 
-  /// 按时段偏移小时数：下午/下 → +12；晚上/傍晚 12 点 → 0（P2-22 午夜）；
+  /// 按时段偏移小时数：下午/下 → +12；晚上/傍晚 12 点 → 0（午夜）；
   /// 晚上/傍晚 → +12；中午 11 点前 → +12；凌晨 12 点 → 0；上午/早上/早晨不变
   static int _applyPeriod(String? period, int hour) {
     if (period == null) return hour;
@@ -457,7 +457,7 @@ class ChineseDateParser {
     return result;
   }
 
-  /// P1-4.7：校验日期合法性（Dart DateTime 对非法月/日会自动进位，
+  /// 校验日期合法性（Dart DateTime 对非法月/日会自动进位，
   /// 如 13月40号 → 次年2月9日，必须构造后回读校验），非法返回 null
   static DateTime? _tryDate(int year, int month, int day) {
     if (month < 1 || month > 12 || day < 1 || day > 31) return null;

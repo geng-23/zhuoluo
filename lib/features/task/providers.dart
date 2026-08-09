@@ -25,7 +25,7 @@ class TasksState {
   /// 重复任务：今天是否命中规则
   final Map<int, bool> todayHas;
 
-  /// P1-4.4：copyWith 的哨兵——显式清除 currentListId
+  /// copyWith 的哨兵——显式清除 currentListId
   /// （参数传 null 表示"不修改"，传本哨兵表示"设置为 null"）
   static const _clearCurrentListId = _ClearListIdSentinel();
 
@@ -69,7 +69,7 @@ class TasksState {
   );
 }
 
-/// P1-4.4：currentListId 显式清除哨兵类型
+/// currentListId 显式清除哨兵类型
 class _ClearListIdSentinel {
   const _ClearListIdSentinel();
 }
@@ -115,7 +115,7 @@ class TasksController extends StateNotifier<TasksState> {
     }
   }
 
-  /// P1-14：reload 请求序号——搜索逐键触发并发 reload 时，
+  /// reload 请求序号——搜索逐键触发并发 reload 时，
   /// 旧请求（慢查询）返回后不得覆盖新请求结果（列表短暂显示过期结果）
   int _reloadSeq = 0;
 
@@ -143,7 +143,7 @@ class TasksController extends StateNotifier<TasksState> {
     } else {
       tasks = await _db.getAllUncompleted();
     }
-    // P1-14：结果落地前仍是当前最新请求才写入（过期结果丢弃）。
+    // 结果落地前仍是当前最新请求才写入（过期结果丢弃）。
     // 辅助状态加载是异步的，每个 await 之后都要再检查序号——
     // 否则旧请求在辅助加载期间被新请求覆盖后，仍会用它自己的
     // 结果覆盖新状态（竞态仍存在）
@@ -167,7 +167,7 @@ class TasksController extends StateNotifier<TasksState> {
   Future<Map<int, bool>> _loadInstanceDone(List<Task> tasks) async {
     final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
-    // P2-1：批量预取今日完成记录（此前逐任务查库）
+    // 批量预取今日完成记录（此前逐任务查库）
     final ids = tasks.where((t) => t.rrule.isNotEmpty).map((t) => t.id).toList();
     final doneSet = await _db.getCompletedSetForTasks(
       ids,
@@ -186,7 +186,7 @@ class TasksController extends StateNotifier<TasksState> {
   Future<Map<int, bool>> _loadTodayHas(List<Task> tasks) async {
     final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
-    // P2-1：批量预取例外（此前逐任务查库）
+    // 批量预取例外（此前逐任务查库）
     final ids = tasks.where((t) => t.rrule.isNotEmpty).map((t) => t.id).toList();
     final exMap = await _db.getExceptionsForTasks(ids);
     final result = <int, bool>{};
@@ -206,7 +206,7 @@ class TasksController extends StateNotifier<TasksState> {
   Future<Map<int, DateTime?>> _loadNextInstances(List<Task> tasks) async {
     final now = AppClock.now();
     final today = DateTime(now.year, now.month, now.day);
-    // P2-1：批量预取例外 + 未来窗口完成记录（此前每个任务 2-3 次查库）；
+    // 批量预取例外 + 未来窗口完成记录（此前每个任务 2-3 次查库）；
     // 窗口按所有重复任务中最大的 windowDaysFor 覆盖
     final recTasks = tasks.where((t) => t.rrule.isNotEmpty).toList();
     final ids = recTasks.map((t) => t.id).toList();
@@ -243,7 +243,7 @@ class TasksController extends StateNotifier<TasksState> {
     Set<String> doneSet,
   ) async {
     final base = t.planStart ?? t.createdAt;
-    // P0-7：窗口至少覆盖一个完整周期（每 2 年任务不再被 370 天窗口
+    // 窗口至少覆盖一个完整周期（每 2 年任务不再被 370 天窗口
     // 误判为"无下次实例"）
     final instances = RruleService.instance.expand(
       base,
@@ -259,7 +259,7 @@ class TasksController extends StateNotifier<TasksState> {
       if (doneSet.contains(_doneKey(t.id, inst))) continue;
       return inst;
     }
-    // P1-4.6：系列已结束或未来实例全部完成 → 无下次实例（不回落今天）
+    // 系列已结束或未来实例全部完成 → 无下次实例（不回落今天）
     return null;
   }
 
@@ -324,7 +324,7 @@ class TasksController extends StateNotifier<TasksState> {
   }
 
   void search(String q) {
-    // P1-14：smartView 在发起 reload 前写入（此前在 _reloadTasks 的
+    // smartView 在发起 reload 前写入（此前在 _reloadTasks 的
     // 异步结果里写——旧请求返回会覆盖清空搜索后的 smartView）
     state = state.copyWith(searchQuery: q, smartView: 'search');
     _reloadTasks();
@@ -401,7 +401,7 @@ class TasksController extends StateNotifier<TasksState> {
       ),
     );
     // 新任务排顶部：把现有同清单任务 sortOrder +1，新任务保持 0
-    // P1-4.5：排除新任务自身（此前把新任务也 +1，导致排序可能不是置顶）
+    // 排除新任务自身（此前把新任务也 +1，导致排序可能不是置顶）
     await _shiftSortOrders(targetList, parentId, excludeId: id);
     // 偏好设置组：设置了默认提醒提前量时，新建任务自动带默认提醒
     // （仅有计划时间/重复规则的任务；纯标题任务与子任务不自动添加，
@@ -494,7 +494,7 @@ class TasksController extends StateNotifier<TasksState> {
       pe = DateTime(d.year, d.month, d.day + 1);
     }
     if (ps == null && parsed.rrule.isNotEmpty) {
-      // P1-4.7：重复任务起始日期用解析出的日期（此前"明天每天阅读"
+      // 重复任务起始日期用解析出的日期（此前"明天每天阅读"
       // 会忽略日期直接落到今天）；无明确时间 → 全天任务
       isAllDay = true;
       final d = parsed.date ?? now;
@@ -511,9 +511,9 @@ class TasksController extends StateNotifier<TasksState> {
     );
   }
 
-  /// 更新任务字段。返回提醒是否全部成功排期（P1-4.9，供 UI 提示权限问题）。
+  /// 更新任务字段。返回提醒是否全部成功排期（供 UI 提示权限问题）。
   Future<bool> updateTaskFields(int id, TasksCompanion changes) async {
-    // P0-3.2：先基于旧任务快照取消全部旧通知，再写入新任务，
+    // 先基于旧任务快照取消全部旧通知，再写入新任务，
     // 最后按新任务重排（避免改期/改规则后旧日期的提醒残留）
     await _scheduler.cancelTask(id);
     await _db.updateTask(id, changes);
@@ -559,7 +559,7 @@ class TasksController extends StateNotifier<TasksState> {
         // 父任务被联动完成/恢复时同步重排其提醒
         final parent = await _db.getTask(parentId);
         if (parent != null) {
-          // P1-15：父任务被联动完成/恢复时同步重排其提醒——scheduleTask
+          // 父任务被联动完成/恢复时同步重排其提醒——scheduleTask
           // 内部先取消全部旧通知再判断 completedAt，非重复父任务被联动
           // 完成后旧提醒随之取消（此前仅重复父任务重排，非重复父任务
           // 已完成仍弹提醒）
@@ -627,7 +627,7 @@ class TasksController extends StateNotifier<TasksState> {
     final parentId = t.parentId;
     if (parentId != null) {
       await _db.maybeReopenParent(parentId);
-      // P0-4：父任务被联动恢复时同步重排其提醒（此前仅 completeTask 侧
+      // 父任务被联动恢复时同步重排其提醒（此前仅 completeTask 侧
       // 有联动重排，reopen 侧漏掉——父任务恢复后提醒静默丢失）
       final parent = await _db.getTask(parentId);
       if (parent != null) {
@@ -648,7 +648,7 @@ class TasksController extends StateNotifier<TasksState> {
     SoundService.instance.play(SoundKind.delete);
     // 批4-1：删除震动 heavy→medium（heavy 过强）
     Haptics.medium();
-    // P0-3.4：整棵子树的通知全部取消（子任务的提醒不再残留）
+    // 整棵子树的通知全部取消（子任务的提醒不再残留）
     final subs = await _collectSubtree(id);
     for (final tid in [id, ...subs.map((s) => s.id)]) {
       await _scheduler.cancelTask(tid);
@@ -658,7 +658,7 @@ class TasksController extends StateNotifier<TasksState> {
     _bump();
   }
 
-  // D1：删除撤销缓存（P2：限容——超出上限丢弃最旧快照，防止长期不撤销时内存增长）
+  // D1：删除撤销缓存（限容——超出上限丢弃最旧快照，防止长期不撤销时内存增长）
   final Map<int, _DeletedSnapshot> _deletedCache = {};
   static const int _deletedCacheLimit = 50;
 
@@ -681,11 +681,11 @@ class TasksController extends StateNotifier<TasksState> {
     if (t == null) return;
     final subs = await _collectSubtree(id);
     final allIds = [id, ...subs.map((s) => s.id)];
-    // P0-3.4：整棵树的提醒全部取消（子任务通知不再残留）
+    // 整棵树的提醒全部取消（子任务通知不再残留）
     for (final tid in allIds) {
       await _scheduler.cancelTask(tid);
     }
-    // P0-3.4：快照保存整棵树所有关联数据（此前漏了子任务提醒与番茄记录）
+    // 快照保存整棵树所有关联数据（此前漏了子任务提醒与番茄记录）
     final reminders = <Reminder>[];
     for (final tid in allIds) {
       reminders.addAll(await _db.getReminders(tid));
@@ -707,20 +707,20 @@ class TasksController extends StateNotifier<TasksState> {
       exceptions,
       pomodoros,
     );
-    // P2：限容——超出上限丢弃最旧快照（Map 保持插入序，keys.first 最旧）
+    // 限容——超出上限丢弃最旧快照（Map 保持插入序，keys.first 最旧）
     while (_deletedCache.length > _deletedCacheLimit) {
       _deletedCache.remove(_deletedCache.keys.first);
     }
     await _db.deleteTask(id);
-    // P1-A：删除主路径必须 bump，否则日历/四象限/统计常驻页不刷新
+    // 删除主路径必须 bump，否则日历/四象限/统计常驻页不刷新
     _bump();
   }
 
-  /// 撤销删除（P0-3.4/3.5：恢复任务 + 子树 + 完整提醒 + 完成记录 + 例外 + 番茄记录，
+  /// 撤销删除（恢复任务 + 子树 + 完整提醒 + 完成记录 + 例外 + 番茄记录，
   /// 全部在同一事务内执行）
   /// [silent]：批量撤销时静默（批4-2：此前批量撤销逐条播音效+震动）
   Future<void> undoDelete(int id, {bool silent = false}) async {
-    // P0-4：事务成功前不得移除快照——失败回滚后快照仍在，数据不永久丢失
+    // 事务成功前不得移除快照——失败回滚后快照仍在，数据不永久丢失
     final snap = _deletedCache[id];
     if (snap == null) return;
     if (!silent) {
@@ -728,7 +728,7 @@ class TasksController extends StateNotifier<TasksState> {
       Haptics.light();
     }
     await _db.transaction(() async {
-      // P0-9 兜底：恢复任务时清单可能已被删除（连带删除撤销前清单未恢复等），
+      // 兜底：恢复任务时清单可能已被删除（连带删除撤销前清单未恢复等），
       // 重映射到默认清单，避免外键约束失败导致任务永久丢失
       var listId = snap.task.listId;
       if (await _db.getListById(listId) == null) {
@@ -737,7 +737,7 @@ class TasksController extends StateNotifier<TasksState> {
       }
       await _db.restoreTask(snap.task.copyWith(listId: listId));
       for (final s in snap.subTasks) {
-        // P0-9 兜底延伸：子任务清单同样可能已被删除（与父同清单时
+        // 兜底延伸：子任务清单同样可能已被删除（与父同清单时
         // 直接沿用兜底值，不同清单单独检查），否则子任务恢复时
         // listId 外键崩溃导致整个撤销回滚
         var sListId = s.listId;
@@ -755,7 +755,7 @@ class TasksController extends StateNotifier<TasksState> {
             taskId: Value(r.taskId),
             remindMinutesBefore: Value(r.remindMinutesBefore),
             isPersistent: Value(r.isPersistent),
-            // P0-3.5：恢复全天任务提醒时刻（旧快照缺该字段时保持 null = 默认 09:00）
+            // 恢复全天任务提醒时刻（旧快照缺该字段时保持 null = 默认 09:00）
             remindAtMinutes: r.remindAtMinutes == null
                 ? const Value(null)
                 : Value(r.remindAtMinutes),
@@ -797,7 +797,7 @@ class TasksController extends StateNotifier<TasksState> {
         );
       }
     });
-    // P0-4：事务成功后才消费快照（失败保留，等待重试）
+    // 事务成功后才消费快照（失败保留，等待重试）
     _deletedCache.remove(id);
     await _reloadTasks();
     // 整棵树恢复后重排全部提醒（含子任务）
@@ -827,11 +827,11 @@ class TasksController extends StateNotifier<TasksState> {
     _bump();
   }
 
-  /// 批量完成，返回**实际完成的任务 id 集合**（P0-1：撤销条必须按此集合
+  /// 批量完成，返回**实际完成的任务 id 集合**（撤销条必须按此集合
   /// 回滚，否则被跳过项会被误撤销——此前跳过的"今日已完成的重复任务"
   /// 会被 batchReopen 反转完成状态）
   Future<List<int>> batchComplete(List<int> ids) async {
-    // P2：逐条静默执行，完成后统一播放一次反馈（此前 20 条响 20 次）
+    // 逐条静默执行，完成后统一播放一次反馈（此前 20 条响 20 次）
     // C8-2：跳过"今天已完成"的重复任务——completeTask 是切换语义，
     // 批量完成会把它们反过来"撤销完成"（与用户意图相反）
     final now = AppClock.now();
@@ -844,7 +844,7 @@ class TasksController extends StateNotifier<TasksState> {
           await _db.isInstanceCompleted(id, today)) {
         continue;
       }
-      // P0-1：非重复任务已完成时同样跳过（completeTask 切换语义会误撤销）
+      // 非重复任务已完成时同样跳过（completeTask 切换语义会误撤销）
       if (t.completedAt != null) continue;
       await completeTask(id, silent: true);
       acted.add(id);
@@ -858,7 +858,7 @@ class TasksController extends StateNotifier<TasksState> {
 
   /// 批量恢复未完成（已完成视图多选用）
   Future<void> batchReopen(List<int> ids) async {
-    // P2：逐条静默执行，完成后统一播放一次反馈
+    // 逐条静默执行，完成后统一播放一次反馈
     for (final id in ids) {
       await reopenTask(id, silent: true);
     }
@@ -876,7 +876,7 @@ class TasksController extends StateNotifier<TasksState> {
   }
 
   /// 批量撤销删除（恢复快照中的任务/子任务/提醒/完成记录）
-  /// P0-4：按父链拓扑排序（父快照先恢复）——乱序批量删除 [子,父] 时，
+  /// 按父链拓扑排序（父快照先恢复）——乱序批量删除 [子,父] 时，
   /// 父快照在子已删除后才收集子树、subTasks 为空，若先恢复子会因
   /// parentId 引用缺失触发外键崩溃；父快照恢复后子快照即可安全恢复。
   /// 批4-2：逐条静默，完成后统一播放一次反馈
@@ -913,7 +913,7 @@ class TasksController extends StateNotifier<TasksState> {
   }
 
   Future<void> skipInstance(int id, DateTime instanceDate) async {
-    // P0-2/P1-9/P2-40：核心逻辑（暂存完成记录/容错/重排）统一在
+    // 核心逻辑（暂存完成记录/容错/重排）统一在
     // ReminderScheduler（任务页与日历页共用），控制器只负责反馈与刷新
     final ok = await _scheduler.skipInstance(id, instanceDate);
     if (!ok) return;
@@ -944,7 +944,7 @@ class TasksController extends StateNotifier<TasksState> {
   }
 
   /// 改期本次实例（写例外）。返回例外记录 ID：
-  /// 撤销时用 [undoEditException] 删除该记录恢复原状，而不是新增反向例外（P0-3.3）。
+  /// 撤销时用 [undoEditException] 删除该记录恢复原状，而不是新增反向例外。
   Future<int> editException(int id, DateTime fromDate, DateTime toDate) async {
     final t = await _db.getTask(id);
     if (t == null) return -1;
@@ -952,7 +952,7 @@ class TasksController extends StateNotifier<TasksState> {
     for (final ex in existing) {
       if (DateUtilsEx.sameDay(ex.instanceDate, fromDate)) {
         await _db.updateException(ex.id, toDate);
-        // P1-25：更新既有例外同样迁移完成记录
+        // 更新既有例外同样迁移完成记录
         await _migrateCompletionOnReschedule(id, fromDate, toDate);
         await _reloadTasks();
         // 更新既有例外同样需重排：新日期（及原日期取消）的提醒
@@ -972,7 +972,7 @@ class TasksController extends StateNotifier<TasksState> {
         overrideScheduledDate: Value(toDate),
       ),
     );
-    // P1-25：实例已完成再"改期本次"→ 完成记录跟随到新日期
+    // 实例已完成再"改期本次"→ 完成记录跟随到新日期
     //（此前留在原日期成为孤儿，统计/已完成视图出现永不匹配的脏数据）
     await _migrateCompletionOnReschedule(id, fromDate, toDate);
     await _reloadTasks();
@@ -981,7 +981,7 @@ class TasksController extends StateNotifier<TasksState> {
     return exId;
   }
 
-  /// P1-25：改期本次时把实例完成记录从原日期迁移到新日期
+  /// 改期本次时把实例完成记录从原日期迁移到新日期
   ///（保留原完成时间，统计不漂移；新日期无冲突时写入）
   Future<void> _migrateCompletionOnReschedule(
     int id,
@@ -998,7 +998,7 @@ class TasksController extends StateNotifier<TasksState> {
 
   /// 撤销单次改期：删除该例外记录（原实例恢复到原日期，不新增反向例外）
   Future<void> undoEditException(int id, int exceptionId) async {
-    // P1-25：撤销改期前读取迁移信息——把完成记录从新日期迁回原日期
+    // 撤销改期前读取迁移信息——把完成记录从新日期迁回原日期
     final ex = await _db.getException(exceptionId);
     await _db.deleteException(exceptionId);
     if (ex != null) {

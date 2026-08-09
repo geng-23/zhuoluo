@@ -30,7 +30,7 @@ class RruleService {
     );
   }
 
-  /// P0-7：判断"系列是否还有未来实例"时使用的展开窗口天数——
+  /// 判断"系列是否还有未来实例"时使用的展开窗口天数——
   /// 至少覆盖一个完整周期（按频率与 INTERVAL 计算，多 1 天缓冲避免
   /// 窗口边缘因时分差漏掉实例），下限 370 天。
   /// 长间隔任务（如每 2 年 = 732 天）若用固定 370 天窗口，
@@ -50,7 +50,7 @@ class RruleService {
       return DateTime.tryParse(s);
     }
     // YYYYMMDD 格式：解析为当日结束（23:59:59.999）。
-    // P1-B：定时实例带时分（如 09:00），若解析为当日 00:00，
+    // 定时实例带时分（如 09:00），若解析为当日 00:00，
     // `_withinRule` 的 d.isAfter(until) 会把结束日当天的实例排除。
     if (s.length == 8) {
       return DateTime(
@@ -113,7 +113,7 @@ class RruleService {
         }
       }
     } else if (rule.freq == 'WEEKLY') {
-      // P0-16：无 BYDAY 时默认锚点星期（此前固定周一，旧"每N周"任务错落周一；
+      // 无 BYDAY 时默认锚点星期（此前固定周一，旧"每N周"任务错落周一；
       // 与解析器"每N周补 BYDAY=起始星期"语义一致）
       final days = rule.byDay ?? [_byDayCode(start.weekday)];
       // 从 start 所在周周一起算

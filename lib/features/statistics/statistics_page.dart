@@ -22,7 +22,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
   List<Habit> _habits = [];
   Map<int, Map<DateTime, bool>> _habitHeatByHabit = {};
   bool _loading = true;
-  /// P2：_load 请求序号——丢弃过期结果（快速切换周/月/年时旧请求
+  /// _load 请求序号——丢弃过期结果（快速切换周/月/年时旧请求
   /// 不得覆盖新选择）
   int _loadSeq = 0;
   late final ProviderSubscription<int> _dataSub;
@@ -31,7 +31,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
   void initState() {
     super.initState();
     // B2：任务数据变更（完成/添加等）自动刷新统计
-    // P2：listenManual 需在 dispose 中 close（否则每次进出页面泄漏订阅）
+    // listenManual 需在 dispose 中 close（否则每次进出页面泄漏订阅）
     _dataSub = ref.listenManual<int>(dataVersionProvider, (prev, next) {
       if (prev != next) _load();
     });
@@ -171,7 +171,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                       ),
                     ),
                   ),
-                // P2：key 随加载序号变化 → 数据刷新时重建（此前 State 复用
+                // key 随加载序号变化 → 数据刷新时重建（此前 State 复用
                 // 不重跑 initState，热力图在页面存活期间不更新）
                 _YearHeatmap(
                   key: ValueKey(_loadSeq),
@@ -454,7 +454,7 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
         .fold<int>(0, (a, b) => b > a ? b : a)
         .clamp(1, 10)
         .toInt();
-    // P2：闰年 366 天（此前固定 365 格漏掉 12/31）
+    // 闰年 366 天（此前固定 365 格漏掉 12/31）
     final daysInYear = DateTime(now.year + 1, 1, 1).difference(
       DateTime(now.year, 1, 1),
     ).inDays;
@@ -477,7 +477,7 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
               style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 11),
             ),
             const SizedBox(height: 12),
-            // P1-26：高度自适应——26 列下全年 365/366 天需 14~15 行，
+            // 高度自适应——26 列下全年 365/366 天需 14~15 行，
             // 固定 100px 只装得下约一半（8 月起底部被裁剪不可见）；
             // 按宽度计算格子尺寸与总行数，完整显示全年
             LayoutBuilder(

@@ -153,7 +153,7 @@ class ProfilePage extends ConsumerWidget {
             const _SectionHeader('关于'),
             ListTile(
               leading: const Icon(Icons.info_outline),
-              title: const Text('着落 v1.0.6'),
+              title: const Text('着落 v1.0.7'),
               subtitle: const Text('事事有着落 · 本地数据'),
               onTap: () => _showAbout(context),
             ),
@@ -312,11 +312,11 @@ class ProfilePage extends ConsumerWidget {
       await db.ensureDefaultList();
       // B4：恢复后全量刷新任务控制器（重载清单/任务）
       await ref.read(tasksControllerProvider.notifier).init();
-      // P1-A：恢复后 bump 数据版本（四象限/日历/统计常驻页同步刷新）
+      // 恢复后 bump 数据版本（四象限/日历/统计常驻页同步刷新）
       bumpDataVersion(ref);
-      // P1-A：重载备份中的内存态设置（主题/音效/震动，此前需重启才生效）
+      // 重载备份中的内存态设置（主题/音效/震动，此前需重启才生效）
       await _reloadRuntimeSettings(db, ref);
-      // P0-3.7：恢复成功后自动全量重排通知（rescheduleAll 先取消全部旧通知
+      // 恢复成功后自动全量重排通知（rescheduleAll 先取消全部旧通知
       // 再按新数据排期；不再依赖用户选择"稍后"导致通知状态不一致）
       await ref.read(reminderSchedulerProvider).rescheduleAll();
       if (context.mounted) {
@@ -572,7 +572,7 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
     final service = ref.read(backupServiceProvider);
     final db = ref.read(dbProvider);
     try {
-      // P1-5 + 备份方案设计 3.5：恢复前自动安全备份当前数据（私有目录），
+      // + 备份方案设计 3.5：恢复前自动安全备份当前数据（私有目录），
       // 恢复失败/不满意时可从备份管理回退
       await service.exportToFile(toDownloads: false);
       final json = await service.readFile(path);
@@ -580,11 +580,11 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
       await db.ensureDefaultList();
       // B4：恢复后全量刷新任务控制器
       await ref.read(tasksControllerProvider.notifier).init();
-      // P1-A：恢复后 bump 数据版本（四象限/日历/统计常驻页同步刷新）
+      // 恢复后 bump 数据版本（四象限/日历/统计常驻页同步刷新）
       bumpDataVersion(ref);
-      // P1-A：重载备份中的内存态设置（主题/音效/震动）
+      // 重载备份中的内存态设置（主题/音效/震动）
       await _reloadRuntimeSettings(db, ref);
-      // P0-3.7：恢复成功后自动全量重排通知（先取消旧通知再按新数据排期）
+      // 恢复成功后自动全量重排通知（先取消旧通知再按新数据排期）
       await ref.read(reminderSchedulerProvider).rescheduleAll();
       if (mounted) {
         showAppSnackBar(context, '恢复完成', icon: Icons.restore);
@@ -714,7 +714,7 @@ class _NotificationPermissionTileState
     final exact = await svc.canScheduleExactAlarms();
     final notif = await svc.areNotificationsEnabled();
     final battery = await svc.isIgnoringBatteryOptimizations();
-    // N-P1-1：刷新调度权限缓存——用户从系统设置授权/拒绝后，
+    // N-刷新调度权限缓存——用户从系统设置授权/拒绝后，
     // 否则调度器按旧缓存短路，提醒一直静默跳过直到重启
     await svc.refreshPermissionCache();
     if (mounted) {
@@ -959,7 +959,7 @@ class _ThemeTileState extends ConsumerState<_ThemeTile> {
 
 // ================= 番茄专注 =================
 
-/// P1-A：备份恢复后重载内存态设置（主题/音效/震动/应用时区）
+/// 备份恢复后重载内存态设置（主题/音效/震动/应用时区）
 /// 恢复导入的 settings 含 themeMode/soundEnabled/hapticsEnabled/appTimezone，
 /// 此前只在启动时加载，恢复后需重启才生效。
 Future<void> _reloadRuntimeSettings(AppDatabase db, WidgetRef ref) async {
@@ -1047,7 +1047,7 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
   Future<void> _finish() async {
     _timer?.cancel();
     final elapsedSec = _minutes * 60 - _remaining;
-    // P1-4.8：立即结束（elapsedSec <= 0）记录 0 分钟
+    // 立即结束（elapsedSec <= 0）记录 0 分钟
     // （此前会把完整 15/25/45 分钟记进统计）
     final elapsedMin = elapsedSec <= 0
         ? 0
@@ -1057,15 +1057,15 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
       // 恢复显示待开始时长（而非 00:00）
       _remaining = _minutes * 60;
     });
-    // P1-4.8：数据库保存成功后再显示成功反馈
-    // P2：捕获外键异常（关联任务被删除时 insertPomodoro 抛错，此前无反馈）
+    // 数据库保存成功后再显示成功反馈
+    // 捕获外键异常（关联任务被删除时 insertPomodoro 抛错，此前无反馈）
     try {
       await ref.read(dbProvider).insertPomodoro(
         _taskId,
         elapsedMin,
         AppClock.now().subtract(Duration(minutes: elapsedMin)),
       );
-      // P1-A：番茄记录写库后通知统计等依赖方
+      // 番茄记录写库后通知统计等依赖方
       bumpDataVersion(ref);
     } catch (e) {
       debugPrint('番茄记录保存失败: $e');
@@ -1088,7 +1088,7 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
   }
 
   Future<void> _pickTask() async {
-    // P2：关联任务改为全量未完成任务（此前 take(30) 且依赖当前视图——
+    // 关联任务改为全量未完成任务（此前 take(30) 且依赖当前视图——
     // "今天"视图下无法关联未来的计划任务）
     final db = ref.read(dbProvider);
     final tasks = await db.getAllUncompleted();
@@ -1398,7 +1398,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                   highlight: habit.id == widget.initialHabitId,
                   onRefresh: _load,
                   onDelete: () async {
-                    // P2：删除习惯前确认（此前直接删除，误触即丢打卡记录）
+                    // 删除习惯前确认（此前直接删除，误触即丢打卡记录）
                     final ok = await showDialog<bool>(
                       context: context,
                       builder: (c) => AlertDialog(
@@ -1428,7 +1428,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                         .read(reminderSchedulerProvider)
                         .cancelHabitReminder(habit.id);
                     await db.deleteHabit(habit.id);
-                    // P1-A：习惯数据变更通知
+                    // 习惯数据变更通知
                     bumpDataVersion(ref);
                     _load();
                   },
@@ -1514,12 +1514,12 @@ class _HabitPageState extends ConsumerState<HabitPage> {
     if (draft != null && draft.name.isNotEmpty) {
       final db = ref.read(dbProvider);
       final id = await db.insertHabit(draft.name, '⭐', draft.reminderTime);
-      // P1-A：习惯数据变更通知
+      // 习惯数据变更通知
       bumpDataVersion(ref);
       if (draft.reminderTime != null) {
         final habit = await db.getHabit(id);
         if (habit != null) {
-          // P1-4.9：提醒未成功排入系统时提示
+          // 提醒未成功排入系统时提示
           final ok = await ref
               .read(reminderSchedulerProvider)
               .scheduleHabitReminder(habit);
@@ -1565,7 +1565,7 @@ class _HabitTile extends ConsumerStatefulWidget {
 
 class _HabitTileState extends ConsumerState<_HabitTile> {
   bool _doneToday = false;
-  /// P1-20：打卡操作进行中标志（双击/连点防抖——toggle 语义下连点
+  /// 打卡操作进行中标志（双击/连点防抖——toggle 语义下连点
   /// 会变成"打卡+取消"，且并发写入可致重复记录）
   bool _toggling = false;
 
@@ -1616,7 +1616,7 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
         onPressed: _toggling
             ? null
             : () async {
-                // P1-20：双击/连点防抖——toggle 语义下连点会变成
+                // 双击/连点防抖——toggle 语义下连点会变成
                 // "打卡+取消"；_toggling 置位未触发重建前，第二次点击
                 // 仍可能进入本闭包，故闭包内再守卫一次
                 if (_toggling) return;
@@ -1625,15 +1625,15 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
                 _toggling = true;
                 if (mounted) setState(() {});
                 try {
-                  // P2：打卡/取消打卡都是 toggle 语义，带撤销条（误触可恢复）
+                  // 打卡/取消打卡都是 toggle 语义，带撤销条（误触可恢复）
                   final willDone = !_doneToday;
                   await db.checkHabit(widget.habit.id, AppClock.now());
-                  // P1-10：打卡/取消后重排习惯提醒——已打卡日期不再排
+                  // 打卡/取消后重排习惯提醒——已打卡日期不再排
                   //（取消打卡后当天提醒恢复）
                   await ref
                       .read(reminderSchedulerProvider)
                       .scheduleHabitReminder(widget.habit);
-                  // P1-A：习惯打卡数据变更通知
+                  // 习惯打卡数据变更通知
                   bumpDataVersion(ref);
                   _load();
                   if (!context.mounted) return;
@@ -1760,11 +1760,11 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
     final db = ref.read(dbProvider);
     final scheduler = ref.read(reminderSchedulerProvider);
     await db.updateHabitReminder(habit.id, remind ? time : null);
-    // P1-A：习惯数据变更通知
+    // 习惯数据变更通知
     bumpDataVersion(ref);
     final updated = await db.getHabit(habit.id);
     if (updated != null) {
-      // P1-4.9：提醒未成功排入系统时提示
+      // 提醒未成功排入系统时提示
       final ok = await scheduler.scheduleHabitReminder(updated);
       if (!ok && mounted) {
         showAppSnackBar(
@@ -1794,7 +1794,7 @@ class QuadrantPage extends ConsumerStatefulWidget {
 class _QuadrantPageState extends ConsumerState<QuadrantPage> {
   List<Task> _tasks = [];
   bool _loading = true;
-  /// P2：数据版本订阅句柄（dispose 时 close，防泄漏）
+  /// 数据版本订阅句柄（dispose 时 close，防泄漏）
   late final ProviderSubscription<int> _dataSub;
 
   @override
@@ -1879,7 +1879,7 @@ class _QuadrantPageState extends ConsumerState<QuadrantPage> {
   Widget build(BuildContext context) {
     final notifier = ref.read(tasksControllerProvider.notifier);
     final cells = <int, List<Task>>{for (var i = 0; i < 4; i++) i: []};
-    // P1-4：未分类任务（quadrant 默认 4）不再静默塞进"一般"象限，
+    // 未分类任务（quadrant 默认 4）不再静默塞进"一般"象限，
     // 单独计数并提示归类
     final unclassified = <Task>[];
     for (final t in _tasks) {

@@ -87,7 +87,7 @@ class BackupService {
       final data = jsonDecode(json) as Map<String, dynamic>;
       if (data['version'] != 1) return null;
       return BackupStats(
-        // P1-21：缺表键（不完整旧备份）兜底计 0，不抛 TypeError
+        // 缺表键（不完整旧备份）兜底计 0，不抛 TypeError
         lists: _rows(data, 'lists').length,
         tasks: _rows(data, 'tasks').length,
         reminders: _rows(data, 'reminders').length,
@@ -101,7 +101,7 @@ class BackupService {
     }
   }
 
-  /// P1-21：备份表键缺失/为 null（不完整旧备份）时兜底为空表；
+  /// 备份表键缺失/为 null（不完整旧备份）时兜底为空表；
   /// 键存在但类型错误仍抛 TypeError（数据损坏应明确报错而非静默吞掉）
   static List _rows(Map<String, dynamic> data, String key) =>
       data.containsKey(key) && data[key] != null
@@ -147,7 +147,7 @@ class BackupService {
   }
 
   /// 导入 JSON 字符串：
-  /// [merge] = false → 全量替换（单事务清空+写入，P0-3.6 原子操作）
+  /// [merge] = false → 全量替换（单事务清空+写入，原子操作）
   /// [merge] = true  → 合并（备份方案设计 3.4，单事务原子，失败自动回滚）
   /// 返回任务数量。
   Future<int> importJson(String json, {bool merge = false}) async {
@@ -155,7 +155,7 @@ class BackupService {
     if (data['version'] != 1) {
       throw FormatException('不支持的备份版本');
     }
-    // P1-21：缺表键（不完整旧备份）兜底为空表，不抛 TypeError
+    // 缺表键（不完整旧备份）兜底为空表，不抛 TypeError
     final lists = _rows(data, 'lists').map(_jsonToList).toList();
     final tasks = _rows(data, 'tasks').map(_jsonToTask).toList();
     final reminders = _rows(data, 'reminders')
@@ -230,7 +230,7 @@ class BackupService {
   }) async {
     await _db.transaction(() async {
       // 1) 清单：同名跳过，新清单插入并建 oldId→newId 映射
-      // P1-22：默认清单标记不能继承/复制——本地已有默认时强制 false
+      // 默认清单标记不能继承/复制——本地已有默认时强制 false
       //（否则合并后 getDefaultList 抛 StateError，事务已提交却报"导入失败"）；
       // 本地无默认（空库首次合并）时保留备份值并跟踪，最多产生 1 个默认，
       // 保证导入后的 ensureDefaultList 不重复创建同名收件箱
@@ -600,7 +600,7 @@ class BackupService {
       TaskCompletionsCompanion(
         id: Value(j['id'] as int),
         taskId: Value(j['taskId'] as int),
-        // P1-4：实例日期归一化到当天 00:00（与 DB 基准一致，database.dart
+        // 实例日期归一化到当天 00:00（与 DB 基准一致，database.dart
         // completeInstance；否则恢复后"已完成"状态与规则展开互相不识别）
         instanceDate: Value(
           DateUtilsEx.normalizeInstanceDate(
@@ -635,7 +635,7 @@ class BackupService {
   HabitRecordsCompanion _jsonToHabitRecord(dynamic j) => HabitRecordsCompanion(
     id: Value(j['id'] as int),
     habitId: Value(j['habitId'] as int),
-    // P1-4：打卡日期归一化到当天 00:00（与 isHabitDone/checkHabit 基准一致）
+    // 打卡日期归一化到当天 00:00（与 isHabitDone/checkHabit 基准一致）
     date: Value(
       DateUtilsEx.normalizeInstanceDate(
         DateTime.parse(j['date'] as String),

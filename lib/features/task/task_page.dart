@@ -71,7 +71,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
   /// 不再等退出动画——此前动画期间界面/数据库/撤销条短暂不一致）
   Future<void> _toggleComplete(Task t) async {
     final notifier = ref.read(tasksControllerProvider.notifier);
-    // P1-B：重复任务今天不是规则日 → 无"今天实例"可完成（防止写入
+    // 重复任务今天不是规则日 → 无"今天实例"可完成（防止写入
     // 不存在的实例记录，如周二完成周一/三的任务）
     if (t.rrule.isNotEmpty) {
       final todayHas =
@@ -245,9 +245,9 @@ class _TaskPageState extends ConsumerState<TaskPage> {
                 onPressed: () async {
                   final ids = _selected.toList();
                   _exitMultiSelect();
-                  // P2：await 批量完成后再出撤销条（此前 fire-and-forget，
+                  // await 批量完成后再出撤销条（此前 fire-and-forget，
                   // 期间数据变化可能作用于过期集合）
-                  // P0-1：撤销条按"实际执行集合"——被跳过的今日已完成项
+                  // 撤销条按"实际执行集合"——被跳过的今日已完成项
                   // 不得被撤销误反转，全部跳过时不弹撤销条
                   final acted = await ref
                       .read(tasksControllerProvider.notifier)
@@ -269,7 +269,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
               onPressed: () async {
                 final ids = _selected.toList();
                 _exitMultiSelect();
-                // P2：await 批量恢复后再出撤销条
+                // await 批量恢复后再出撤销条
                 await ref
                     .read(tasksControllerProvider.notifier)
                     .batchReopen(ids);
@@ -342,7 +342,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       body: GestureDetector(
         // opaque：空状态/空白区域也能命中手势（否则空任务时滑动无效）
         behavior: HitTestBehavior.opaque,
-        // P2：手势开始/取消时重置累计位移（此前只在结束归零，
+        // 手势开始/取消时重置累计位移（此前只在结束归零，
         // 手势被取消会残留位移叠加到下一次拖动）
         onHorizontalDragStart: (_) => _navDragDx = 0,
         onHorizontalDragUpdate: (d) => _navDragDx += d.delta.dx,
@@ -448,7 +448,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
               // 批4-4：拖拽排序起拖补触觉反馈（此前无）
               onReorderStart: (_) => Haptics.select(),
               onReorder: (oldIndex, newIndex) {
-                // P2：仅手动排序模式可拖拽重排（智能视图/按时间/按象限排序
+                // 仅手动排序模式可拖拽重排（智能视图/按时间/按象限排序
                 // 时列表顺序由查询决定，跨清单拖拽会污染各清单独立 sortOrder）
                 if (state.sortMode != 'manual') {
                   if (mounted) {
@@ -596,7 +596,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     );
     if (ok != true) return;
     await ref.read(tasksControllerProvider.notifier).clearCompleted();
-    // P1-13：清空操作不可撤销（此前撤销条回调为空操作，误导性 UI）；
+    // 清空操作不可撤销（此前撤销条回调为空操作，误导性 UI）；
     // 改为无撤销按钮的普通提示
     if (mounted) {
       showAppSnackBar(
@@ -721,7 +721,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
 
   void _showMoreSheet(Task t) {
     final done = _isDone(t);
-    // P1-B：今天是否命中规则（非规则日无"今天实例"可完成）
+    // 今天是否命中规则（非规则日无"今天实例"可完成）
     final todayHas = t.rrule.isNotEmpty
         ? (ref.read(tasksControllerProvider).todayHas[t.id] ?? false)
         : null;
@@ -747,7 +747,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
                 await _pickDate(t);
               },
             ),
-            // P1-B：今天非规则日 → 无"今天实例"，隐藏完成本次（防止写入
+            // 今天非规则日 → 无"今天实例"，隐藏完成本次（防止写入
             // 不存在的实例记录；跳过/改期本次仍可用）
             if (t.rrule.isNotEmpty && (todayHas ?? true)) ...[
               ListTile(
@@ -761,7 +761,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
                   final notifier = ref.read(tasksControllerProvider.notifier);
                   notifier.completeTask(t.id);
                   if (mounted) {
-                    // P1-B：completeTask 是切换语义（完成↔撤销），撤销回调
+                    // completeTask 是切换语义（完成↔撤销），撤销回调
                     // 统一再切一次即可恢复原状态（此前用 reopenTask 无条件
                     // 撤销，done=true 时撤销条反而取消用户的操作）
                     _showUndo(
@@ -826,7 +826,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
   Future<void> _pickDate(Task t) async {
     final now = AppClock.now();
     final initial = t.planStart ?? now;
-    // P1-7：initialDate 钳制到 [firstDate, lastDate]（长期任务的 planStart
+    // initialDate 钳制到 [firstDate, lastDate]（长期任务的 planStart
     // 可早于一年前，超界触发 debug 断言崩溃 / release 月份错乱）
     final first = DateTime(now.year - 1);
     final last = DateTime(now.year + 5);
@@ -862,7 +862,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     final durationMinutes = t.isAllDay
         ? 60
         : (pe == null || ps == null ? 60 : pe.difference(ps).inMinutes);
-    // P1-24（A13-2 第四处遗漏）：重复任务"修改重复时间"= 平移系列锚点，
+    // （A13-2 第四处遗漏）：重复任务"修改重复时间"= 平移系列锚点，
     // 开始日期自动吸附到距其最近的规则命中日——否则锚点不命中规则
     // （如每周一任务改到周二）时系列从日历/列表消失
     var effectiveStart = newStart;
@@ -882,7 +882,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       }
     }
     final newEnd = effectiveStart.add(Duration(minutes: durationMinutes));
-    // P0-3：重复任务改期（平移系列锚点）统一收口——清理不再匹配新锚点的
+    // 重复任务改期（平移系列锚点）统一收口——清理不再匹配新锚点的
     // 旧完成记录/例外（此前直接 updateTaskFields，旧记录成孤儿参与统计）
     var removedCount = 0;
     if (t.rrule.isNotEmpty &&
@@ -905,7 +905,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       ),
     );
     if (mounted) {
-      // P1-24：吸附发生且有清理时合并提示（避免两条 Snackbar 互相覆盖）
+      // 吸附发生且有清理时合并提示（避免两条 Snackbar 互相覆盖）
       final adjusted = !DateUtilsEx.sameDay(newStart, effectiveStart);
       final msg = adjusted
           ? '开始日期与重复规则不匹配，已自动调整到 '
@@ -917,7 +917,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
                   '${DateUtilsEx.timeCn(effectiveStart)}');
       _showUndo(
         msg,
-        // P2-52：撤销恢复原锚点 + 被清理的完成记录/例外（与日历系列改期
+        // 撤销恢复原锚点 + 被清理的完成记录/例外（与日历系列改期
         // 撤销 undoMoveTaskSeries 一致；此前只恢复日期，历史数据永久缺失）
         () async {
           await _undoReschedule();
@@ -927,7 +927,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     }
   }
 
-  /// P2-52：任务页改期撤销快照（恢复被清理的完成记录与例外）
+  /// 任务页改期撤销快照（恢复被清理的完成记录与例外）
   _RescheduleUndo? _lastRescheduleUndo;
 
   Future<void> _undoReschedule() async {
@@ -996,7 +996,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       pickedTime.minute,
     );
     final notifier = ref.read(tasksControllerProvider.notifier);
-    // P0-3.3：记录例外 ID，撤销时删除该例外（而非新增反向例外）
+    // 记录例外 ID，撤销时删除该例外（而非新增反向例外）
     final exId = await notifier.editException(t.id, instDay, toDate);
     if (mounted) {
       _showUndo(
@@ -1065,7 +1065,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
   }
 }
 
-/// P2-52：任务页改期撤销快照（原锚点 + 被清理的完成记录/例外）
+/// 任务页改期撤销快照（原锚点 + 被清理的完成记录/例外）
 class _RescheduleUndo {
   final Task task;
   final DateTime? oldStart;
@@ -1182,7 +1182,7 @@ class _QuickAddSheetState extends ConsumerState<QuickAddSheet> {
 
   /// 从输入中提取标题（去掉已识别的时间词）
   /// 从输入中提取标题（去掉已识别的时间词）
-  /// P1-D：统一走公共实现 extractTaskTitle（日历快速添加共用，
+  /// 统一走公共实现 extractTaskTitle（日历快速添加共用，
   /// 此前两份重复实现且逐词删除会撕裂标题）
   String _extractTitle(String input) => extractTaskTitle(input);
 }
@@ -1226,7 +1226,7 @@ class _TaskTile extends StatelessWidget {
     final color = overdue ? Theme.of(context).colorScheme.error : null;
     final listColor = listColorHex == null ? null : colorFromHex(listColorHex!);
     return Dismissible(      key: ValueKey('task-${task.id}'),
-      // P1-D：多选模式下禁用横滑手势（防误完成/误开更多操作）
+      // 多选模式下禁用横滑手势（防误完成/误开更多操作）
       direction: multiSelect
           ? DismissDirection.none
           : DismissDirection.horizontal,
@@ -1470,7 +1470,7 @@ class _TaskDrawer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(tasksControllerProvider);
     final notifier = ref.read(tasksControllerProvider.notifier);
-    // P2：抽屉切换视图/清单时退出多选（否则 _selected 残留旧视图任务，
+    // 抽屉切换视图/清单时退出多选（否则 _selected 残留旧视图任务，
     // 批量操作会作用于不可见任务）
     void selectAndClose(VoidCallback select) {
       onMultiSelectChange(false);
@@ -1830,7 +1830,7 @@ class _TaskDrawer extends ConsumerWidget {
           '已删除清单「${l.name}」及其 ${topLevel.length} 个任务',
           actionLabel: '撤销',
           onAction: () async {
-            // P0-9：撤销连带删除必须先恢复清单，否则任务恢复时
+            // 撤销连带删除必须先恢复清单，否则任务恢复时
             // listId 外键引用缺失导致崩溃、数据永久丢失
             await db.restoreList(l);
             for (final t in topLevel) {

@@ -91,7 +91,7 @@ class CalendarPage extends ConsumerWidget {
                           // E1：#7.1 单击日期弹出当天任务弹层
                           _openDayPreview(context, ref, d);
                         },
-                        // P2：长按 = 快速添加（与点按预览区分开，
+                        // 长按 = 快速添加（与点按预览区分开，
                         // 此前两者行为完全相同）
                         onDayLongPress: (d) {
                           notifier.setSelectedDay(d);
@@ -147,7 +147,7 @@ class CalendarPage extends ConsumerWidget {
       case 'week':
         final monday = DateUtilsEx.mondayOf(d);
         final sunday = monday.add(const Duration(days: 6));
-        // P2：跨月周（如 8/31-9/6）拆分显示，此前"8月 31-6日"误导
+        // 跨月周（如 8/31-9/6）拆分显示，此前"8月 31-6日"误导
         if (monday.month == sunday.month) {
           return '${DateUtilsEx.monthCn(monday)} '
               '${monday.day}-${sunday.day}日';
@@ -169,7 +169,7 @@ class CalendarPage extends ConsumerWidget {
     // 前后各 60 年（覆盖周/日视图可翻范围，此前 ±5 年范围太小）
     final first = DateTime(now.year - 60);
     final last = DateTime(now.year + 60);
-    // P1-27：周/日视图可翻数百年前，selectedDay 超界会触发 DatePicker
+    // 周/日视图可翻数百年前，selectedDay 超界会触发 DatePicker
     // 断言崩溃，钳制到 [firstDate, lastDate]
     final initial = state.selectedDay;
     final clamped = initial.isBefore(first)
@@ -410,7 +410,7 @@ class MonthPager extends ConsumerStatefulWidget {
   });
 
   final List<CalendarItem> items;
-  /// 按天分组索引（P2-1：月视图不再逐项遍历建分组）
+  /// 按天分组索引（月视图不再逐项遍历建分组）
   final Map<int, List<CalendarItem>> byDay;
   final DateTime displayedMonth;
   final DateTime selectedDay;

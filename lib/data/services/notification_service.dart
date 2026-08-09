@@ -19,11 +19,11 @@ class NotificationService {
 
   bool _initialized = false;
 
-  /// P1-C：通知权限结果缓存（启动/设置页请求一次；
+  /// 通知权限结果缓存（启动/设置页请求一次；
   /// 调度时不再重复请求，被拒后不再弹窗轰炸）
   bool? _permissionGranted;
 
-  /// P0-10：冷启动深链——进程被杀后点击通知启动 App 时，
+  /// 冷启动深链——进程被杀后点击通知启动 App 时，
   /// payload 不经过 onDidReceiveNotificationResponse 回调（此时无人订阅），
   /// 需在 init 时通过 getNotificationAppLaunchDetails 主动捕获，供订阅前消费。
   String? _launchPayload;
@@ -92,7 +92,7 @@ class NotificationService {
   Future<void> init() async {
     if (_initialized) return;
     tzdata.initializeTimeZones();
-    // P1-C：使用设备本地时区（此前硬编码 Asia/Shanghai，非中国时区用户
+    // 使用设备本地时区（此前硬编码 Asia/Shanghai，非中国时区用户
     // 通知时刻全部偏移；"回退本地时区"分支实为不可达死代码）
     tz.setLocalLocation(tz.local);
     const settings = InitializationSettings(
@@ -152,7 +152,7 @@ class NotificationService {
           })
           .timeout(const Duration(seconds: 2), onTimeout: () {});
     } catch (_) {}
-    // P0-10：捕获冷启动通知 payload（进程被杀后点通知启动 App 的深链）。
+    // 捕获冷启动通知 payload（进程被杀后点通知启动 App 的深链）。
     // 测试环境无原生宿主时默认返回 didNotificationLaunchApp=false，安全。
     try {
       final details = await _plugin.getNotificationAppLaunchDetails();
@@ -177,14 +177,14 @@ class NotificationService {
   Stream<String?> get tapStream => _tapController.stream;
 
   /// 请求通知权限（Android 13+；Web = 浏览器通知权限）。
-  /// 结果缓存（P1-C）：后续 schedule() 直接读缓存，不再重复请求。
+  /// 结果缓存：后续 schedule() 直接读缓存，不再重复请求。
   Future<bool> requestPermission() async {
     final granted = await _fetchPermission();
     _permissionGranted = granted;
     return granted;
   }
 
-  /// N-P1-1：权限缓存失效通道——用户在系统设置授予/拒绝通知权限后调用，
+  /// N-权限缓存失效通道——用户在系统设置授予/拒绝通知权限后调用，
   /// 否则调度器会一直按旧的 `_permissionGranted` 短路（提醒全部静默跳过）。
   Future<bool> refreshPermissionCache() async {
     try {
@@ -238,7 +238,7 @@ class NotificationService {
   /// 调度通知。返回 false 表示未调度（时间已过/无权限），供调用方提示用户
   /// [payload] 深链载荷：'t{taskId}' 定位任务 / 'h{habitId}' 打开习惯页
   /// [channel] 通知渠道：任务提醒默认 task_reminder_v4；习惯提醒传
-  /// habit_reminder_v3（P2-51：P1-10 逐日排期后习惯提醒改走本方法，
+  /// habit_reminder_v3（逐日排期后习惯提醒改走本方法，
   /// 此前硬编码任务渠道导致习惯提醒声音/开关无法单独控制）
   Future<bool> schedule(
     int id, {
@@ -251,7 +251,7 @@ class NotificationService {
   }) async {
     if (!_initialized) await init();
     // Android 13+：确保通知权限已授予；未授予则不调度
-    // P1-C：只在状态未知时请求一次（被拒后不再重复弹窗）
+    // 只在状态未知时请求一次（被拒后不再重复弹窗）
     if (_permissionGranted == false) {
       debugPrint('通知：权限被拒，跳过 $id');
       return false;
@@ -346,13 +346,13 @@ class NotificationService {
 /// 提醒 ID 含实例日期维度：同一 (task, reminder) 在不同实例上的通知互不覆盖，
 /// 否则重复任务 93 天内的各实例会因同 ID 互相替换（只剩最后一个）。
 ///
-/// 历史公式（P0-5/P0-6）：taskId*200000 + dayIndex*64 + reminderId，按
+/// 历史公式：taskId*200000 + dayIndex*64 + reminderId，按
 /// "任务内 0..63 槽位"设计，但调用方传的是 Reminders 表**全局自增主键**
 /// r.id（非任务内序号）——全局提醒记录累积 64 条后：
 /// - debug：assert 崩溃；
 /// - release：r.id=64 与次日 r.id=0 同 ID，日重复任务跨日互相覆盖漏提醒。
 ///
-/// 现行公式（N-P1-4 修复）：
+/// 现行公式（N-修复）：
 ///   reminderId*16384 + max(0, dayIndex)
 /// 依据：r.id 全局唯一 → 无需 taskId 因子（taskId 段位限制 10000 随之消除）；
 /// dayIndex 为实例日距 2024-01-01 天数，槽宽 16384 覆盖约 45 年（2068 年前
@@ -367,7 +367,7 @@ class NotificationIds {
   static const int _daySlotWidth = 16384;
 
   /// 提醒记录 ID（Reminders 表自增主键）上限：128000*16384 ≈ 2.097e9，
-  /// 低于习惯段起点 2.1e9（P2-11 隔离带）。
+  /// 低于习惯段起点 2.1e9（隔离带）。
   static const int _maxReminderId = 128000;
 
   /// 提醒通知 ID：reminderId*16384 + 实例日距 2024-01-01 天数
@@ -384,7 +384,7 @@ class NotificationIds {
   }
 
   /// 习惯提醒 ID（独立区段，置于任务 ID 空间之上，互不干扰）。
-  /// P1-10：逐日排期后需区分日期——每习惯占 65536 槽（约 179 年），
+  /// 逐日排期后需区分日期——每习惯占 65536 槽（约 179 年），
   /// 上限约 3.2 万个习惯，仍低于 forTest（2147483646）。
   static int forHabit(int habitId, DateTime day) {
     final dayIndex = day.difference(_epoch).inDays;
@@ -392,6 +392,6 @@ class NotificationIds {
   }
 
   /// 通知测试 ID（独立区段，int32 上限附近，不与任务/习惯冲突；
-  /// 旧值 2099999990 恰与第 10 个习惯提醒 ID 相同——P0-7）
+  /// 旧值 2099999990 恰与第 10 个习惯提醒 ID 相同——）
   static int get forTest => 2147483646;
 }

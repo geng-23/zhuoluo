@@ -36,7 +36,7 @@ Future<void> main() async {
     UncontrolledProviderScope(container: container, child: const ZhuoluoApp()),
   );
   // 每天首次打开自动备份（备份方案设计 3.2）：
-  // runApp 之后异步执行（fire-and-forget），不阻塞启动流程（P2-3）
+  // runApp 之后异步执行（fire-and-forget），不阻塞启动流程
   unawaited(container.read(backupServiceProvider).autoBackup());
 }
 

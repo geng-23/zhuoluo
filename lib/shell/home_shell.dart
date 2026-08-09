@@ -19,7 +19,7 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell>
     with WidgetsBindingObserver {
   int _tab = 0;
-  /// P2：用户是否已手动切换 Tab（_restoreTab 恢复结果不得覆盖手动选择）
+  /// 用户是否已手动切换 Tab（_restoreTab 恢复结果不得覆盖手动选择）
   bool _tabChanged = false;
   StreamSubscription<String?>? _tapSub;
   /// A1：懒加载页面缓存——仅首次访问时创建，之后保留 State
@@ -57,7 +57,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
       if (payload == null || !mounted) return;
       _handlePayload(payload);
     });
-    // P0-10：冷启动深链——进程被杀后点通知启动 App，payload 不经 onTap 回调，
+    // 冷启动深链——进程被杀后点通知启动 App，payload 不经 onTap 回调，
     // 需消费 init 时捕获的启动 payload（同步执行，无竞态）
     final launchPayload = ref
         .read(notificationServiceProvider)
@@ -97,7 +97,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
     super.dispose();
   }
 
-  /// P0-6：回到前台时检查 93 天排期窗口是否过期（>24h）——进程常驻
+  /// 回到前台时检查 93 天排期窗口是否过期（>24h）——进程常驻
   /// 期间窗口不自动前进，用户每天回前台即触发滚动重排
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -109,7 +109,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
   Future<void> _restoreTab() async {
     final settings = ref.read(settingsProvider);
     final tab = await settings.getLastTab();
-    // P2：用户已手动切换过 Tab（_tabChanged 标记）则丢弃恢复结果，
+    // 用户已手动切换过 Tab（_tabChanged 标记）则丢弃恢复结果，
     // 避免慢查询返回后覆盖用户选择
     if (mounted && !_tabChanged && tab >= 0 && tab < 4) {
       setState(() => _tab = tab);

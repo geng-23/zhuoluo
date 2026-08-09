@@ -12,7 +12,7 @@ extension TaskEx on Task {
     return d > 0 ? d : 60;
   }
 
-  /// 是否过期（计划结束时间或截止时间已过；P1-4.2 纳入 dueTime）
+  /// 是否过期（计划结束时间或截止时间已过；纳入 dueTime）
   bool get isOverdueNow {
     if (completedAt != null) return false;
     final now = AppClock.now();

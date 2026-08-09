@@ -25,10 +25,10 @@ const _pixelPerHour = 64.0;
 /// 按天索引 key（与 CalendarController 的 byDay 同口径）
 int _dayKey(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
 
-/// P1-8：时间轴起始小时——显示范围内最早 timed 任务（非全天/非跨天/
+/// 时间轴起始小时——显示范围内最早 timed 任务（非全天/非跨天/
 /// 有计划时间）的开始小时，与默认值取小：只扩展不收缩，多数情况保持
 /// 06:00 起点；有 06:00 前任务时起始点下移，任务不再隐形不可操作。
-/// P2-1/丝滑翻页：改为按天分组数据驱动——此前遍历整个窗口 items
+/// 丝滑翻页：改为按天分组数据驱动——此前遍历整个窗口 items
 /// （每次 build O(N×7)），现只扫显示范围内 7 天。
 int effectiveStartHourFor({
   required Map<int, List<CalendarItem>> byDay,
@@ -60,7 +60,7 @@ class WeekView extends ConsumerStatefulWidget {
 
   final List<CalendarItem> items;
 
-  /// 按天分组索引（P2-1：视图 build 不再全窗口扫描）
+  /// 按天分组索引（视图 build 不再全窗口扫描）
   final Map<int, List<CalendarItem>> byDay;
   final DateTime selectedDay;
   final ValueChanged<DateTime> onDayChanged;
@@ -137,16 +137,16 @@ class _WeekViewState extends ConsumerState<WeekView> {
   late final ValueNotifier<double> _sharedScrollOffset;
   ValueNotifier<double>? _ownScroll;
 
-  /// P1-D：外部跳页目标页。跳页触发的 onPageChanged 只同步 _dragDay、
+  /// 外部跳页目标页。跳页触发的 onPageChanged 只同步 _dragDay、
   /// 不回写 selectedDay（否则点"今天"后选中日被回归为周一）。
   int? _pendingExternalPage;
 
-  /// P0-1：固定周基准（initState 时刻的当前周周一），state 生命周期内
+  /// 固定周基准（initState 时刻的当前周周一），state 生命周期内
   /// 不再变化，与 DayView 固定日基准（2000-01-01）同一模式。此前以
   /// mondayOf(widget.selectedDay) 为基准，而 didUpdateWidget 中
   /// widget.selectedDay 已是新值 → 差恒为 0 → 目标页恒为 500：
   /// 手动翻周必触发 280ms 弹回动画、跨周外部跳转恒落回 App 打开时
-  /// 那一周（上版误判 P0-15 已修复，本轮翻案）。
+  /// 那一周（上版误判 已修复，本轮翻案）。
   late final DateTime _epochMonday;
 
   int _pageForMonday(DateTime monday) =>
@@ -498,7 +498,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
   Widget build(BuildContext context) {
     return PageView.builder(
       controller: _controller,
-      // P0-1：itemCount 随固定基准同步扩大（自 _epochMonday 起每周一页，
+      // itemCount 随固定基准同步扩大（自 _epochMonday 起每周一页，
       // 与 DayView 的 40000 对称，前后各覆盖约 380 年）
       itemCount: 40000,
       // A13：allowImplicitScrolling 预构建页在 widget 测试 teardown 时
@@ -508,7 +508,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
         _activePage.value = page;
         final offset = page - 500;
         final weekMonday = _epochMonday.add(Duration(days: offset * 7));
-        // P1-D：外部跳页（今天按钮/日期选择）动画期间——onPageChanged
+        // 外部跳页（今天按钮/日期选择）动画期间——onPageChanged
         // 在动画中（round 变化）多次触发，一律只同步 _dragDay、不回写
         // selectedDay（否则回写→didUpdateWidget→animateToPage 回跳打断
         // 动画，最终停在中间页/月）；到达目标页时结束拦截
@@ -572,7 +572,7 @@ class DayView extends ConsumerStatefulWidget {
 
   final List<CalendarItem> items;
 
-  /// 按天分组索引（P2-1：视图 build 不再全窗口扫描）
+  /// 按天分组索引（视图 build 不再全窗口扫描）
   final Map<int, List<CalendarItem>> byDay;
   final DateTime selectedDay;
   final ValueChanged<DateTime> onDayChanged;
@@ -1059,7 +1059,7 @@ class _TimeAxisView extends ConsumerStatefulWidget {
   final ValueNotifier<int> activePage;
   final List<CalendarItem> items;
 
-  /// 按天分组索引（P2-1：build 不再全窗口扫描）
+  /// 按天分组索引（build 不再全窗口扫描）
   final Map<int, List<CalendarItem>> byDay;
   final DateTime start;
   final bool isWeek;
@@ -1273,7 +1273,7 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
     // A7：表头"今天"高亮由 build 时实时计算（跨天时随页面重建自然更新），
     // 不再依赖每分钟 setState 的 _now
     final today = AppClock.now();
-    // P1-8：时间轴起始小时动态化——显示范围内最早 timed 任务决定
+    // 时间轴起始小时动态化——显示范围内最早 timed 任务决定
     //（默认 6；06:00 前任务存在时扩展起始点，任务不再隐形不可操作）
     final startEff = _effectiveStartHour(days);
     final totalHours = _endHour - startEff;
@@ -1293,12 +1293,12 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
                   Expanded(
                     child: InkWell(
                       onTap: widget.isWeek
-                          // P2：合并为一次 load（此前 setSelectedDay+setView 两次）
+                          // 合并为一次 load（此前 setSelectedDay+setView 两次）
                           ? () => notifier.setSelectedDayWithView(d, 'day')
-                          // P2：日视图头部可点击跳转其他日期（此前点击无反应）
+                          // 日视图头部可点击跳转其他日期（此前点击无反应）
                           : () async {
                               final now = AppClock.now();
-                              // P1-27：日视图可翻至 2000-01-01，当前显示日超界
+                              // 日视图可翻至 2000-01-01，当前显示日超界
                               // 会触发 DatePicker 断言崩溃，钳制到 [first, last]
                               //（前后各 60 年，覆盖日视图可翻范围）
                               final first = DateTime(now.year - 60);
@@ -1360,7 +1360,7 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
               ],
             ),
             const Divider(height: 1),
-            // 5.8/P1-8：时间轴可见范围说明（动态起始小时，06:00 前有任务时
+            // 5.8/时间轴可见范围说明（动态起始小时，06:00 前有任务时
             // 起始点扩展；超出时间轴范围的夜间任务仍不显示）
             Padding(
               padding: const EdgeInsets.fromLTRB(48, 1, 12, 1),
@@ -1548,7 +1548,7 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
   /// 是否显示在顶部置顶区（全天 / 无计划时间 / 跨天任务）
   bool _isTopArea(CalendarItem i) => _AllDayBar.isTopArea(i);
 
-  /// P1-8：显示范围内（当周/当天）timed 任务的最早开始小时，
+  /// 显示范围内（当周/当天）timed 任务的最早开始小时，
   /// 与默认 6 取小——只扩展不收缩（多数情况保持 06:00 起点）。
   int _effectiveStartHour(List<DateTime> days) =>
       effectiveStartHourFor(byDay: widget.byDay, days: days);
@@ -1578,7 +1578,7 @@ class _NowLine extends StatefulWidget {
   final int todayIndex;
   final double columnWidth;
 
-  /// P1-8：时间轴起始小时（与 _TimeAxisView 动态起始一致，红线随之下移）
+  /// 时间轴起始小时（与 _TimeAxisView 动态起始一致，红线随之下移）
   final int startHour;
 
   @override
@@ -1690,7 +1690,7 @@ class _AllDayBar extends ConsumerWidget {
 
   final List<DateTime> days;
 
-  /// 按天分组索引（P2-1：不再全窗口扫描）
+  /// 按天分组索引（不再全窗口扫描）
   final Map<int, List<CalendarItem>> byDay;
 
   /// 内容区实际可用宽度（含左侧时间栏 44px；布局收窄后 ≠ 屏宽）
@@ -1805,7 +1805,7 @@ class _DayColumn extends ConsumerStatefulWidget {
   final List<CalendarItem> items;
   final bool isWeek;
 
-  /// P1-8：时间轴起始小时（动态——显示范围内最早 timed 任务决定，
+  /// 时间轴起始小时（动态——显示范围内最早 timed 任务决定，
   /// 默认 6；有更早任务时扩展，保证 06:00 前任务可见可操作）
   final int startHour;
 
@@ -2298,7 +2298,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
               _selectionStartGlobalX = null;
               _selectionStartGlobalY = null;
             });
-            // P2：长按未拖动（位移过小）→ 等价点击空白，打开默认时长
+            // 长按未拖动（位移过小）→ 等价点击空白，打开默认时长
             // 快速添加（此前有震动但无任何动作）
             if ((end - start).abs() < 20) {
               _openQuickAdd(context, ref, widget.day);
@@ -2449,7 +2449,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                     return AnimatedPositioned(
                       duration: const Duration(milliseconds: 80),
                       curve: Curves.easeOut,
-                      // P1-7：虚影位置 = 实际写入（C5-1 回退后）的开始时间
+                      // 虚影位置 = 实际写入（C5-1 回退后）的开始时间
                       top: _ghostTopFor(local.dy),
                       left: 2,
                       right: 2,
@@ -2521,7 +2521,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
         colorFromHex(info.listColor);
     final onColor = TaskColors.textOn(color);
     final snapped = _snapMinutesForY(localY);
-    // P1-7：虚影显示实际写入的开始时间（C5-1 回退后），所见即所得
+    // 虚影显示实际写入的开始时间（C5-1 回退后），所见即所得
     final start = _draggedStartForMinutes(snapped);
     final dur = info.durationMinutes;
     final end = start.add(Duration(minutes: dur));
@@ -2588,7 +2588,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     return h < 32 ? 32 : h;
   }
 
-  /// P1-7：拖动改期虚影的实际开始时间——落点分钟经 C5-1"时长不跨天"
+  /// 拖动改期虚影的实际开始时间——落点分钟经 C5-1"时长不跨天"
   /// 回退后（22:30 拖 2h 任务实际写入 21:00），预览（虚影/胶囊）与
   /// 写入端 moveTaskToDateTime 必须一致，否则所见非所得。
   DateTime _draggedStartForMinutes(int minutes) {
@@ -2609,7 +2609,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     return widget.dragGhostInfo?.value?.durationMinutes;
   }
 
-  /// P1-7：虚影在时间轴内的 top——基于实际写入（C5-1 回退后）的开始时间
+  /// 虚影在时间轴内的 top——基于实际写入（C5-1 回退后）的开始时间
   double _ghostTopFor(double gy) {
     final s = _draggedStartForMinutes(_snapMinutesForY(gy));
     return ((s.hour * 60 + s.minute) - widget.startHour * 60) /
@@ -2619,7 +2619,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   }
 
   /// E7：将拖动范围吸附到 10 分钟粒度
-  /// P2：与 _snappedYRange 一致 clamp 到 [06:00, 23:00]——
+  /// 与 _snappedYRange 一致 clamp 到 [06:00, 23:00]——
   /// 此前顶部/底部 padding 区拖动可得 5:30/23:30，预览与结果不一致
   /// C5-2：两端同 clamp 到 23:00 时保证至少 10 分钟跨度
   (DateTime, DateTime) _snapRange(double y1, double y2) {
@@ -2882,7 +2882,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
       final ps = i.task.planStart;
       final pe = i.task.planEnd;
       final day = i.instanceDate;
-      // P1-B：例外改期目标时刻（displayTime）优先，否则 planStart 时分
+      // 例外改期目标时刻（displayTime）优先，否则 planStart 时分
       final dt = i.displayTime;
       final s = ps == null
           ? DateTime(day.year, day.month, day.day)
@@ -3328,7 +3328,7 @@ class _InstanceActionSheetState extends ConsumerState<InstanceActionSheet> {
               leading: const Icon(Icons.skip_next),
               title: const Text('跳过本次'),
               onTap: () async {
-                // P1-D：先等待跳过写入完成，再弹撤销条（此前先弹条后
+                // 先等待跳过写入完成，再弹撤销条（此前先弹条后
                 // fire-and-forget 执行，快速点撤销读到旧 skippedDates 会静默失效）
                 await notifier.skipInstance(t.id, day);
                 if (!mounted) return;
@@ -3367,7 +3367,7 @@ class _InstanceActionSheetState extends ConsumerState<InstanceActionSheet> {
   Future<void> _pickReschedule(WidgetRef ref, CalendarItem item) async {
     final now = AppClock.now();
     final ps = item.task.planStart;
-    // P1-7：日视图可翻到百年前，实例日期超界会触发 DatePicker 断言崩溃
+    // 日视图可翻到百年前，实例日期超界会触发 DatePicker 断言崩溃
     final first = DateTime(now.year - 1);
     final last = DateTime(now.year + 5);
     final initial = item.instanceDate;
@@ -3396,7 +3396,7 @@ class _InstanceActionSheetState extends ConsumerState<InstanceActionSheet> {
       pickedTime.minute,
     );
     final tasksNotifier = ref.read(tasksControllerProvider.notifier);
-    // P0-3.3：记录例外 ID，撤销时删除该例外（而非新增反向例外）
+    // 记录例外 ID，撤销时删除该例外（而非新增反向例外）
     final exId = await tasksNotifier.editException(
       item.task.id,
       item.instanceDate,
@@ -3579,7 +3579,7 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
     if (action == 'reschedule') {
       final now = AppClock.now();
       final ps = item.task.planStart;
-      // P1-7：月视图可翻到很久以前，实例日期超界会触发 DatePicker 断言崩溃；
+      // 月视图可翻到很久以前，实例日期超界会触发 DatePicker 断言崩溃；
       // 范围前后各 60 年（覆盖日常改期，超界时钳制到边界）
       final first = DateTime(now.year - 60);
       final last = DateTime(now.year + 60);
@@ -3595,7 +3595,7 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
         helpText: '改期到',
       );
       if (picked == null || !mounted) return;
-      // P2：与弹层入口一致——改期保留/选择时分（此前只选日期丢时分，
+      // 与弹层入口一致——改期保留/选择时分（此前只选日期丢时分，
       // 且更新既有例外时会覆盖之前带时分的改期）
       final pickedTime = await showTimePicker(
         context: context,

@@ -65,7 +65,7 @@ Future<String?> pickBackupFileImpl() async {
 /// 获取导出目录：
 /// - 下载目录（Android 10+ 的 MediaStore 映射 / iOS / 桌面）
 /// - 不可用时回退应用文档目录
-/// P1-C：此前硬编码 /storage/emulated/0/Download——Android 9 及以下
+/// 此前硬编码 /storage/emulated/0/Download——Android 9 及以下
 /// 无 WRITE_EXTERNAL_STORAGE 权限必失败，iOS/桌面会建在错误位置。
 Future<Directory> _exportBase() async {
   final downloads = await getDownloadsDirectory();

@@ -44,7 +44,7 @@ class DateUtilsEx {
     return '$hh:$mm';
   }
 
-  /// C5-1/P1-7：落点"时长不跨天"约束——起点 + 时长越过当天 23:00 时
+  /// C5-1/落点"时长不跨天"约束——起点 + 时长越过当天 23:00 时
   /// 回退起点（23:00 - 时长），保证任务不跨午夜（跨天任务会跳进置顶区
   /// 且无法拖回）。写入端与拖拽预览端（虚影/时间胶囊）必须统一使用，
   /// 否则所见非所得（22:30 拖 2h 任务实际写入 21:00）。
@@ -74,14 +74,14 @@ class DateUtilsEx {
 
   /// 重复任务实例日期统一归一化：当天 00:00。
   /// 完成记录/提醒排期/跳过/例外必须共用同一基准，否则 RRULE 展开保留的时分
-  /// （如 09:00）与完成记录（00:00）会互相判定为不同实例（P0-3.1）。
+  /// （如 09:00）与完成记录（00:00）会互相判定为不同实例。
   static DateTime normalizeInstanceDate(DateTime d) => DateTime(
     d.year,
     d.month,
     d.day,
   );
 
-  /// P1-9/P2-40：skippedDates 非法 JSON（损坏备份导入等）静默视为无跳过，
+  /// skippedDates 非法 JSON（损坏备份导入等）静默视为无跳过，
   /// 避免跳过/撤销操作直接抛 FormatException。
   /// 任务页与日历页共用同一实现（此前日历侧漏掉容错直接 jsonDecode）。
   static List<String> parseSkippedDates(String raw) {

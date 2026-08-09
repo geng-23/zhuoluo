@@ -121,7 +121,7 @@ class _QuickAddSheetWithRangeState
       return;
     }
     final title = extractTaskTitle(text);
-    // P1-19：await + mounted 守卫——此前 .then 回调在 pop/dispose 之后
+    // await + mounted 守卫——此前 .then 回调在 pop/dispose 之后
     // 使用 ref，会抛 "Cannot use ref after dispose"，任务偶发未创建
     final defId = await _defaultListId(ref);
     if (!mounted) return;
@@ -305,7 +305,7 @@ class _QuickAddSheetWithDefaultsState
     }
     final (ps, pe, isAllDay) = _parsePlan(text);
     // C6-2：固定进收件箱（不随任务页当前清单）
-    // P1-19：await + mounted 守卫——此前 .then 回调在 pop/dispose 之后
+    // await + mounted 守卫——此前 .then 回调在 pop/dispose 之后
     // 使用 ref，会抛 "Cannot use ref after dispose"，任务偶发未创建
     final defId = await _defaultListId(ref);
     if (!mounted) return;

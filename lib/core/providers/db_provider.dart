@@ -58,7 +58,7 @@ class SettingsController {
     final raw = await get(keyDefaultListId);
     final id = int.tryParse(raw ?? '');
     if (id == null || id <= 0) return null;
-    // 清单可能被删除或备份恢复后失效（P1-22 家族）：读取时校验存在性
+    // 清单可能被删除或备份恢复后失效（家族）：读取时校验存在性
     final list = await _db.getListById(id);
     return list == null ? null : id;
   }

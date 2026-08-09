@@ -16,7 +16,7 @@ class ReminderScheduler {
 
   final AppDatabase _db;
 
-  /// P0-6：上次全量重排时间（内存态，进程内有效）。
+  /// 上次全量重排时间（内存态，进程内有效）。
   /// 用于"窗口滚动"门控：resumed 时距上次重排 >24h 才再排一次，
   /// 避免每次回前台都 cancelAll+全量重排（93 天窗口随日期前进）。
   DateTime? _lastFullReschedule;
@@ -59,7 +59,7 @@ class ReminderScheduler {
 
   /// 调度单个任务的提醒（增量重排：先取消旧通知再排新）。
   /// 返回 false 表示有提醒未成功排入系统（通知权限被拒/精确闹钟缺失等），
-  /// 供 UI 向用户提示（P1-4.9）；通知平台调用失败不影响业务，吞掉异常避免
+  /// 供 UI 向用户提示；通知平台调用失败不影响业务，吞掉异常避免
   /// 破坏调用方（如任务详情页刷新）的数据流程。
   Future<bool> scheduleTask(Task task, DateTime referenceDay) async {
     try {
@@ -81,7 +81,7 @@ class ReminderScheduler {
     if (task.rrule.isEmpty) {
       final ps = task.planStart;
       if (ps == null) {
-        // P0-13：仅截止时间的任务（备份兼容路径）——按截止日当天 +
+        // 仅截止时间的任务（备份兼容路径）——按截止日当天 +
         // 提醒时刻排期（_reminderBase 对 ps==null 已按全天式 remindAtMinutes
         // 处理，默认 09:00）。此前调度器直接跳过，提醒静默失效。
         final due = task.dueTime;
@@ -105,7 +105,7 @@ class ReminderScheduler {
         limit: 500,
       );
       for (final inst in instances) {
-        // P0-3.1：实例日期归一化到当天 00:00，与完成记录存储基准一致，
+        // 实例日期归一化到当天 00:00，与完成记录存储基准一致，
         // 避免 RRULE 展开保留的时分（如 09:00）与完成记录（00:00）互相不识别
         final day = DateUtilsEx.normalizeInstanceDate(inst);
         final skipped = await _isSkipped(task, day);
@@ -137,7 +137,7 @@ class ReminderScheduler {
     return (await skipped).isEmpty;
   }
 
-  /// 返回 false 表示该天存在未成功排入系统的提醒（P1-4.9）
+  /// 返回 false 表示该天存在未成功排入系统的提醒
   Future<bool> _scheduleDay(
     Task task,
     DateTime day,
@@ -255,7 +255,7 @@ class ReminderScheduler {
       final today = AppClock.now();
       for (final t in allTasks) {
         final ps = t.planStart;
-        // P0-13：仅截止时间（dueTime）的任务同样纳入全量重排
+        // 仅截止时间（dueTime）的任务同样纳入全量重排
         if (ps == null && t.rrule.isEmpty && t.dueTime == null) continue;
         await scheduleTask(t, today);
       }
@@ -270,7 +270,7 @@ class ReminderScheduler {
     }
   }
 
-  /// P0-6：93 天排期窗口滚动——进程常驻期间窗口不会自动前进，
+  /// 93 天排期窗口滚动——进程常驻期间窗口不会自动前进，
   /// 距上次全量重排超过 24h 时补排一次（resumed 生命周期回调调用；
   /// 用户每天回到前台即完成滚动，避免长期不重启设备重复任务
   /// 提醒在窗口外静默消失）。
@@ -287,14 +287,14 @@ class ReminderScheduler {
   // ---------- 习惯提醒 ----------
 
   /// 调度习惯每日提醒（无 reminderTime 则取消）。
-  /// P1-10：逐日排期（93 天窗口，一次性通知，ID 含日期维度）——
+  /// 逐日排期（93 天窗口，一次性通知，ID 含日期维度）——
   /// 已打卡的日期跳过（此前 scheduleDaily 循环通知无法按天跳过，
   /// 当天已打卡后仍弹"该打卡了"）；打卡/撤销打卡后调用本方法重排。
-  /// 返回 false 表示有提醒未成功排入系统（权限被拒等）（P1-4.9）。
+  /// 返回 false 表示有提醒未成功排入系统（权限被拒等）。
   Future<bool> scheduleHabitReminder(Habit habit) async {
     try {
       final time = habit.reminderTime;
-      // P1-10：无论是否取消提醒，先取消窗口内全部旧通知再重排——
+      // 无论是否取消提醒，先取消窗口内全部旧通知再重排——
       // 打卡后重排时已排的"今天"通知必须取消，否则已打卡仍到点弹
       await cancelHabitReminder(habit.id);
       if (time == null) return true;
@@ -303,7 +303,7 @@ class ReminderScheduler {
       final start = DateTime(now.year, now.month, now.day);
       for (var i = 0; i < 93; i++) {
         final day = start.add(Duration(days: i));
-        // P1-10：已打卡的日期不排提醒（无效打扰）
+        // 已打卡的日期不排提醒（无效打扰）
         if (await _db.isHabitDone(habit.id, day)) continue;
         final when = DateTime(
           day.year,
@@ -320,7 +320,7 @@ class ReminderScheduler {
               body: '该打卡「${habit.name}」了',
               when: when,
               payload: 'h${habit.id}',
-              // P2-51：习惯提醒走独立渠道（声音/开关可与任务提醒分开控制）
+              // 习惯提醒走独立渠道（声音/开关可与任务提醒分开控制）
               channel: 'habit_reminder_v3',
             ) &&
             ok;
@@ -343,9 +343,9 @@ class ReminderScheduler {
     }
   }
 
-  // ---------- 跳过实例（任务页/日历页共用，P0-2/P1-9/P2-40 统一收口） ----------
+  // ---------- 跳过实例（任务页/日历页共用，统一收口） ----------
 
-  /// P0-2：跳过实例时被删除的完成记录暂存（撤销跳过时恢复原完成时间）。
+  /// 跳过实例时被删除的完成记录暂存（撤销跳过时恢复原完成时间）。
   /// 撤销条 3 秒内有效，同限容策略防止内存增长。
   final Map<String, DateTime> _skippedCompletionCache = {};
   static const int _skippedCompletionCacheLimit = 50;
@@ -360,13 +360,13 @@ class ReminderScheduler {
   Future<bool> skipInstance(int taskId, DateTime instanceDate) async {
     final t = await _db.getTask(taskId);
     if (t == null) return false;
-    // P0-3.1：跳过日期归一化到当天 00:00（与规则展开/例外基准一致）
+    // 跳过日期归一化到当天 00:00（与规则展开/例外基准一致）
     final day = DateUtilsEx.normalizeInstanceDate(instanceDate);
     final skipped = DateUtilsEx.parseSkippedDates(t.skippedDates);
     if (!skipped.contains(day.toIso8601String())) {
       skipped.add(day.toIso8601String());
     }
-    // C1-1/P0-2：清理当天完成记录前暂存完成时间——否则"删除本次"后
+    // C1-1/清理当天完成记录前暂存完成时间——否则"删除本次"后
     // 列表/已完成视图/统计仍认为今天已完成；撤销跳过时恢复原记录
     if (await _db.isInstanceCompleted(taskId, day)) {
       final comp = await _db.getInstanceCompletion(taskId, day);
@@ -400,7 +400,7 @@ class ReminderScheduler {
     final day = DateUtilsEx.normalizeInstanceDate(instanceDate);
     final skipped = DateUtilsEx.parseSkippedDates(t.skippedDates);
     skipped.remove(day.toIso8601String());
-    // P0-2：撤销跳过恢复被删除的完成记录（保留原完成时间，统计不漂移）
+    // 撤销跳过恢复被删除的完成记录（保留原完成时间，统计不漂移）
     final cachedAt = _skippedCompletionCache.remove(
       _skipCompletionKey(taskId, day),
     );

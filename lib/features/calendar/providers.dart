@@ -14,7 +14,7 @@ class CalendarState {
   final DateTime selectedDay; // 选中的日期
   final String view; // month / week / day
   final List<CalendarItem> items; // 当前加载的日历条目
-  /// P2-1/丝滑翻页：按天索引的日历条目（key = yyyymmdd 整数），
+  /// 丝滑翻页：按天索引的日历条目（key = yyyymmdd 整数），
   /// 视图层据此 O(1) 取当天数据（此前每页 build 全窗口扫描）
   final Map<int, List<CalendarItem>> byDay;
   final bool loading;
@@ -230,7 +230,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     load();
   }
 
-  /// P2：选中日期 + 切换视图合并为一次 load
+  /// 选中日期 + 切换视图合并为一次 load
   /// （周视图头部点击"跳日视图"此前触发两次 load）
   void setSelectedDayWithView(DateTime day, String view) {
     state = state.copyWith(
@@ -256,7 +256,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     if (t == null) return;
     SoundService.instance.play(SoundKind.drop);
     Haptics.light();
-    // P0-3.2：改期前先取消旧任务全部通知
+    // 改期前先取消旧任务全部通知
     await _scheduler.cancelTask(taskId);
     final ps = t.planStart;
     final pe = t.planEnd;
@@ -265,7 +265,7 @@ class CalendarController extends StateNotifier<CalendarState> {
         : const Duration(hours: 1);
     // C5-1：落点吸附"时长不跨天"约束——拖到 23:00 且时长跨过午夜时
     // 回退起点（此前 1 小时任务拖到 23:00 变跨天、跳进置顶区且无法拖回）
-    // P1-7：与拖拽预览端（虚影/时间胶囊）统一用 clampStartWithinDay
+    // 与拖拽预览端（虚影/时间胶囊）统一用 clampStartWithinDay
     final start = DateUtilsEx.clampStartWithinDay(target, dur);
     await _db.updateTask(
       taskId,
@@ -295,14 +295,14 @@ class CalendarController extends StateNotifier<CalendarState> {
     SoundService.instance.play(SoundKind.drop);
     // 批4-3：拖拽改期强度统一为 light（此前单次 light/系列 medium 不一致）
     Haptics.light();
-    // P0-3.2：系列改期前先取消旧规则全部通知
+    // 系列改期前先取消旧规则全部通知
     await _scheduler.cancelTask(taskId);
     final oldStart = t.planStart;
     final oldEnd = t.planEnd;
     final dur = (oldEnd != null && oldStart != null)
         ? oldEnd.difference(oldStart)
         : const Duration(hours: 1);
-    // C5-1：系列改期同样应用"时长不跨天"约束（P1-7：与预览端统一）
+    // C5-1：系列改期同样应用"时长不跨天"约束（与预览端统一）
     final start = DateUtilsEx.clampStartWithinDay(target, dur);
     await _db.updateTask(
       taskId,
@@ -341,7 +341,7 @@ class CalendarController extends StateNotifier<CalendarState> {
       TasksCompanion(
         planStart: s.oldStart == null ? const Value(null) : Value(s.oldStart),
         planEnd: s.oldEnd == null ? const Value(null) : Value(s.oldEnd),
-        // P1-16：撤销恢复全天状态——此前快照缺 isAllDay，全天系列
+        // 撤销恢复全天状态——此前快照缺 isAllDay，全天系列
         // 拖动改期后撤销变成时段任务
         isAllDay: Value(s.oldIsAllDay),
       ),
@@ -400,7 +400,7 @@ class CalendarController extends StateNotifier<CalendarState> {
 
   /// 跳过重复实例
   Future<void> skipInstance(int taskId, DateTime instanceDate) async {
-    // P0-2/P1-9/P2-40：核心逻辑（暂存完成记录/容错/重排）统一在
+    // 核心逻辑（暂存完成记录/容错/重排）统一在
     // ReminderScheduler（任务页与日历页共用），控制器只负责反馈与刷新
     final ok = await _scheduler.skipInstance(taskId, instanceDate);
     if (!ok) return;

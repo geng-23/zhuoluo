@@ -33,14 +33,14 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
   late Task? _task;
   List<Reminder> _reminders = [];
   List<Task> _subTasks = [];
-  /// 子任务"今天完成"状态（P1-4.3：重复子任务按实例表判断）
+  /// 子任务"今天完成"状态（重复子任务按实例表判断）
   final Map<int, bool> _subTasksDone = {};
   /// 重复任务：今天实例是否已完成
   bool _instanceDoneToday = false;
-  /// P1-B：重复任务今天是否命中规则（非规则日无"今天实例"可完成）
+  /// 重复任务今天是否命中规则（非规则日无"今天实例"可完成）
   bool _todayHas = true;
   bool _loaded = false;
-  /// P1-D：_load 请求序号——丢弃过期请求结果，防止旧数据覆盖新状态
+  /// _load 请求序号——丢弃过期请求结果，防止旧数据覆盖新状态
   /// （用户输入标题/备注时，较慢的旧 _load 会把输入框回滚为旧值）
   int _loadSeq = 0;
 
@@ -123,7 +123,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       if (!mounted || seq != _loadSeq) return;
       _subTasks = await db.getSubTasks(task.id);
       if (!mounted || seq != _loadSeq) return;
-      // P1-4.3：子任务完成状态——重复子任务按今日实例完成记录判断
+      // 子任务完成状态——重复子任务按今日实例完成记录判断
       // （此前一律用 completedAt，重复子任务今天已完成仍显示未完成）
       final now = AppClock.now();
       final today = DateTime(now.year, now.month, now.day);
@@ -180,7 +180,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     if (!_loaded) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    // P2：任务被其他入口删除后显示空态（此前无限转圈）
+    // 任务被其他入口删除后显示空态（此前无限转圈）
     if (t == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('任务详情')),
@@ -221,7 +221,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                   size: 28,
                 ),
                 onPressed: () async {
-                  // P1-B：重复任务今天不是规则日 → 无"今天实例"可完成
+                  // 重复任务今天不是规则日 → 无"今天实例"可完成
                   // （防止写入不存在的实例记录）
                   if (t.rrule.isNotEmpty && !_todayHas) {
                     showAppSnackBar(
@@ -337,7 +337,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                 leading: const Icon(Icons.notifications_outlined),
                 title: Text(_reminderText(r)),
                 // 全天任务：点击可修改提醒时刻
-                // P2：非全天任务点击给提示（此前样式相同但点击无反应）
+                // 非全天任务点击给提示（此前样式相同但点击无反应）
                 onTap: _task!.isAllDay
                     ? () => _editReminderAt(r)
                     : () => showAppSnackBar(
@@ -364,7 +364,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
           ),
           // 重复任务：实例操作（完成/改期/跳过本次）
           if (t.rrule.isNotEmpty) ...[
-            // P1-B：今天非规则日 → 无"今天实例"可完成（防止写入不存在
+            // 今天非规则日 → 无"今天实例"可完成（防止写入不存在
             // 的实例记录；改期/跳过本次仍可用）
             if (_todayHas)
               _ListTileRow(
@@ -595,7 +595,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     return rrule;
   }
 
-  /// P1-D：标题/备注保存防抖——每敲一个字符就触发 updateTaskFields
+  /// 标题/备注保存防抖——每敲一个字符就触发 updateTaskFields
   /// （内部会取消全部通知→写库→全量重载→重新排期）非常浪费
   Timer? _saveDebounce;
 
@@ -666,7 +666,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     );
     if (id != null && id != t.listId) {
       await _notifier.updateTaskFields(t.id, TasksCompanion(listId: Value(id)));
-      // P2：await 后 mounted 检查（弹窗期间退出页面避免 setState-after-dispose）
+      // await 后 mounted 检查（弹窗期间退出页面避免 setState-after-dispose）
       if (mounted) setState(() => _task = t.copyWith(listId: id));
     }
   }
@@ -702,7 +702,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         t.id,
         TasksCompanion(quadrant: Value(q)),
       );
-      // P2：await 后 mounted 检查
+      // await 后 mounted 检查
       if (mounted) setState(() => _task = t.copyWith(quadrant: q));
     }
   }
@@ -817,7 +817,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         t.id,
         TasksCompanion(color: Value(selected)),
       );
-      // P2：await 后 mounted 检查
+      // await 后 mounted 检查
       if (mounted) setState(() => _task = t.copyWith(color: selected));
     }
   }
@@ -847,7 +847,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         planEnd: Value(planEnd),
       ),
     );
-    // P2：重复任务改计划时间 = 平移系列锚点 → 统一收口清理不再命中
+    // 重复任务改计划时间 = 平移系列锚点 → 统一收口清理不再命中
     // 新锚点的旧完成记录/例外（此前平移后旧记录成孤儿参与统计）
     if (t.rrule.isNotEmpty &&
         !DateUtilsEx.sameDay(t.planStart ?? start, start)) {
@@ -882,7 +882,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     FocusScope.of(context).unfocus();
     final now = AppClock.now();
     final initial = t.dueTime ?? now;
-    // P1-7：initialDate 钳制到 [firstDate, lastDate]
+    // initialDate 钳制到 [firstDate, lastDate]
     final first = DateTime(now.year - 1);
     final last = DateTime(now.year + 5);
     final clamped = initial.isBefore(first)
@@ -1100,7 +1100,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       remindMinutesBefore,
       remindAtMinutes: remindAt,
     );
-    // P0-13/P1-23：无 planStart 的任务（仅截止时间的备份兼容路径）
+    // 无 planStart 的任务（仅截止时间的备份兼容路径）
     // 调度器永不排期——此前 UI 放行造成"已设置但永不触发"的静默失效
     if (triggerAt == null) {
       showAppSnackBar(
@@ -1158,7 +1158,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     await (db.update(db.reminders)..where((x) => x.id.equals(r.id))).write(
       RemindersCompanion(remindAtMinutes: Value(picked)),
     );
-    // P1-A：提醒时刻更新同样触发数据版本（遵守统一写操作约定）
+    // 提醒时刻更新同样触发数据版本（遵守统一写操作约定）
     ref.read(dataVersionProvider.notifier).state++;
     final t = await db.getTask(_task!.id);
     if (t != null) {
@@ -1260,7 +1260,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         ),
       );
       await db.updateTaskHasReminder(_task!.id, true);
-      // P1-4.9：提醒未成功排入系统（通知权限被拒等）时明确提示
+      // 提醒未成功排入系统（通知权限被拒等）时明确提示
       final ok = await _notifier.updateTaskFields(
         _task!.id,
         const TasksCompanion(hasReminder: Value(true)),
@@ -1331,7 +1331,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         final newEnd = t.planEnd == null
             ? newStart.add(const Duration(hours: 1))
             : newStart.add(t.planEnd!.difference(base));
-        // P0-3.8：更换/新建规则前统一清理不再匹配新系列的旧完成记录与例外
+        // 更换/新建规则前统一清理不再匹配新系列的旧完成记录与例外
         if (rrule != t.rrule) {
           await db.applyRecurringChange(
             t.id,
@@ -1394,7 +1394,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
           ),
         );
         if (ok != true || !mounted) return;
-        // P0-3.8：清除重复规则 → 删除全部实例完成记录与例外（语义失效）
+        // 清除重复规则 → 删除全部实例完成记录与例外（语义失效）
         await db.applyRecurringChange(
           t.id,
           oldRrule: t.rrule,
@@ -1436,7 +1436,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       pickedTime.minute,
     );
     final notifier = ref.read(tasksControllerProvider.notifier);
-    // P0-3.3：记录例外 ID，撤销时删除该例外（而非新增反向例外）
+    // 记录例外 ID，撤销时删除该例外（而非新增反向例外）
     final exId = await notifier.editException(t.id, instDay, toDate);
     _load();
     if (mounted) {
@@ -1488,7 +1488,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
   }
 
   Future<void> _deleteSubTask(Task s) async {
-    // P1-D：与其余删除路径一致——带撤销条（此前直接删除无确认无撤销，
+    // 与其余删除路径一致——带撤销条（此前直接删除无确认无撤销，
     // 误触即永久丢失）
     await _notifier.deleteTaskWithUndo(s.id);
     if (mounted) {
@@ -1535,7 +1535,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       );
       if (choice == 'skip') {
         await _notifier.skipInstance(t.id, instDay);
-        // P2：删除本次（跳过）后刷新本地快照（此前界面停留"今天待完成"）
+        // 删除本次（跳过）后刷新本地快照（此前界面停留"今天待完成"）
         _load();
         if (mounted) {
           showAppSnackBar(
@@ -1638,7 +1638,7 @@ class _PlanTimeSheetState extends State<_PlanTimeSheet> {
     String? help,
   }) async {
     final now = AppClock.now();
-    // P1-7：initialDate 钳制到 [firstDate, lastDate]（长期任务的一年
+    // initialDate 钳制到 [firstDate, lastDate]（长期任务的一年
     // 前计划时间/结束时间会超界触发断言崩溃）
     final first = DateTime(now.year - 1);
     final last = DateTime(now.year + 5);
@@ -1880,7 +1880,7 @@ class _PlanTimeSheetState extends State<_PlanTimeSheet> {
       Navigator.pop(context, (start, end, false));
       return;
     }
-    // P2：选了结束日期但未选结束时间 → 提示（此前结束日期被静默丢弃）
+    // 选了结束日期但未选结束时间 → 提示（此前结束日期被静默丢弃）
     if (_endDate != null) {
       showAppSnackBar(
         context,
@@ -2040,7 +2040,7 @@ class _RepeatRuleSheetState extends State<RepeatRuleSheet> {
               InkWell(
                 onTap: () async {
                   final now = AppClock.now();
-                  // P1-7：长期系列的开始日期可早于一年前，钳制防断言崩溃
+                  // 长期系列的开始日期可早于一年前，钳制防断言崩溃
                   final first = DateTime(now.year - 1);
                   final last = DateTime(now.year + 5);
                   final effectiveStart = _effectiveStart.isBefore(first)
@@ -2195,7 +2195,7 @@ class _RepeatRuleSheetState extends State<RepeatRuleSheet> {
                     onSelected: (v) async {
                       if (!v) return;
                       final now = AppClock.now();
-                      // P1-7：过期 UNTIL 早于 firstDate 会触发断言崩溃，钳制到今天
+                      // 过期 UNTIL 早于 firstDate 会触发断言崩溃，钳制到今天
                       final until = _until;
                       final last = DateTime(now.year + 5);
                       final clamped = until == null || until.isBefore(now)

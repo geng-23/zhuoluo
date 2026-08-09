@@ -2,6 +2,7 @@
 
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../core/utils/date_utils.dart' as du;
 import '../services/rrule_expander.dart';
@@ -154,8 +155,7 @@ class AppDatabase extends _$AppDatabase {
         try {
           await _dedupeCompletionsAndIndex();
         } catch (e) {
-          // ignore: avoid_print
-          print('v3 启动补索引跳过（task_completions 表缺失）: $e');
+          debugPrint('v3 启动补索引跳过（task_completions 表缺失）: $e');
         }
       }
       // v5：旧库补习惯打卡唯一索引（新库由表定义 uniqueKeys 自动生成）；
@@ -164,8 +164,7 @@ class AppDatabase extends _$AppDatabase {
         try {
           await _dedupeHabitRecordsAndIndex();
         } catch (e) {
-          // ignore: avoid_print
-          print('v5 启动补索引跳过（habit_records 表缺失）: $e');
+          debugPrint('v5 启动补索引跳过（habit_records 表缺失）: $e');
         }
       }
     },
@@ -176,8 +175,7 @@ class AppDatabase extends _$AppDatabase {
         try {
           await _dedupeHabitRecordsAndIndex();
         } catch (e) {
-          // ignore: avoid_print
-          print('v5 迁移跳过（habit_records 表缺失）: $e');
+          debugPrint('v5 迁移跳过（habit_records 表缺失）: $e');
         }
       }
       if (from < 4) {
@@ -190,8 +188,7 @@ class AppDatabase extends _$AppDatabase {
         try {
           await _dedupeCompletionsAndIndex();
         } catch (e) {
-          // ignore: avoid_print
-          print('v3 迁移跳过（task_completions 表缺失）: $e');
+          debugPrint('v3 迁移跳过（task_completions 表缺失）: $e');
         }
       }
       if (from < 2) {
@@ -366,7 +363,7 @@ class AppDatabase extends _$AppDatabase {
     await (delete(lists)..where((l) => l.id.equals(listId))).go();
   }
 
-  /// 撤销删除清单：按原 ID 恢复清单行（连带删除撤销用，）
+  /// 撤销删除清单：按原 ID 恢复清单行（连带删除撤销用）
   Future<void> restoreList(TaskList l) => into(lists).insertOnConflictUpdate(
     ListsCompanion(
       id: Value(l.id),
@@ -523,7 +520,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   /// 完成记录集合的 key：与 getCalendarItems 的 doneSet 同格式。
-  /// ：DB 读回值为系统时区解释，取字段前必须按应用时区重新解释，
+  /// DB 读回值为系统时区解释，取字段前必须按应用时区重新解释，
   /// 否则与写入侧（应用时区 00:00 基准）key 不一致，完成状态错位。
   static String _doneKey(int taskId, DateTime d) {
     final a = AppClock.asApp(d);

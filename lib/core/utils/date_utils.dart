@@ -81,13 +81,6 @@ class DateUtilsEx {
     return DateTime(a.year, a.month + 1, 0).day;
   }
 
-  /// 过期判断（有计划日且早于今天且未完成）
-  static bool isOverdue(DateTime? scheduledDate, {DateTime? now}) {
-    if (scheduledDate == null) return false;
-    final today = day(now ?? AppClock.now());
-    return day(scheduledDate).isBefore(today);
-  }
-
   /// 重复任务实例日期统一归一化：当天 00:00（按应用时区解释）。
   /// 完成记录/提醒排期/跳过/例外必须共用同一基准，否则 RRULE 展开保留的时分
   /// （如 09:00）与完成记录（00:00）会互相判定为不同实例。

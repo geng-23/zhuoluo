@@ -307,7 +307,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     );
     final updated = await _db.getTask(taskId);
     if (updated != null) {
-      await _scheduler.scheduleTask(updated, AppClock.now());
+      await _scheduler.scheduleTask(updated);
     }
     _bump();
     load();
@@ -387,7 +387,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     );
     final updated = await _db.getTask(taskId);
     if (updated != null) {
-      await _scheduler.scheduleTask(updated, AppClock.now());
+      await _scheduler.scheduleTask(updated);
     }
     _bump();
     load();
@@ -445,7 +445,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     }
     final updated = await _db.getTask(s.taskId);
     if (updated != null) {
-      await _scheduler.scheduleTask(updated, AppClock.now());
+      await _scheduler.scheduleTask(updated);
     }
     _bump();
     load();
@@ -467,7 +467,7 @@ class CalendarController extends StateNotifier<CalendarState> {
         // 恢复实例后重排：该实例提醒重新排上
         final fresh = await _db.getTask(item.task.id);
         if (fresh != null) {
-          await _scheduler.scheduleTask(fresh, AppClock.now());
+          await _scheduler.scheduleTask(fresh);
         }
       } else {
         await _db.reopenTask(item.task.id);
@@ -482,7 +482,7 @@ class CalendarController extends StateNotifier<CalendarState> {
         // 完成实例后重排：取消该实例已排提醒，其余未完成实例保留
         final fresh = await _db.getTask(item.task.id);
         if (fresh != null) {
-          await _scheduler.scheduleTask(fresh, AppClock.now());
+          await _scheduler.scheduleTask(fresh);
         }
       } else {
         await _db.completeTask(item.task.id);

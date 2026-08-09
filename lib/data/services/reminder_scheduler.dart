@@ -67,16 +67,16 @@ class ReminderScheduler {
   /// 返回 false 表示有提醒未成功排入系统（通知权限被拒/精确闹钟缺失等），
   /// 供 UI 向用户提示；通知平台调用失败不影响业务，吞掉异常避免
   /// 破坏调用方（如任务详情页刷新）的数据流程。
-  Future<bool> scheduleTask(Task task, DateTime referenceDay) async {
+  Future<bool> scheduleTask(Task task) async {
     try {
-      return await _scheduleTaskInner(task, referenceDay);
+      return await _scheduleTaskInner(task);
     } catch (e) {
       debugPrint('提醒调度失败 taskId=${task.id}: $e');
       return false;
     }
   }
 
-  Future<bool> _scheduleTaskInner(Task task, DateTime referenceDay) async {
+  Future<bool> _scheduleTaskInner(Task task) async {
     // 取消该任务的全部旧通知
     await cancelTask(task.id);
     if (task.completedAt != null) return true;
@@ -268,12 +268,11 @@ class ReminderScheduler {
     try {
       await NotificationService.instance.cancelAll();
       final allTasks = await _db.getAllUncompleted();
-      final today = AppClock.now();
       for (final t in allTasks) {
         final ps = t.planStart;
         // 仅截止时间（dueTime）的任务同样纳入全量重排
         if (ps == null && t.rrule.isEmpty && t.dueTime == null) continue;
-        await scheduleTask(t, today);
+        await scheduleTask(t);
       }
       // 习惯提醒：每日固定时刻重复
       final habits = await _db.getHabits();
@@ -364,7 +363,7 @@ class ReminderScheduler {
   // ---------- 跳过实例（任务页/日历页共用，统一收口） ----------
 
   /// 跳过实例时被删除的完成记录暂存（撤销跳过时恢复原完成时间）。
-  /// 撤销条 3 秒内有效，同限容策略防止内存增长。
+  /// 缓存最近 50 条防内存增长；暂存仅内存级，App 重启后失效。
   final Map<String, DateTime> _skippedCompletionCache = {};
   static const int _skippedCompletionCacheLimit = 50;
 
@@ -405,7 +404,7 @@ class ReminderScheduler {
     // 重新取任务：旧快照的 skippedDates 不含本次跳过，会让重排重新排上该实例
     final fresh = await _db.getTask(taskId);
     if (fresh != null) {
-      await scheduleTask(fresh, AppClock.now());
+      await scheduleTask(fresh);
     }
     return true;
   }
@@ -432,7 +431,7 @@ class ReminderScheduler {
     // 重新取任务：旧快照仍含被移除的跳过日期，会让重排漏排该实例
     final fresh = await _db.getTask(taskId);
     if (fresh != null) {
-      await scheduleTask(fresh, AppClock.now());
+      await scheduleTask(fresh);
     }
     return true;
   }

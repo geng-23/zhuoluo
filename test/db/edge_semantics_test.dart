@@ -339,7 +339,7 @@ void main() {
       // 无提醒：true 且无调度调用
       final noReminder = await insertTask(title: '无提醒任务');
       final t1 = (await db.getTask(noReminder))!;
-      expect(await scheduler.scheduleTask(t1, now), isTrue);
+      expect(await scheduler.scheduleTask(t1), isTrue);
       expect(fake.scheduled, isEmpty,
           reason: '无提醒任务不应产生任何调度');
 
@@ -359,13 +359,13 @@ void main() {
       );
       fake.failSchedules = true;
       final t2 = (await db.getTask(withReminder))!;
-      expect(await scheduler.scheduleTask(t2, now), isFalse,
+      expect(await scheduler.scheduleTask(t2), isFalse,
           reason: '排期失败应返回 false 供 UI 提示');
 
       // 替身恢复成功：应真实调度一条通知（ID 含实例维度 + 提前 10 分钟）
       fake.failSchedules = false;
       fake.clear();
-      expect(await scheduler.scheduleTask(t2, now), isTrue);
+      expect(await scheduler.scheduleTask(t2), isTrue);
       expect(fake.scheduled.length, 1,
           reason: '一条提醒应产生一条通知');
       final s = fake.scheduled.single;

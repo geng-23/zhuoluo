@@ -435,7 +435,7 @@ class TasksController extends StateNotifier<TasksState> {
     await _reloadTasks();
     final t = await _db.getTask(id);
     if (t != null && (t.planStart != null || t.rrule.isNotEmpty)) {
-      await _scheduler.scheduleTask(t, AppClock.now());
+      await _scheduler.scheduleTask(t);
     }
     _bump();
     return id;
@@ -522,7 +522,7 @@ class TasksController extends StateNotifier<TasksState> {
     final t = await _db.getTask(id);
     var ok = true;
     if (t != null) {
-      ok = await _scheduler.scheduleTask(t, AppClock.now());
+      ok = await _scheduler.scheduleTask(t);
     }
     _bump();
     return ok;
@@ -552,7 +552,7 @@ class TasksController extends StateNotifier<TasksState> {
       // 完成/撤销实例后重排：取消该实例已排提醒，其余未完成实例保留
       final fresh = await _db.getTask(id);
       if (fresh != null) {
-        await _scheduler.scheduleTask(fresh, AppClock.now());
+        await _scheduler.scheduleTask(fresh);
       }
       await _reloadTasks();
       // C2：子任务全完成时自动完成父任务（含重复子任务的今日实例对齐）
@@ -566,7 +566,7 @@ class TasksController extends StateNotifier<TasksState> {
           // 内部先取消全部旧通知再判断 completedAt，非重复父任务被联动
           // 完成后旧提醒随之取消（此前仅重复父任务重排，非重复父任务
           // 已完成仍弹提醒）
-          await _scheduler.scheduleTask(parent, AppClock.now());
+          await _scheduler.scheduleTask(parent);
         }
         await _reloadTasks();
       }
@@ -615,14 +615,14 @@ class TasksController extends StateNotifier<TasksState> {
       final parent = await _db.getTask(parentId);
       if (parent != null) {
         // 父任务仍完成（其他子任务未完成）时 scheduleTask 内部会取消提醒
-        await _scheduler.scheduleTask(parent, AppClock.now());
+        await _scheduler.scheduleTask(parent);
       }
       await _reloadTasks();
     }
     // 重新取任务：旧快照 completedAt 非空会让重排直接跳过
     final fresh = await _db.getTask(id);
     if (fresh != null) {
-      await _scheduler.scheduleTask(fresh, AppClock.now());
+      await _scheduler.scheduleTask(fresh);
     }
     _bump();
   }
@@ -773,7 +773,7 @@ class TasksController extends StateNotifier<TasksState> {
     for (final tid in [snap.task.id, ...snap.subTasks.map((s) => s.id)]) {
       final restored = await _db.getTask(tid);
       if (restored != null) {
-        await _scheduler.scheduleTask(restored, AppClock.now());
+        await _scheduler.scheduleTask(restored);
       }
     }
     _bump();
@@ -928,7 +928,7 @@ class TasksController extends StateNotifier<TasksState> {
         // 更新既有例外同样需重排：新日期（及原日期取消）的提醒
         final fresh = await _db.getTask(id);
         if (fresh != null) {
-          await _scheduler.scheduleTask(fresh, AppClock.now());
+          await _scheduler.scheduleTask(fresh);
         }
         _bump();
         return ex.id;
@@ -946,7 +946,7 @@ class TasksController extends StateNotifier<TasksState> {
     //（此前留在原日期成为孤儿，统计/已完成视图出现永不匹配的脏数据）
     await _migrateCompletionOnReschedule(id, fromDate, toDate);
     await _reloadTasks();
-    await _scheduler.scheduleTask(t, AppClock.now());
+    await _scheduler.scheduleTask(t);
     _bump();
     return exId;
   }
@@ -988,7 +988,7 @@ class TasksController extends StateNotifier<TasksState> {
     await _reloadTasks();
     final t = await _db.getTask(id);
     if (t != null) {
-      await _scheduler.scheduleTask(t, AppClock.now());
+      await _scheduler.scheduleTask(t);
     }
     _bump();
   }

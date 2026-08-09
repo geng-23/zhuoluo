@@ -9,7 +9,7 @@ import 'package:zhuoluo/features/profile/profile_page.dart';
 import 'package:zhuoluo/features/profile/quadrant_page.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
 import 'package:zhuoluo/features/task/task_page.dart';
-/// 四栏主壳（任务 / 日历 / 统计 / 我的）
+/// 四栏主壳（任务 / 日历 / 四象限 / 我的）
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 

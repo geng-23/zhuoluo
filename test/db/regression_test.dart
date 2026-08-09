@@ -93,12 +93,15 @@ void main() {
   group('番茄统计窗口', () {
     test('to=月末 00:00 时当天完成的番茄记录计入', () async {
       final id = await insertTask(title: '番茄任务');
-      // 月末 23:59 完成的记录
+      // 月末 23:59 完成的记录（用 Raw 显式指定 completedAt，真正触达月末边界）
       final monthEnd = DateTime(now.year, now.month + 1, 0, 23, 59);
-      await db.insertPomodoro(
-        id,
-        25,
-        monthEnd.subtract(const Duration(minutes: 25)),
+      await db.insertPomodoroRaw(
+        PomodoroRecordsCompanion(
+          taskId: Value(id),
+          durationMinutes: Value(25),
+          startedAt: Value(monthEnd.subtract(const Duration(minutes: 25))),
+          completedAt: Value(monthEnd),
+        ),
       );
       final records = await db.getPomodoros(
         from: DateTime(now.year, now.month, 1),

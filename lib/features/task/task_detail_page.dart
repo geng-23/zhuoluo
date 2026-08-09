@@ -1168,7 +1168,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     if (t != null) {
       await ref
           .read(reminderSchedulerProvider)
-          .scheduleTask(t, AppClock.now());
+          .scheduleTask(t);
     }
     _load();
   }

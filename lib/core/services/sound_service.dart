@@ -56,8 +56,6 @@ class SoundService {
     }
   }
 
-  bool _disposed = false;
-
   static String _asset(SoundKind kind) => switch (kind) {
     SoundKind.add => 'sounds/add.wav',
     SoundKind.complete => 'sounds/complete.wav',
@@ -69,7 +67,7 @@ class SoundService {
   };
 
   Future<void> play(SoundKind kind) async {
-    if (!enabled || !soundsEnabled || _disposed) return;
+    if (!enabled || !soundsEnabled) return;
     final pool = _pool.whereType<AudioPlayer>().toList();
     if (pool.isEmpty) return;
     // 轮换取一个空闲播放器；不前置 stop（避免截断上一音）
@@ -82,13 +80,6 @@ class SoundService {
       );
     } catch (_) {
       // 无声播放环境（测试/模拟器无声卡）静默
-    }
-  }
-
-  void dispose() {
-    _disposed = true;
-    for (final p in _pool) {
-      unawaited(p?.dispose());
     }
   }
 }

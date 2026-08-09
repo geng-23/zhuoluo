@@ -913,7 +913,7 @@ void main() {
       final parent = (await db.getTask(parentId))!;
       final ok = await container
           .read(reminderSchedulerProvider)
-          .scheduleTask(parent, DateTime.now());
+          .scheduleTask(parent);
       expect(ok, isTrue, reason: '已完成任务调度 = 取消旧提醒，视为成功');
     });
   });

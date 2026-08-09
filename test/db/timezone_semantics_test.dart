@@ -359,7 +359,7 @@ void main() {
     );
     final t = (await db.getTask(id))!;
     final scheduler = ReminderScheduler(db);
-    final ok = await scheduler.scheduleTask(t, AppClock.now());
+    final ok = await scheduler.scheduleTask(t);
     expect(ok, isTrue, reason: '调度应成功');
     expect(fake.scheduled, isNotEmpty,
         reason: '93 天窗口内应有实例通知');

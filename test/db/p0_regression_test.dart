@@ -12,7 +12,7 @@ import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 
-import 'support/fake_notification_scheduler.dart';
+import '../support/fake_notification_scheduler.dart';
 
 /// 回归测试：实例归一化 / 撤销 / 删除树 / 备份原子性 / 系列收口 / 子任务联动
 ///

@@ -19,7 +19,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         // 通知权限统一由 Dart 侧（main.dart 启动时）请求，
-        // 此处不再重复请求（P1-C：双入口弹窗时机冲突）
+        // 此处不再重复请求（双入口弹窗时机冲突）
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "zhuoluo/notifications",

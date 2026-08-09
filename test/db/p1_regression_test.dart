@@ -13,7 +13,7 @@ import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/features/profile/profile_page.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 
-import 'support/fake_notification_scheduler.dart';
+import '../support/fake_notification_scheduler.dart';
 
 /// 回归测试：统计口径 / 截止时间 / 清单与置顶 / 重复任务 / 解析边界 / 提醒调度 / 番茄
 void main() {

@@ -13,7 +13,7 @@ import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/features/calendar/providers.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 
-import 'support/fake_notification_scheduler.dart';
+import '../support/fake_notification_scheduler.dart';
 
 /// 修复回归测试：
 /// - 日历侧跳过/撤销跳过与任务页统一（完成记录暂存恢复 + JSON 容错）

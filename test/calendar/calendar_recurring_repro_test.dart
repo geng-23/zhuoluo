@@ -10,7 +10,7 @@ import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/calendar/providers.dart';
 import 'package:zhuoluo/main.dart';
 
-import 'support/fake_notification_scheduler.dart';
+import '../support/fake_notification_scheduler.dart';
 
 /// 复现：重复任务在日历（周/月窗口）中是否可见
 void main() {

@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show Value;
+﻿import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +9,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/main.dart';
 
-import 'support/fake_notification_scheduler.dart';
+import '../support/fake_notification_scheduler.dart';
 
 /// App 冒烟测试：验证启动、四 Tab、任务创建全流程
 void main() {

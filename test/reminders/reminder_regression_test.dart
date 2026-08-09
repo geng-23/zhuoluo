@@ -5,7 +5,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 
-import 'support/fake_notification_scheduler.dart';
+import '../support/fake_notification_scheduler.dart';
 
 /// 修复回归测试：
 /// - #1 通知 ID 含实例日期维度：同 (task, reminder) 不同实例互不覆盖

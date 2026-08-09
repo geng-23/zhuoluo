@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
-    <!-- P1-C：去掉 USE_EXACT_ALARM（系统自动授予，使精确→降级链永不触发）；
+    <!-- 去掉 USE_EXACT_ALARM（系统自动授予，使精确→降级链永不触发）；
          备份导出到公共下载目录需要写权限（仅 Android 9 及以下） -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"/>

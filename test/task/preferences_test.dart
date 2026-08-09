@@ -9,7 +9,7 @@ import 'package:zhuoluo/data/services/chinese_date_parser.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 
-import 'support/fake_notification_scheduler.dart';
+import '../support/fake_notification_scheduler.dart';
 
 /// 偏好设置组（2026-08-08）：默认清单 / 默认提醒 / 全天提醒时刻 / 应用时区
 void main() {

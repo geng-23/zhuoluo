@@ -11,7 +11,7 @@ import 'package:zhuoluo/features/calendar/providers.dart';
 import 'package:zhuoluo/features/calendar/quick_add_sheets.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 
-import 'support/fake_notification_scheduler.dart';
+import '../support/fake_notification_scheduler.dart';
 
 /// 反直觉修复回归测试（23 项修复中的关键行为）
 void main() {

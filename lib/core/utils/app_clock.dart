@@ -42,7 +42,7 @@ class AppClock {
     return tz.TZDateTime.now(loc);
   }
 
-  /// 应用时区下的"墙上时间"构造（P1-2 统一时间模型）。
+  /// 应用时区下的"墙上时间"构造（统一时间模型）。
   /// 未设置应用时区时退化为普通 DateTime(y,m,d,h,min)，行为完全不变；
   /// 设置了应用时区时返回该时区的 TZDateTime（绝对时刻 = 应用时区墙上时间）。
   /// 业务写入侧构造任务时间/提醒基准/日历窗口必须走本方法，
@@ -59,7 +59,7 @@ class AppClock {
     return tz.TZDateTime(loc, y, m, d, h, min);
   }
 
-  /// 把任意 DateTime 按应用时区重新解释（P1-2 统一时间模型）。
+  /// 把任意 DateTime 按应用时区重新解释（统一时间模型）。
   /// 未设置应用时区时原样返回；设置了应用时区时返回 TZDateTime——
   /// 绝对时刻不变，仅字段（year/month/day/hour 等）改按应用时区解释。
   /// 业务读取侧从数据库取出的时间必须先经本方法再取字段，

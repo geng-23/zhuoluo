@@ -108,6 +108,15 @@ class _WeekViewState extends ConsumerState<WeekView> {
   /// 落点 y 换算基准：当前页时间轴主体顶部全局 y（各页 post-frame
   /// 上报 + 滚动修正，当前可见页最后写入）
   final ValueNotifier<double> dragAxisTopY = ValueNotifier<double>(0);
+  /// 当前页时间轴 scrollController（各页 post-frame 上报——翻页后
+  /// Draggable 被 evict 时全局 route 据此接管垂直自动滚动）
+  final ValueNotifier<ScrollController?> dragScrollCtrl =
+      ValueNotifier<ScrollController?>(null);
+  /// 当前页时间轴视口顶部全局 y + 视口高（垂直自动滚动触发区换算用）
+  final ValueNotifier<double> dragViewportTopY = ValueNotifier<double>(0);
+  final ValueNotifier<double> dragViewportH = ValueNotifier<double>(0);
+  /// 全局垂直自动滚动 Timer（16ms 步进 jumpTo ±8px；松手/取消停止）
+  Timer? _autoScrollTimer;
 
   /// 共享垂直滚动位置（跨周翻页时新周继承当前滚动位置，避免跳回顶部）
   /// 优先使用外部传入的共享 notifier（周↔日切换连续）
@@ -189,6 +198,10 @@ class _WeekViewState extends ConsumerState<WeekView> {
     dragGhostInfo.dispose();
     dragDropped.dispose();
     dragAxisTopY.dispose();
+    dragScrollCtrl.dispose();
+    dragViewportTopY.dispose();
+    dragViewportH.dispose();
+    _stopAutoScroll();
     _edgeTurnCtrl.timer?.cancel();
     // 仅释放自建的滚动 notifier（外部传入的由持有者管理）
     _ownScroll?.dispose();
@@ -244,8 +257,10 @@ class _WeekViewState extends ConsumerState<WeekView> {
   void _onDragPointerEvent(PointerEvent e) {
     if (e is PointerMoveEvent) {
       // 共享拖拽位置（虚影/胶囊跟随）+ 边缘翻页检测（反向/连续均可靠）
+      // + 垂直自动滚动（翻页后 Draggable evict 仍可靠）
       dragGlobalPos.value = e.position;
       _maybeEdgeTurn(e.position.dx);
+      _checkVerticalAutoScrollGlobal(e.position.dy);
     } else if (e is PointerUpEvent || e is PointerCancelEvent) {
       _unregisterDragRoute();
       if (e is PointerUpEvent) {
@@ -268,15 +283,73 @@ class _WeekViewState extends ConsumerState<WeekView> {
     _edgeTurnCtrl.timer?.cancel();
     _edgeTurnCtrl.timer = null;
     _edgeTurnCtrl.dir = 0;
+    _edgeTurnCtrl.armed = false;
+    _stopAutoScroll();
+  }
+
+  /// 垂直自动滚动（全局 route 驱动）：手指接近时间轴视口顶部/底部
+  /// 触发自动滚动。翻页后 Draggable 被 evict 时 onDragUpdate 失效
+  ///（列版 _checkVerticalAutoScroll 停止工作）——本层用各页上报的
+  /// 视口信息接管，翻页后上下边缘滚动依然可用。
+  void _checkVerticalAutoScrollGlobal(double globalDy) {
+    final scroll = dragScrollCtrl.value;
+    if (scroll == null || !scroll.hasClients) return;
+    final viewportTop = dragViewportTopY.value;
+    final viewportH = dragViewportH.value;
+    final fingerY = globalDy - viewportTop;
+    // 上滑触发区 30px；下滑触发区 90px（与列版一致，底部靠近导航栏放宽）
+    if (fingerY < 30) {
+      _startAutoScroll(scroll, -1);
+    } else if (fingerY > viewportH - 90) {
+      _startAutoScroll(scroll, 1);
+    } else {
+      _stopAutoScroll();
+    }
+  }
+
+  void _startAutoScroll(ScrollController scroll, int dir) {
+    if (_autoScrollTimer != null) return;
+    _autoScrollTimer = Timer.periodic(const Duration(milliseconds: 16), (t) {
+      if (!scroll.hasClients) {
+        _stopAutoScroll();
+        return;
+      }
+      final max = scroll.position.maxScrollExtent;
+      final target = (scroll.offset + dir * 8).clamp(0.0, max);
+      if (target == scroll.offset) {
+        _stopAutoScroll();
+        return;
+      }
+      scroll.jumpTo(target);
+    });
+  }
+
+  void _stopAutoScroll() {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = null;
   }
 
   /// 边缘翻周/日：进入边缘区停留 300ms 触发首次翻页；
-  /// 翻页后若指针仍停边缘 → 每 800ms 自动续翻；离开边缘区即停止。
+  /// 翻页后若指针仍停边缘（保持区：右缘链 x>65%、左缘链 x<35%）→ 每
+  /// 500ms 自动续翻（连续拖到多个周以后），触摸点微漂移不断链；
+  /// 移出保持区（拖回中间定位）或松手即停止。
   /// （与 _DayColumn 内同名方法逻辑一致，共享 edgeTurnCtrl——本层为
   /// 全局 route 驱动，列版为 Draggable onDragUpdate 驱动，双源幂等）
   void _maybeEdgeTurn(double globalX) {
     _edgeTurnCtrl.lastGlobalX = globalX;
     final w = MediaQuery.sizeOf(context).width;
+    // 保持区滞回：链已启动时，右缘链 x>65%、左缘链 x<35% 持续翻页
+    //（触摸点微漂移不出链）；移出保持区停链并继续按触发区判断（反向）
+    if (_edgeTurnCtrl.armed) {
+      final keep = _edgeTurnCtrl.dir > 0
+          ? globalX > w * 0.65
+          : globalX < w * 0.35;
+      if (keep) return;
+      _edgeTurnCtrl.timer?.cancel();
+      _edgeTurnCtrl.timer = null;
+      _edgeTurnCtrl.dir = 0;
+      _edgeTurnCtrl.armed = false;
+    }
     if (globalX > w * 0.85) {
       _armEdgeTimer(1, w);
     } else if (globalX < w * 0.06) {
@@ -285,6 +358,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
       _edgeTurnCtrl.timer?.cancel();
       _edgeTurnCtrl.timer = null;
       _edgeTurnCtrl.dir = 0;
+      _edgeTurnCtrl.armed = false;
     }
   }
 
@@ -294,15 +368,19 @@ class _WeekViewState extends ConsumerState<WeekView> {
     _edgeTurnCtrl.dir = dir;
     _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 300), () {
       _edgeTurnCtrl.timer = null;
+      _edgeTurnCtrl.armed = true;
       _edgeTurn(dir.toDouble());
       _armContinuation(dir, w);
     });
   }
 
   void _armContinuation(int dir, double w) {
-    if (_edgeTurnCtrl.lastGlobalX > w * 0.85 ||
-        _edgeTurnCtrl.lastGlobalX < w * 0.06) {
-      _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 800), () {
+    // 保持区续链（按方向：右缘链看 x>65%、左缘链看 x<35%）
+    final keep = dir > 0
+        ? _edgeTurnCtrl.lastGlobalX > w * 0.65
+        : _edgeTurnCtrl.lastGlobalX < w * 0.35;
+    if (keep) {
+      _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 500), () {
         _edgeTurnCtrl.timer = null;
         _edgeTurn(dir.toDouble());
         _armContinuation(dir, w);
@@ -440,6 +518,9 @@ class _WeekViewState extends ConsumerState<WeekView> {
             dragGhostInfo: dragGhostInfo,
             dragDropped: dragDropped,
             dragAxisTopY: dragAxisTopY,
+            dragScrollCtrl: dragScrollCtrl,
+            dragViewportTopY: dragViewportTopY,
+            dragViewportH: dragViewportH,
             edgeTurnCtrl: _edgeTurnCtrl,
             onDragStartTracking: (taskId, pointer) =>
                 _registerDragRoute(taskId, pointer),
@@ -494,6 +575,15 @@ class _DayViewState extends ConsumerState<DayView> {
   final ValueNotifier<bool> dragDropped = ValueNotifier<bool>(false);
   /// 落点 y 换算基准：当前页时间轴主体顶部全局 y（各页 post-frame 上报）
   final ValueNotifier<double> dragAxisTopY = ValueNotifier<double>(0);
+  /// 当前页时间轴 scrollController（各页 post-frame 上报——翻页后
+  /// Draggable 被 evict 时全局 route 据此接管垂直自动滚动，同 WeekView）
+  final ValueNotifier<ScrollController?> dragScrollCtrl =
+      ValueNotifier<ScrollController?>(null);
+  /// 当前页时间轴视口顶部全局 y + 视口高（垂直自动滚动触发区换算用）
+  final ValueNotifier<double> dragViewportTopY = ValueNotifier<double>(0);
+  final ValueNotifier<double> dragViewportH = ValueNotifier<double>(0);
+  /// 全局垂直自动滚动 Timer（16ms 步进 jumpTo ±8px；松手/取消停止）
+  Timer? _autoScrollTimer;
 
   /// 共享垂直滚动位置（跨日翻页时新日继承当前滚动位置）
   /// 优先使用外部传入的共享 notifier（周↔日切换连续）
@@ -539,6 +629,10 @@ class _DayViewState extends ConsumerState<DayView> {
     dragGhostInfo.dispose();
     dragDropped.dispose();
     dragAxisTopY.dispose();
+    dragScrollCtrl.dispose();
+    dragViewportTopY.dispose();
+    dragViewportH.dispose();
+    _stopAutoScroll();
     _edgeTurnCtrl.timer?.cancel();
     // 仅释放自建的滚动 notifier（外部传入的由持有者管理）
     _ownScroll?.dispose();
@@ -595,6 +689,7 @@ class _DayViewState extends ConsumerState<DayView> {
     if (e is PointerMoveEvent) {
       dragGlobalPos.value = e.position;
       _maybeEdgeTurn(e.position.dx);
+      _checkVerticalAutoScrollGlobal(e.position.dy);
     } else if (e is PointerUpEvent || e is PointerCancelEvent) {
       _unregisterDragRoute();
       if (e is PointerUpEvent) {
@@ -616,11 +711,66 @@ class _DayViewState extends ConsumerState<DayView> {
     _edgeTurnCtrl.timer?.cancel();
     _edgeTurnCtrl.timer = null;
     _edgeTurnCtrl.dir = 0;
+    _edgeTurnCtrl.armed = false;
+    _stopAutoScroll();
+  }
+
+  /// 垂直自动滚动（全局 route 驱动）：手指接近时间轴视口顶部/底部
+  /// 触发自动滚动。翻页后 Draggable 被 evict 时 onDragUpdate 失效
+  ///（列版 _checkVerticalAutoScroll 停止工作）——本层用各页上报的
+  /// 视口信息接管，翻页后上下边缘滚动依然可用。
+  void _checkVerticalAutoScrollGlobal(double globalDy) {
+    final scroll = dragScrollCtrl.value;
+    if (scroll == null || !scroll.hasClients) return;
+    final viewportTop = dragViewportTopY.value;
+    final viewportH = dragViewportH.value;
+    final fingerY = globalDy - viewportTop;
+    // 上滑触发区 30px；下滑触发区 90px（与列版一致，底部靠近导航栏放宽）
+    if (fingerY < 30) {
+      _startAutoScroll(scroll, -1);
+    } else if (fingerY > viewportH - 90) {
+      _startAutoScroll(scroll, 1);
+    } else {
+      _stopAutoScroll();
+    }
+  }
+
+  void _startAutoScroll(ScrollController scroll, int dir) {
+    if (_autoScrollTimer != null) return;
+    _autoScrollTimer = Timer.periodic(const Duration(milliseconds: 16), (t) {
+      if (!scroll.hasClients) {
+        _stopAutoScroll();
+        return;
+      }
+      final max = scroll.position.maxScrollExtent;
+      final target = (scroll.offset + dir * 8).clamp(0.0, max);
+      if (target == scroll.offset) {
+        _stopAutoScroll();
+        return;
+      }
+      scroll.jumpTo(target);
+    });
+  }
+
+  void _stopAutoScroll() {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = null;
   }
 
   void _maybeEdgeTurn(double globalX) {
     _edgeTurnCtrl.lastGlobalX = globalX;
     final w = MediaQuery.sizeOf(context).width;
+    // 保持区滞回：链已启动时，右缘链 x>65%、左缘链 x<35% 持续翻页
+    if (_edgeTurnCtrl.armed) {
+      final keep = _edgeTurnCtrl.dir > 0
+          ? globalX > w * 0.65
+          : globalX < w * 0.35;
+      if (keep) return;
+      _edgeTurnCtrl.timer?.cancel();
+      _edgeTurnCtrl.timer = null;
+      _edgeTurnCtrl.dir = 0;
+      _edgeTurnCtrl.armed = false;
+    }
     if (globalX > w * 0.85) {
       _armEdgeTimer(1, w);
     } else if (globalX < w * 0.06) {
@@ -629,6 +779,7 @@ class _DayViewState extends ConsumerState<DayView> {
       _edgeTurnCtrl.timer?.cancel();
       _edgeTurnCtrl.timer = null;
       _edgeTurnCtrl.dir = 0;
+      _edgeTurnCtrl.armed = false;
     }
   }
 
@@ -638,15 +789,19 @@ class _DayViewState extends ConsumerState<DayView> {
     _edgeTurnCtrl.dir = dir;
     _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 300), () {
       _edgeTurnCtrl.timer = null;
+      _edgeTurnCtrl.armed = true;
       _edgeTurn(dir.toDouble());
       _armContinuation(dir, w);
     });
   }
 
   void _armContinuation(int dir, double w) {
-    if (_edgeTurnCtrl.lastGlobalX > w * 0.85 ||
-        _edgeTurnCtrl.lastGlobalX < w * 0.06) {
-      _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 800), () {
+    // 保持区续链（按方向）
+    final keep = dir > 0
+        ? _edgeTurnCtrl.lastGlobalX > w * 0.65
+        : _edgeTurnCtrl.lastGlobalX < w * 0.35;
+    if (keep) {
+      _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 500), () {
         _edgeTurnCtrl.timer = null;
         _edgeTurn(dir.toDouble());
         _armContinuation(dir, w);
@@ -761,6 +916,9 @@ class _DayViewState extends ConsumerState<DayView> {
             dragGhostInfo: dragGhostInfo,
             dragDropped: dragDropped,
             dragAxisTopY: dragAxisTopY,
+            dragScrollCtrl: dragScrollCtrl,
+            dragViewportTopY: dragViewportTopY,
+            dragViewportH: dragViewportH,
             edgeTurnCtrl: _edgeTurnCtrl,
             onDragStartTracking: (taskId, pointer) =>
                 _registerDragRoute(taskId, pointer),
@@ -814,6 +972,9 @@ class _TimeAxisView extends ConsumerStatefulWidget {
     this.dragGhostInfo,
     this.dragDropped,
     this.dragAxisTopY,
+    this.dragScrollCtrl,
+    this.dragViewportTopY,
+    this.dragViewportH,
     this.edgeTurnCtrl,
     this.onDragStartTracking,
   });
@@ -846,6 +1007,11 @@ class _TimeAxisView extends ConsumerStatefulWidget {
   final ValueNotifier<bool>? dragDropped;
   /// 本页时间轴主体顶部全局 y 上报（落点兜底换算基准）
   final ValueNotifier<double>? dragAxisTopY;
+  /// 本页 scrollController + 视口顶全局 y + 视口高上报（翻页后
+  /// Draggable evict 时全局 route 接管垂直自动滚动用）
+  final ValueNotifier<ScrollController?>? dragScrollCtrl;
+  final ValueNotifier<double>? dragViewportTopY;
+  final ValueNotifier<double>? dragViewportH;
 
   /// 共享边缘翻页控制器（连续翻周链跨页保持）
   final _EdgeTurnController? edgeTurnCtrl;
@@ -881,6 +1047,9 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
       }
       // 上报本页时间轴主体顶部全局 y（落点兜底换算基准；当前页最后写入）
       _reportAxisTopY();
+      // 上报本页 scrollController + 视口顶/高（翻页后全局 route 接管
+      // 垂直自动滚动；当前页最后写入）
+      _reportScrollViewport();
     });
     // A7：移除每分钟整页 setState 的时钟 Timer——红线改由独立组件
     // _NowLine 自驱动，不再触发整个时间轴重建
@@ -914,6 +1083,25 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
 
   double? _baseAxisTopY;
   double _baseAxisOffset = 0;
+
+  /// 本页时间轴 ListView 的 scrollController + 视口顶全局 y + 视口高上报
+  ///（post-frame；当前页最后写入——翻页后 Draggable evict 时全局 route
+  /// 用这些值继续驱动垂直自动滚动）。
+  /// 视口取自本页 ListView 自身的 Scrollable（position.context——
+  /// Scrollable.of(context) 会找到 PageView 而非时间轴 ListView）
+  void _reportScrollViewport() {
+    final ctrl = widget.dragScrollCtrl;
+    if (ctrl == null) return;
+    if (!_scrollController.hasClients) return;
+    ctrl.value = _scrollController;
+    final ctx = _scrollController.position.context.notificationContext;
+    final scrollable = ctx?.findRenderObject() as RenderBox?;
+    if (scrollable != null && scrollable.hasSize) {
+      widget.dragViewportTopY?.value =
+          scrollable.localToGlobal(Offset.zero).dy;
+      widget.dragViewportH?.value = scrollable.size.height;
+    }
+  }
 
   void _syncTimeBar() {
     if (!_timeBarController.hasClients) return;
@@ -1410,6 +1598,9 @@ class _EdgeTurnController {
   Timer? timer;
   int dir = 0;
   double lastGlobalX = 0;
+  /// 连续翻页链已启动（首次翻页 fire 后置位）：保持区内触摸点微漂移
+  /// 不断链（"不间断翻页"）；移出保持区停链；松手/取消复位
+  bool armed = false;
 }
 
 /// 拖动虚影渲染所需的任务信息（拖动开始时上报——
@@ -1598,8 +1789,9 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   }
 
   /// 边缘翻周/日：进入边缘区停留 300ms 触发首次翻页；
-  /// 翻页后若指针仍停边缘 → 每 800ms 自动续翻（连续拖到多个周以后），
-  /// 离开边缘区或松手（_clearDragState）即停止。
+  /// 翻页后若指针仍停边缘（保持区：右缘链 x>65%、左缘链 x<35%）→ 每
+  /// 500ms 自动续翻（连续拖到多个周以后），触摸点微漂移不断链；
+  /// 移出保持区（拖回中间定位）或松手（_clearDragState）即停止。
   /// Timer/方向/最后位置存共享控制器（跨页保持，任意列可取消）。
   void _maybeEdgeTurn(double globalX) {
     final onEdgeTurn = widget.onEdgeTurn;
@@ -1608,6 +1800,16 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     if (onEdgeTurn == null || state == null || ctrl == null) return;
     ctrl.lastGlobalX = globalX;
     final w = MediaQuery.of(context).size.width;
+    // 保持区滞回：链已启动时，右缘链 x>65%、左缘链 x<35% 持续翻页
+    if (ctrl.armed) {
+      final keep = ctrl.dir > 0 ? globalX > w * 0.65 : globalX < w * 0.35;
+      if (keep) return;
+      ctrl.timer?.cancel();
+      ctrl.timer = null;
+      ctrl.dir = 0;
+      ctrl.armed = false;
+      state.value = 0;
+    }
     if (globalX > w * 0.85) {
       _armEdgeTimer(1, w, ctrl);
     } else if (globalX < w * 0.06) {
@@ -1617,6 +1819,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
       ctrl.timer?.cancel();
       ctrl.timer = null;
       ctrl.dir = 0;
+      ctrl.armed = false;
       state.value = 0;
     }
   }
@@ -1629,16 +1832,21 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     ctrl.dir = dir;
     ctrl.timer = Timer(const Duration(milliseconds: 300), () {
       ctrl.timer = null;
+      ctrl.armed = true;
       widget.edgeState?.value = dir;
       widget.onEdgeTurn?.call(dir.toDouble());
       _armContinuation(dir, w, ctrl);
     });
   }
 
-  /// 连续翻页链：翻页后指针仍停边缘 → 800ms 后再翻，递归续链
+  /// 连续翻页链：翻页后指针仍停保持区 → 500ms 后再翻，递归续链
   void _armContinuation(int dir, double w, _EdgeTurnController ctrl) {
-    if (ctrl.lastGlobalX > w * 0.85 || ctrl.lastGlobalX < w * 0.06) {
-      ctrl.timer = Timer(const Duration(milliseconds: 800), () {
+    // 保持区续链（按方向）
+    final keep = dir > 0
+        ? ctrl.lastGlobalX > w * 0.65
+        : ctrl.lastGlobalX < w * 0.35;
+    if (keep) {
+      ctrl.timer = Timer(const Duration(milliseconds: 500), () {
         ctrl.timer = null;
         widget.onEdgeTurn?.call(dir.toDouble());
         _armContinuation(dir, w, ctrl);
@@ -1658,6 +1866,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     if (_dragSelecting) {
       widget.edgeTurnCtrl?.timer?.cancel();
       widget.edgeTurnCtrl?.dir = 0;
+      widget.edgeTurnCtrl?.armed = false;
     }
     super.dispose();
   }
@@ -1683,6 +1892,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     ctrl?.timer?.cancel();
     ctrl?.timer = null;
     ctrl?.dir = 0;
+    ctrl?.armed = false;
     widget.edgeState?.value = 0;
   }
 
@@ -1731,14 +1941,10 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
         // dragGlobalPos 驱动，_handleDragGlobal 更新）
         widget.dragTaskId?.value = details.data;
         widget.dragActiveDay?.value = widget.day;
-        // 指针进入列内 = 离开屏幕边缘区 → 取消连续翻页链。
-        // onMove 由 avatar 悬停检测驱动（独立于 Draggable State）——
-        // 跨多周后 Draggable 被 dispose 时 onDragUpdate 失效，
-        // 此处是可靠的取消兜底（否则连续翻周停不下来）
-        final ctrl = widget.edgeTurnCtrl;
-        ctrl?.timer?.cancel();
-        ctrl?.timer = null;
-        ctrl?.dir = 0;
+        // 注意：不再取消共享连续翻页链——onMove 由 avatar 悬停检测
+        // 驱动，测试环境无 move 事件时也会触发（长按后/翻页后），
+        // 无条件取消会让"拖任务到边缘连续翻页"断链；链的启停统一
+        // 由 _maybeEdgeTurn 的保持区滞回管理（移出保持区才停链）
       },
       onLeave: (details) {
         // 注意：不再清共享拖拽状态——指针离开本列后虚影保留在
@@ -1964,6 +2170,8 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                         child: _TaskBlock(
                           item: b.item,
                           allDay: false,
+                          // 拖动中原任务块半透明由共享状态驱动（跨页返回一致）
+                          dragTaskId: widget.dragTaskId,
                           // 边缘翻周/日 + 垂直自动滚动：Draggable 全局坐标驱动
                           onDragPosition: _handleDragGlobal,
                           onDragEnd: _handleDragEnd,
@@ -2272,7 +2480,8 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   /// 悬浮时间胶囊（拖动任务 + 长按拖选共用渲染）：
   /// [local] 胶囊锚定位置（列内局部），[anchorY] 垂直锚点（选区/虚影上端），
   /// 顶部空间不足时翻到锚点下方；水平按整个时间轴视口宽钳制（允许跨列绘制）。
-  /// 垂直以屏幕坐标定位并钳制在屏幕内（列表滚动后胶囊也不被上/下缘裁剪）。
+  /// 垂直以屏幕坐标定位并钳制在 **ListView 视口** 内（列表滚动后胶囊
+  /// 不被 AppBar 后遮挡/不被视口裁剪）；水平与手指错开（手指不挡胶囊）。
   Widget _buildHintCapsule({
     required Offset local,
     required double anchorY,
@@ -2282,29 +2491,46 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     const capW = 78.0;
     // 胶囊与锚点间距（防手指遮挡：手指接触半径约 22px，须大于半径 + 余量）
     const capGap = 48.0;
+    // 水平错开量：胶囊中心与手指水平间距（手指不挡胶囊，比继续加高更自然）
+    const capOffsetX = 36.0;
     final maxY = (_endHour - widget.startHour) * _pixelPerHour;
-    // 屏幕安全边（避开状态栏/底部手势条）
-    final safeTop = MediaQuery.paddingOf(context).top + 4;
     final safeBottom = MediaQuery.paddingOf(context).bottom + 4;
     var top = anchorY - capH - capGap;
     // 屏幕内定位：列 Stack 顶部全局 y + 列内锚点 → 锚点屏幕 y，
-    // 胶囊放锚点上方，超屏幕顶则翻到锚点下方，再钳制在屏幕可见区
-    //（此前按列内坐标 clamp——列表滚动后时间轴主体滚出视口时胶囊
-    // 会落在屏幕外被裁剪）
+    // 胶囊放锚点上方，超可见区顶则翻到锚点下方，再钳制在可见区
+    //（可见区 = ListView 视口 ∩ 列 Stack——此前用 padding 当上界，
+    // 列表滚动后胶囊被 clamp 到 AppBar 之后被完全遮挡）
     final box = _columnKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box != null && box.hasSize) {
-      final axisTopGlobal = box.localToGlobal(Offset.zero).dy;
-      final screenH = MediaQuery.sizeOf(context).height;
-      final anchorScreenY = axisTopGlobal + anchorY;
-      var topScreen = anchorScreenY - capH - capGap;
-      if (topScreen < safeTop) topScreen = anchorScreenY + capGap;
-      final maxTopScreen = screenH - capH - safeBottom;
-      topScreen = topScreen.clamp(
-        safeTop,
-        maxTopScreen < safeTop ? safeTop : maxTopScreen,
-      );
-      top = topScreen - axisTopGlobal;
+    if (box == null || !box.hasSize) {
+      // 列尚未布局（如翻页后新列首帧）：本帧不渲染，下一帧重算——
+      // 避免按列内坐标兜底渲染到屏幕外（滚动后列 Stack 顶部可能在视口上方）
+      _retryLocalAfterLayout();
+      return const SizedBox.shrink();
     }
+    final axisTopGlobal = box.localToGlobal(Offset.zero).dy;
+    final screenH = MediaQuery.sizeOf(context).height;
+    final scrollable = Scrollable.of(context).context.findRenderObject()
+        as RenderBox?;
+    final viewportTop =
+        scrollable != null && scrollable.hasSize
+            ? scrollable.localToGlobal(Offset.zero).dy
+            : axisTopGlobal;
+    // 垂直可见区 = 视口顶 ∩ 列 Stack 顶（取靠下者）+ 安全边 4px
+    final visibleTop = viewportTop + 4 > axisTopGlobal + 4
+        ? viewportTop + 4
+        : axisTopGlobal + 4;
+    final axisBottom = axisTopGlobal + maxY;
+    final screenBottom = screenH - capH - safeBottom;
+    final visibleBottom =
+        axisBottom - 4 < screenBottom ? axisBottom - 4 : screenBottom;
+    final anchorScreenY = axisTopGlobal + anchorY;
+    var topScreen = anchorScreenY - capH - capGap;
+    if (topScreen < visibleTop) topScreen = anchorScreenY + capGap;
+    topScreen = topScreen.clamp(
+      visibleTop,
+      visibleBottom < visibleTop ? visibleTop : visibleBottom,
+    );
+    top = topScreen - axisTopGlobal;
     top = top.clamp(4.0, maxY - capH - 4);
     // A13：水平按整个时间轴视口宽 clamp（周视图单列仅约 50px，
     // 按列 clamp 会因 min>max 抛 ArgumentError 使整列崩溃；
@@ -2312,12 +2538,28 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     // 列内 Positioned 坐标换算：视口内位置 = viewportLeft + 列内 dx，
     // 先钳制在视口内再减回列偏移——周日列胶囊右缘不再超出视口被裁
     final viewportW = columnWidth * (widget.isWeek ? 7 : 1);
-    final left =
+    var left =
         (widget.viewportLeft + local.dx - capW / 2).clamp(
               4.0,
               viewportW - capW - 4,
             ) -
         widget.viewportLeft;
+    // 水平错开：胶囊中心与手指水平重叠（< capOffsetX）时，向视口内
+    // 空间大的一侧偏移（shift = 错开量 + 半宽——完全脱离手指投影）
+    final fingerX = widget.viewportLeft + local.dx;
+    final center = left + widget.viewportLeft + capW / 2;
+    if ((center - fingerX).abs() < capOffsetX) {
+      final rightRoom = viewportW - 4 - (fingerX + capW / 2);
+      final leftRoom = fingerX - capW / 2 - 4;
+      final shift = capOffsetX + capW / 2;
+      if (rightRoom >= leftRoom) {
+        left = (fingerX + shift).clamp(4.0, viewportW - capW - 4) -
+            widget.viewportLeft;
+      } else {
+        left = (fingerX - shift - capW).clamp(4.0, viewportW - capW - 4) -
+            widget.viewportLeft;
+      }
+    }
     final scheme = Theme.of(context).colorScheme;
     return Positioned(
       top: top,
@@ -2632,6 +2874,7 @@ class _TaskBlock extends ConsumerWidget {
     this.onDragCanceled,
     this.onDragStartedTask,
     this.onPointerDown,
+    this.dragTaskId,
   });
 
   final CalendarItem item;
@@ -2650,6 +2893,12 @@ class _TaskBlock extends ConsumerWidget {
   final ValueChanged<int>? onDragStartedTask;
   /// 按下指针上报（全局 pointerRouter 事件驱动用）
   final ValueChanged<int>? onPointerDown;
+  /// 共享拖动任务 id（null 兜底时用 _noopTaskId）：
+  /// 拖动中原任务块半透明由共享状态驱动——跨页翻走再返回原页时
+  /// Draggable 已死（childWhenDragging 失效），据此保持半透明一致
+  final ValueNotifier<int?>? dragTaskId;
+  /// dragTaskId 为 null 时的兜底 notifier
+  static final ValueNotifier<int?> _noopTaskId = ValueNotifier<int?>(null);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -2664,38 +2913,48 @@ class _TaskBlock extends ConsumerWidget {
     final block = _blockBody(context, color, done, notifier, ref);
     // 全天任务：禁止拖入时间轴（保持全天语义），仅保留点击操作
     if (allDay) return block;
+    // 共享状态驱动的"拖动中"半透明：跨页翻走再返回原页时 Draggable
+    // 已死（childWhenDragging 失效），原任务块据此保持与同页拖动一致的
+    // 不明显状态；同页拖动时 childWhenDragging 已生效，双源一致
     // Listener 捕获按下指针：拖动开始后 WeekView 注册全局 pointerRouter
     // route（跨页事件驱动——Draggable 被 evict/dispose 后回调失效的兜底）
-    return Listener(
-      onPointerDown: (e) => onPointerDown?.call(e.pointer),
-      child: LongPressDraggable<int>(
-        data: item.task.id,
-        onDragStarted: () {
-          Haptics.select();
-          // 上报任务 id：共享拖拽状态据此显示虚影/胶囊
-          onDragStartedTask?.call(item.task.id);
-        },
-        // 边缘翻周/日：Draggable 全局坐标驱动（此前依赖 DragTarget.onMove，
-        // 指针离开列范围即失效）
-        onDragUpdate: (d) => onDragPosition?.call(d.globalPosition),
-        onDragEnd: (_) => onDragEnd?.call(),
-        // 兜底：拖动中任务所在列被 PageView evict（跨多周后超 cacheExtent）
-        // 导致 Draggable State dispose（mounted=false）时 onDragEnd 不回调
-        //（SDK 有 mounted 检查），onDraggableCanceled 无此限制——据此停
-        // 本列自动滚动；**不清共享拖拽状态**（否则翻页 4-5 页后虚影/胶囊
-        // 闪退）；共享状态由全局 route 的 up/cancel 统一清理
-        onDraggableCanceled: (_, _) => onDragCanceled?.call(),
-        // 拖动不显示悬浮块：目标位置由虚影（_dragGhost）实时预览
-        feedback: Material(
-          color: Colors.transparent,
-          child: const SizedBox.shrink(),
-        ),
-        childWhenDragging: Opacity(
-          opacity: 0.3,
-          child: block,
-        ),
-        child: block,
-      ),
+    return ValueListenableBuilder<int?>(
+      valueListenable: dragTaskId ?? _noopTaskId,
+      builder: (context, draggingId, _) {
+        final dimmed = draggingId == item.task.id;
+        final shown = dimmed ? Opacity(opacity: 0.3, child: block) : block;
+        return Listener(
+          onPointerDown: (e) => onPointerDown?.call(e.pointer),
+          child: LongPressDraggable<int>(
+            data: item.task.id,
+            onDragStarted: () {
+              Haptics.select();
+              // 上报任务 id：共享拖拽状态据此显示虚影/胶囊
+              onDragStartedTask?.call(item.task.id);
+            },
+            // 边缘翻周/日：Draggable 全局坐标驱动（此前依赖 DragTarget.onMove，
+            // 指针离开列范围即失效）
+            onDragUpdate: (d) => onDragPosition?.call(d.globalPosition),
+            onDragEnd: (_) => onDragEnd?.call(),
+            // 兜底：拖动中任务所在列被 PageView evict（跨多周后超 cacheExtent）
+            // 导致 Draggable State dispose（mounted=false）时 onDragEnd 不回调
+            //（SDK 有 mounted 检查），onDraggableCanceled 无此限制——据此停
+            // 本列自动滚动；**不清共享拖拽状态**（否则翻页 4-5 页后虚影/胶囊
+            // 闪退）；共享状态由全局 route 的 up/cancel 统一清理
+            onDraggableCanceled: (_, _) => onDragCanceled?.call(),
+            // 拖动不显示悬浮块：目标位置由虚影（_dragGhost）实时预览
+            feedback: Material(
+              color: Colors.transparent,
+              child: const SizedBox.shrink(),
+            ),
+            childWhenDragging: Opacity(
+              opacity: 0.3,
+              child: block,
+            ),
+            child: shown,
+          ),
+        );
+      },
     );
   }
 

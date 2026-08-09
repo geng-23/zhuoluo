@@ -326,7 +326,7 @@ void main() {
       return gesture;
     }
 
-    testWidgets('右缘停留连续翻周：翻第一周后 800ms 自动续翻第二周', (tester) async {
+    testWidgets('右缘停留连续翻周：翻第一周后 500ms 自动续翻第二周', (tester) async {
       final container = await pumpCalendarWithTask(tester, '拖拽任务A');
       final before = container.read(calendarControllerProvider).selectedDay;
 
@@ -338,8 +338,8 @@ void main() {
       final after1 = container.read(calendarControllerProvider).selectedDay;
       expect(after1.isAfter(before), isTrue, reason: '首次边缘停留应翻周');
 
-      // 指针仍停右缘：连续链 800ms 后自动续翻
-      await tester.pump(const Duration(milliseconds: 850));
+      // 指针仍停右缘：连续链 500ms 后自动续翻
+      await tester.pump(const Duration(milliseconds: 550));
       await tester.pumpAndSettle();
       final after2 = container.read(calendarControllerProvider).selectedDay;
       expect(after2.isAfter(after1), isTrue,
@@ -365,7 +365,7 @@ void main() {
       );
 
       // 继续停留续翻，虚影仍跟随
-      await tester.pump(const Duration(milliseconds: 850));
+      await tester.pump(const Duration(milliseconds: 550));
       await tester.pumpAndSettle();
       expect(
         find.textContaining(RegExp(r'\d{2}:\d{2} - \d{2}:\d{2}')),
@@ -604,9 +604,10 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350)); // 首翻
       await tester.pumpAndSettle();
-      // 连续续翻 6 次（远超 PageView cacheExtent——Draggable 被 evict）
+      // 连续续翻 6 次（远超 PageView cacheExtent——Draggable 被 evict；
+      // 链间隔 500ms → 每次推进 550ms 恰翻一页）
       for (var i = 0; i < 6; i++) {
-        await tester.pump(const Duration(milliseconds: 850));
+        await tester.pump(const Duration(milliseconds: 550));
         await tester.pumpAndSettle();
       }
       // 回归保护：跨页超过 5 次后虚影仍显示（onDraggableCanceled
@@ -621,23 +622,127 @@ void main() {
           reason: '边缘松手应改期成功（落点兜底，任务不回退）');
     });
 
-    testWidgets('胶囊始终在屏幕内：任务拖到屏幕顶部不被上缘裁剪', (tester) async {
+    testWidgets('胶囊在视口内且水平错开手指：不被上缘遮挡、不被手指挡住', (tester) async {
       await pumpCalendarWithTask(tester, '胶囊任务');
       final block = find.text('胶囊任务');
       final gesture = await tester.startGesture(tester.getCenter(block.first));
       for (var i = 0; i < 6; i++) {
         await tester.pump(const Duration(milliseconds: 100));
       }
-      // 拖到屏幕顶部（此前胶囊按列内坐标定位，可能超出屏幕上缘被裁剪）
+      // 拖到屏幕顶部（此前胶囊按列内坐标定位可能超出上缘被裁剪；
+      // 后按 padding 当上界 → 被 clamp 到 AppBar 之后完全遮挡）
       await gesture.moveTo(const Offset(400, 60));
       await tester.pump();
       final capsule = find.byIcon(Icons.schedule);
       expect(capsule, findsWidgets, reason: '拖动任务时应显示时间胶囊');
       final rect = tester.getRect(capsule.first);
-      expect(rect.top, greaterThanOrEqualTo(0),
-          reason: '胶囊不应超出屏幕上缘（实际 top=${rect.top}）');
+      // 视口内：胶囊 top 不低于时间轴区域顶部（AppBar 之后不再被遮挡）
+      final viewTop = tester.getRect(find.byType(PageView).last).top;
+      expect(rect.top, greaterThanOrEqualTo(viewTop),
+          reason: '胶囊不应被上缘/AppBar 遮挡（top=${rect.top} < 视口顶 $viewTop）');
       expect(rect.bottom, lessThanOrEqualTo(600),
           reason: '胶囊不应超出屏幕下缘（实际 bottom=${rect.bottom}）');
+      // 水平错开手指：胶囊中心与手指 x 距离 ≥ 24（手指不挡胶囊）
+      final fingerX = 400.0;
+      expect((rect.center.dx - fingerX).abs(), greaterThanOrEqualTo(24),
+          reason: '胶囊应水平错开手指（中心 dx=${rect.center.dx}，手指 x=400）');
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('翻页后手指微漂移（保持区内）→ 500ms 间隔连续翻页不间断', (tester) async {
+      final container = await pumpCalendarWithTask(tester, '微漂任务');
+      final block = find.text('微漂任务');
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await gesture.moveTo(const Offset(760, 400)); // 右缘触发区
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350)); // 首翻
+      await tester.pumpAndSettle();
+      final after1 = container.read(calendarControllerProvider).selectedDay;
+
+      // 微漂移到 80%（保持区内：>65%）——链不应中断
+      await gesture.moveTo(const Offset(640, 400));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 550)); // 链 500ms → 续翻
+      await tester.pumpAndSettle();
+      final after2 = container.read(calendarControllerProvider).selectedDay;
+      expect(after2.isAfter(after1), isTrue,
+          reason: '保持区内微漂移应继续翻页（不间断）');
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('翻页后拖到视口顶部：垂直自动滚动仍工作（全局 route 接管）', (tester) async {
+      await pumpCalendarWithTask(tester, '滚动任务');
+      final block = find.text('滚动任务');
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      // 右缘翻一页（跨页后 Draggable 可能被 evict——全局 route 接管垂直滚动）
+      await gesture.moveTo(const Offset(760, 400));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+
+      // 拖到视口底部（下滑自动滚动触发区：距视口底 <90px；时间轴初始在
+      // 顶部——向下滚动必然增加 offset）
+      await gesture.moveTo(const Offset(400, 580));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500)); // 16ms 步进滚动
+      // 时间轴应已向上滚动（列版 + 全局 route 双源驱动，至少一方生效）
+      var pixels = 0.0;
+      final scrollables = find.byType(Scrollable);
+      final count = tester.widgetList(scrollables).length;
+      for (var i = 0; i < count; i++) {
+        final pos = tester
+            .state<ScrollableState>(scrollables.at(i))
+            .position;
+        if (pos.axis == Axis.vertical) {
+          pixels = pos.pixels;
+          break;
+        }
+      }
+      expect(pixels, greaterThan(0),
+          reason: '翻页后拖到视口顶部应自动滚动时间轴（实际 pixels=$pixels）');
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('跨页翻走再返回：原任务块保持半透明（共享状态驱动）', (tester) async {
+      await pumpCalendarWithTask(tester, '透明任务');
+      final block = find.text('透明任务');
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      // 右缘翻两页（跨页后 Draggable 可能被 evict——childWhenDragging 失效）
+      await gesture.moveTo(const Offset(760, 400));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 550));
+      await tester.pumpAndSettle();
+      // 拖回左缘翻回原周（不松手）
+      await gesture.moveTo(const Offset(10, 400));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 550));
+      await tester.pumpAndSettle();
+      // 原任务块应可见且半透明（Opacity 0.3，与同页拖动一致）
+      expect(find.text('透明任务'), findsWidgets, reason: '返回原页原任务块应可见');
+      final dimmed = find.ancestor(
+        of: find.text('透明任务'),
+        matching: find.byWidgetPredicate(
+          (w) => w is Opacity && w.opacity == 0.3,
+        ),
+      );
+      expect(dimmed, findsWidgets,
+          reason: '跨页返回原任务块应保持半透明（与同页拖动一致）');
       await gesture.up();
       await tester.pumpAndSettle();
     });

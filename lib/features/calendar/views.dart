@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -42,7 +42,9 @@ int effectiveStartHourFor({
   for (final d in days) {
     for (final it in byDay[_dayKey(d)] ?? const <CalendarItem>[]) {
       if (_AllDayBar.isTopArea(it)) continue;
-      final h = it.task.planStart?.hour ?? defaultStart;
+      // P1-2：planStart 为 DB 读回值，取字段前按应用时区解释
+      final ps = it.task.planStart;
+      final h = ps == null ? defaultStart : AppClock.asApp(ps).hour;
       if (h < earliest) earliest = h;
     }
   }
@@ -448,7 +450,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
       startHour * 60,
       _endHour * 60,
     );
-    final target = DateTime(
+    final target = AppClock.at(
       day.year,
       day.month,
       day.day,
@@ -632,8 +634,13 @@ class _DayViewState extends ConsumerState<DayView> {
   late final ValueNotifier<double> _sharedScrollOffset;
   ValueNotifier<double>? _ownScroll;
 
-  int _pageFor(DateTime d) =>
-      DateTime(d.year, d.month, d.day).difference(DateTime(2000, 1, 1)).inDays;
+  int _pageFor(DateTime d) {
+    // P1-2：按应用时区日期字段计算页号（两侧同口径，跨时区不偏移）
+    final a = AppClock.asApp(d);
+    return AppClock.at(a.year, a.month, a.day)
+        .difference(AppClock.at(2000, 1, 1))
+        .inDays;
+  }
 
   @override
   void initState() {
@@ -710,7 +717,7 @@ class _DayViewState extends ConsumerState<DayView> {
         curve: Curves.easeOutCubic,
       );
     }
-    _dragDay.value = DateTime(
+    _dragDay.value = AppClock.at(
       2000,
       1,
       1,
@@ -900,7 +907,7 @@ class _DayViewState extends ConsumerState<DayView> {
       startHour * 60,
       _endHour * 60,
     );
-    final target = DateTime(
+    final target = AppClock.at(
       day.year,
       day.month,
       day.day,
@@ -958,7 +965,7 @@ class _DayViewState extends ConsumerState<DayView> {
       // 丝滑翻页主要靠窗口缓存（翻页零 DB）+ byDay 分组 build 减负
       onPageChanged: (page) {
         _activePage.value = page;
-        final day = DateTime(2000, 1, 1).add(Duration(days: page));
+        final day = AppClock.at(2000, 1, 1).add(Duration(days: page));
         // 外部跳日动画期间：onPageChanged 多次触发（round 变化），只同步
         // _dragDay 不回写 selectedDay（防回跳打断动画停在中间日）；到达
         // 目标页结束拦截（动画结束时 whenComplete 也会清理）
@@ -973,7 +980,7 @@ class _DayViewState extends ConsumerState<DayView> {
         widget.onDayChanged(day);
       },
       itemBuilder: (context, page) {
-        final day = DateTime(2000, 1, 1).add(Duration(days: page));
+        final day = AppClock.at(2000, 1, 1).add(Duration(days: page));
         return _KeepAlive(
           child: _TimeAxisView(
             pageIndex: page,
@@ -2161,7 +2168,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
           _endHour * 60,
         );
         final d = widget.day; // 改期落点 = 落点所在列的真实日期（翻页后为新页列）
-        final target = DateTime(
+        final target = AppClock.at(
           d.year,
           d.month,
           d.day,
@@ -2236,7 +2243,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
             final tapped = ((minutes / 10).round() * 10)
                 .clamp(widget.startHour * 60, _endHour * 60 - 60)
                 .toInt();
-            final dayStart = DateTime(
+            final dayStart = AppClock.at(
               widget.day.year,
               widget.day.month,
               widget.day.day,
@@ -2597,7 +2604,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   DateTime _draggedStartForMinutes(int minutes) {
     final durMin = _draggedDurationMinutes() ?? 60;
     return DateUtilsEx.clampStartWithinDay(
-      DateTime(
+      AppClock.at(
         widget.day.year,
         widget.day.month,
         widget.day.day,
@@ -2843,11 +2850,14 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
 
   /// 任务块顶部位置：例外改期目标时刻（displayTime）优先，否则 planStart 时分
   double _topFor(CalendarItem item) {
+    // P1-2：displayTime/planStart 为 DB 读回值，取时分前按应用时区解释
     final dt = item.displayTime;
     final ps = item.task.planStart;
     final minutes = dt != null
-        ? dt.hour * 60 + dt.minute
-        : (ps?.hour ?? 0) * 60 + (ps?.minute ?? 0);
+        ? AppClock.asApp(dt).hour * 60 + AppClock.asApp(dt).minute
+        : ps == null
+        ? 0
+        : AppClock.asApp(ps).hour * 60 + AppClock.asApp(ps).minute;
     return (minutes - widget.startHour * 60) / 60 * _pixelPerHour;
   }
 
@@ -2882,25 +2892,25 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
       );
     final intervals = <_Interval>[];
     for (final i in sorted) {
-      final ps = i.task.planStart;
-      final pe = i.task.planEnd;
-      final day = i.instanceDate;
-      // 例外改期目标时刻（displayTime）优先，否则 planStart 时分
-      final dt = i.displayTime;
-      final s = ps == null
-          ? AppClock.at(day.year, day.month, day.day)
-          : dt != null
-          ? AppClock.at(day.year, day.month, day.day, dt.hour, dt.minute)
-          : AppClock.at(day.year, day.month, day.day, ps.hour, ps.minute);
-      final endTime = pe ?? ps?.add(const Duration(hours: 1));
+      // P1-2：DB 读回值取字段前统一按应用时区解释
+      final psA = i.task.planStart == null ? null : AppClock.asApp(i.task.planStart!);
+      final peA = i.task.planEnd == null ? null : AppClock.asApp(i.task.planEnd!);
+      final da = AppClock.asApp(i.instanceDate);
+      final dtA = i.displayTime == null ? null : AppClock.asApp(i.displayTime!);
+      final s = psA == null
+          ? AppClock.at(da.year, da.month, da.day)
+          : dtA != null
+          ? AppClock.at(da.year, da.month, da.day, dtA.hour, dtA.minute)
+          : AppClock.at(da.year, da.month, da.day, psA.hour, psA.minute);
+      final endTime = peA ?? psA?.add(const Duration(hours: 1));
       var e = endTime == null
           ? s.add(const Duration(hours: 1))
-          : dt != null
-          ? s.add(endTime.difference(ps ?? endTime))
+          : dtA != null
+          ? s.add(endTime.difference(psA ?? endTime))
           : AppClock.at(
-              day.year,
-              day.month,
-              day.day,
+              da.year,
+              da.month,
+              da.day,
               endTime.hour,
               endTime.minute,
             );
@@ -3388,11 +3398,14 @@ class _InstanceActionSheetState extends ConsumerState<InstanceActionSheet> {
     if (picked == null || !mounted) return;
     final pickedTime = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay(hour: ps?.hour ?? 9, minute: ps?.minute ?? 0),
+      initialTime: TimeOfDay(
+        hour: ps == null ? 9 : AppClock.asApp(ps).hour,
+        minute: ps == null ? 0 : AppClock.asApp(ps).minute,
+      ),
       helpText: '选择实例时间',
     );
     if (pickedTime == null || !mounted) return;
-    final toDate = DateTime(
+    final toDate = AppClock.at(
       picked.year,
       picked.month,
       picked.day,
@@ -3603,11 +3616,14 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
       // 且更新既有例外时会覆盖之前带时分的改期）
       final pickedTime = await showTimePicker(
         context: context,
-        initialTime: TimeOfDay(hour: ps?.hour ?? 9, minute: ps?.minute ?? 0),
+        initialTime: TimeOfDay(
+          hour: ps == null ? 9 : AppClock.asApp(ps).hour,
+          minute: ps == null ? 0 : AppClock.asApp(ps).minute,
+        ),
         helpText: '选择实例时间',
       );
       if (pickedTime == null || !mounted) return;
-      final toDate = DateTime(
+      final toDate = AppClock.at(
         picked.year,
         picked.month,
         picked.day,

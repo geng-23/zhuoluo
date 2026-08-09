@@ -312,12 +312,12 @@ class CalendarController extends StateNotifier<CalendarState> {
     // 改规则同口径（否则锚点落在非命中日，系列在当前窗口"消失"）。
     // 先 clamp 再吸附日期部分（保留时分）：吸附只调整日期，
     // 避免对长时长任务先吸附后 clamp 又把起点推回非命中日。
-    final anchorDay = DateTime(clamped.year, clamped.month, clamped.day);
+    final anchorDay = AppClock.at(clamped.year, clamped.month, clamped.day);
     final hit = RruleService.instance.nearestHitOnOrNear(anchorDay, t.rrule);
     final start =
         hit == null
             ? clamped
-            : DateTime(
+            : AppClock.at(
                 hit.year,
                 hit.month,
                 hit.day,

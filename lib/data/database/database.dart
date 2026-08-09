@@ -511,9 +511,13 @@ class AppDatabase extends _$AppDatabase {
     };
   }
 
-  /// 完成记录集合的 key：与 getCalendarItems 的 doneSet 同格式
-  static String _doneKey(int taskId, DateTime d) =>
-      '${taskId}_${d.year}_${d.month}_${d.day}';
+  /// 完成记录集合的 key：与 getCalendarItems 的 doneSet 同格式。
+  /// P1-2：DB 读回值为系统时区解释，取字段前必须按应用时区重新解释，
+  /// 否则与写入侧（应用时区 00:00 基准）key 不一致，完成状态错位。
+  static String _doneKey(int taskId, DateTime d) {
+    final a = AppClock.asApp(d);
+    return '${taskId}_${a.year}_${a.month}_${a.day}';
+  }
 
   /// 智能清单：全部（未完成，不含子任务；排除已结束的有限重复系列）
   Future<List<Task>> getAllUncompleted() async {
@@ -717,8 +721,10 @@ class AppDatabase extends _$AppDatabase {
     for (final ex in exceptions) {
       final od = ex.overrideScheduledDate;
       if (od != null) {
+        // P1-2：DB 读回值为系统时区字段，取字段前按应用时区解释
+        final a = AppClock.asApp(od);
         keepDays.add(
-          AppClock.at(od.year, od.month, od.day).millisecondsSinceEpoch,
+          AppClock.at(a.year, a.month, a.day).millisecondsSinceEpoch,
         );
       }
     }
@@ -727,11 +733,9 @@ class AppDatabase extends _$AppDatabase {
     )..where((c) => c.taskId.equals(taskId))).get();
     final removed = <TaskCompletion>[];
     for (final c in all) {
-      final d = AppClock.at(
-        c.instanceDate.year,
-        c.instanceDate.month,
-        c.instanceDate.day,
-      );
+      // P1-2：DB 读回值为系统时区字段，取字段前按应用时区解释
+      final a = AppClock.asApp(c.instanceDate);
+      final d = AppClock.at(a.year, a.month, a.day);
       if (!keepDays.contains(d.millisecondsSinceEpoch)) {
         await (delete(taskCompletions)..where((t) => t.id.equals(c.id))).go();
         removed.add(c);
@@ -1005,8 +1009,8 @@ class AppDatabase extends _$AppDatabase {
               c.instanceDate.isSmallerThanValue(end),
         )).get();
     final doneSet = <String>{
-      for (final c in completions)
-        '${c.taskId}_${c.instanceDate.year}_${c.instanceDate.month}_${c.instanceDate.day}',
+      // P1-2：DB 读回值取字段前按应用时区解释（与 _doneKey 同口径）
+      for (final c in completions) _doneKey(c.taskId, c.instanceDate),
     };
 
     final items = <CalendarItem>[];
@@ -1020,7 +1024,9 @@ class AppDatabase extends _$AppDatabase {
           // 仅截止时间的任务 → 在截止日展示一个实例
           final due = t.dueTime;
           if (due == null) continue;
-          final dueDay = AppClock.at(due.year, due.month, due.day);
+          // P1-2：DB 读回值为系统时区字段，取字段前按应用时区解释
+          final a = AppClock.asApp(due);
+          final dueDay = AppClock.at(a.year, a.month, a.day);
           if (!dueDay.isBefore(start) && dueDay.isBefore(end)) {
             items.add(
               CalendarItem(
@@ -1034,7 +1040,9 @@ class AppDatabase extends _$AppDatabase {
           continue;
         }
         final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
-        var d = AppClock.at(ps.year, ps.month, ps.day);
+        // P1-2：DB 读回值为系统时区字段，取字段前按应用时区解释
+        final pa = AppClock.asApp(ps);
+        var d = AppClock.at(pa.year, pa.month, pa.day);
         while (d.isBefore(end) && d.isBefore(pe)) {
           if (!d.isBefore(start)) {
             items.add(
@@ -1164,12 +1172,15 @@ class AppDatabase extends _$AppDatabase {
     DateTime date,
     List<TaskException> exceptions,
   ) async {
+    // P1-2：date 可能是循环 day（应用时区）或外部传入值，统一按应用时区
+    // 解释后再取字段（asApp 对已是应用时区的 TZDateTime 幂等）
+    final da = AppClock.asApp(date);
     if (t.rrule.isEmpty) {
       // 非重复任务：判断该天是否被计划区间覆盖（含跨天）
       final ps = t.planStart;
       if (ps == null) return [];
       final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
-      final dayStart = AppClock.at(date.year, date.month, date.day);
+      final dayStart = AppClock.at(da.year, da.month, da.day);
       final dayEnd = dayStart.add(const Duration(days: 1));
       if (ps.isBefore(dayEnd) && pe.isAfter(dayStart)) return [t];
       return [];
@@ -1182,34 +1193,26 @@ class AppDatabase extends _$AppDatabase {
           .map((e) => DateTime.parse(e as String))
           .toList();
     } catch (_) {}
-    final dateKey = AppClock.at(date.year, date.month, date.day);
+    final dateKey = AppClock.at(da.year, da.month, da.day);
     if (skipped.any(
-      (s) =>
-          s.year == dateKey.year &&
-          s.month == dateKey.month &&
-          s.day == dateKey.day,
+      (s) => du.DateUtilsEx.sameDay(s, dateKey),
     )) {
       return [];
     }
     for (final ex in exceptions) {
       final od = ex.overrideScheduledDate;
       // 例外改期：overrideScheduledDate 指向的日期视为有实例（原日期不再显示）
+      // P1-2：例外为 DB 读回值，字段按应用时区解释后比较
       if (ex.action == 'edit' &&
           od != null &&
-          od.year == dateKey.year &&
-          od.month == dateKey.month &&
-          od.day == dateKey.day) {
+          du.DateUtilsEx.sameDay(od, dateKey)) {
         return [t];
       }
       final ed = ex.instanceDate;
-      if (ed.year == dateKey.year &&
-          ed.month == dateKey.month &&
-          ed.day == dateKey.day) {
+      if (du.DateUtilsEx.sameDay(ed, dateKey)) {
         // 例外：若 overrideScheduledDate 指向其他日期，则本日期无实例
         if (ex.action == 'edit' && od != null) {
-          if (!(od.year == dateKey.year &&
-              od.month == dateKey.month &&
-              od.day == dateKey.day)) {
+          if (!du.DateUtilsEx.sameDay(od, dateKey)) {
             return [];
           }
         }
@@ -1315,7 +1318,9 @@ class AppDatabase extends _$AppDatabase {
       );
 
   Future<bool> isHabitDone(int habitId, DateTime date) async {
-    final d = AppClock.at(date.year, date.month, date.day);
+    // P1-2：入参可能是 DB 读回值，统一按应用时区解释后取字段
+    final a = AppClock.asApp(date);
+    final d = AppClock.at(a.year, a.month, a.day);
     final found =
         await (select(habitRecords)
               ..where((h) => h.habitId.equals(habitId) & h.date.equals(d)))
@@ -1327,7 +1332,9 @@ class AppDatabase extends _$AppDatabase {
   /// 第二次调用看到第一次的提交结果（查→删/插），不会并发插入重复记录
   ///（配合 habit_records 唯一索引双保险）
   Future<void> checkHabit(int habitId, DateTime date) async {
-    final d = AppClock.at(date.year, date.month, date.day);
+    // P1-2：入参可能是 DB 读回值，统一按应用时区解释后取字段
+    final a = AppClock.asApp(date);
+    final d = AppClock.at(a.year, a.month, a.day);
     await transaction(() async {
       final existing =
           await (select(habitRecords)
@@ -1436,11 +1443,9 @@ class AppDatabase extends _$AppDatabase {
     }
     for (final c in completions) {
       if (!topLevelTaskIds.contains(c.taskId)) continue;
-      final d = AppClock.at(
-        c.completedAt.year,
-        c.completedAt.month,
-        c.completedAt.day,
-      );
+      // P1-2：completedAt 为 DB 读回值，字段按应用时区解释后分组
+      final a = AppClock.asApp(c.completedAt);
+      final d = AppClock.at(a.year, a.month, a.day);
       result[d] = (result[d] ?? 0) + 1;
     }
     // 普通任务完成（completedAt，rrule 为空，避免与实例表重复计数；
@@ -1455,11 +1460,9 @@ class AppDatabase extends _$AppDatabase {
             ))
             .get();
     for (final t in doneTasks) {
-      final d = AppClock.at(
-        t.completedAt!.year,
-        t.completedAt!.month,
-        t.completedAt!.day,
-      );
+      // P1-2：completedAt 为 DB 读回值，字段按应用时区解释后分组
+      final a = AppClock.asApp(t.completedAt!);
+      final d = AppClock.at(a.year, a.month, a.day);
       result[d] = (result[d] ?? 0) + 1;
     }
     return result;
@@ -1481,7 +1484,10 @@ class AppDatabase extends _$AppDatabase {
     final result = <DateTime, int>{};
 
     void add(DateTime d) {
-      final key = AppClock.at(d.year, d.month, d.day);
+      // P1-2：d 可能是 DB 读回值（planStart/dueTime），统一按应用时区
+      // 解释后取字段分组
+      final a = AppClock.asApp(d);
+      final key = AppClock.at(a.year, a.month, a.day);
       result[key] = (result[key] ?? 0) + 1;
     }
 

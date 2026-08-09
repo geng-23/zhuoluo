@@ -85,7 +85,9 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
     }
     final records = await db.getAllHabitRecords();
     for (final r in records) {
-      final day = AppClock.at(r.date.year, r.date.month, r.date.day);
+      // P1-2：r.date 为 DB 读回值，字段按应用时区解释后与热力图 key 对齐
+      final a = AppClock.asApp(r.date);
+      final day = AppClock.at(a.year, a.month, a.day);
       final map = heatByHabit[r.habitId];
       if (map != null && map.containsKey(day)) {
         map[day] = true;
@@ -107,11 +109,9 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
   Map<DateTime, int> _pomodoroDayMap(List<PomodoroRecord> records) {
     final map = <DateTime, int>{};
     for (final r in records) {
-      final d = AppClock.at(
-        r.completedAt.year,
-        r.completedAt.month,
-        r.completedAt.day,
-      );
+      // P1-2：completedAt 为 DB 读回值，字段按应用时区解释后分组
+      final a = AppClock.asApp(r.completedAt);
+      final d = AppClock.at(a.year, a.month, a.day);
       map[d] = (map[d] ?? 0) + r.durationMinutes;
     }
     return map;

@@ -573,7 +573,7 @@ class MonthView extends ConsumerWidget {
                   if (dayNum < 1 || dayNum > daysInMonth) {
                     return const SizedBox.shrink();
                   }
-                  final date = DateTime(
+                  final date = AppClock.at(
                     displayedMonth.year,
                     displayedMonth.month,
                     dayNum,

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
+import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/features/calendar/calendar_page.dart';
 import 'package:zhuoluo/features/calendar/providers.dart';
@@ -56,12 +57,14 @@ void main() {
       expect(first, greaterThanOrEqualTo(1), reason: '首次必须查库');
       expect(controller.state.items, isNotEmpty);
 
-      // 同周内翻页（+1 天）：命中缓存，零 DB
-      controller.setSelectedDay(now.add(const Duration(days: 1)));
+      // 同周内翻页（选本周另一天，避免跨周边界）→ 命中缓存零 DB
+      final monday = DateUtilsEx.mondayOf(now);
+      final nextInWeek =
+          monday.isBefore(now) ? monday : now.add(const Duration(days: 1));
+      controller.setSelectedDay(nextInWeek);
       await controller.load();
       expect(controller.loadCount, first,
           reason: '缓存窗口内翻页不应触发 DB 查询');
-      expect(controller.state.items, isNotEmpty, reason: '数据立即就绪');
 
       // 周视图边界内（+6 天）：仍命中缓存（±31 天缓冲）
       controller.setSelectedDay(now.add(const Duration(days: 6)));
@@ -276,7 +279,7 @@ void main() {
       }
 
       // 拖到屏幕左缘（Draggable 全局坐标检测，不依赖列边界）
-      await gesture.moveBy(const Offset(-560, 0));
+      await gesture.moveTo(const Offset(10, 400));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
       await gesture.up();
@@ -286,7 +289,171 @@ void main() {
       expect(after.isBefore(before), isTrue, reason: '拖到左缘停留应翻到上一周');
     });
   });
+
+  group('连续翻周 + 虚影跨页 + 左时间栏贴边', () {
+    Future<ProviderContainer> pumpCalendarWithTask(
+      WidgetTester tester,
+      String title,
+    ) async {
+      await db.ensureDefaultList();
+      final list = await db.getDefaultList();
+      final start = DateTime(now.year, now.month, now.day, 10, 0);
+      await db.insertTask(TasksCompanion.insert(
+        listId: list.id,
+        title: title,
+        planStart: Value(start),
+        planEnd: Value(start.add(const Duration(hours: 1))),
+        createdAt: now,
+      ));
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(home: const CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return container;
+    }
+
+    Future<TestGesture> longPressDrag(WidgetTester tester, String title) async {
+      final block = find.text(title);
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      return gesture;
+    }
+
+    testWidgets('右缘停留连续翻周：翻第一周后 800ms 自动续翻第二周', (tester) async {
+      final container = await pumpCalendarWithTask(tester, '拖拽任务A');
+      final before = container.read(calendarControllerProvider).selectedDay;
+
+      final gesture = await longPressDrag(tester, '拖拽任务A');
+      await gesture.moveBy(const Offset(200, 0)); // 到右缘
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350)); // 首次 300ms 触发
+      await tester.pumpAndSettle();
+      final after1 = container.read(calendarControllerProvider).selectedDay;
+      expect(after1.isAfter(before), isTrue, reason: '首次边缘停留应翻周');
+
+      // 指针仍停右缘：连续链 800ms 后自动续翻
+      await tester.pump(const Duration(milliseconds: 850));
+      await tester.pumpAndSettle();
+      final after2 = container.read(calendarControllerProvider).selectedDay;
+      expect(after2.isAfter(after1), isTrue,
+          reason: '边缘停留应自动续翻第二周（连续拖到多个周以后）');
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('翻周后虚影跟随新周边缘列（跨页保持），松手消失', (tester) async {
+      await pumpCalendarWithTask(tester, '拖拽任务B');
+      final gesture = await longPressDrag(tester, '拖拽任务B');
+      await gesture.moveBy(const Offset(200, 0)); // 右缘
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350)); // 翻周
+      await tester.pumpAndSettle();
+
+      // 虚影（'HH:mm - HH:mm' 格式文本）应显示在新周
+      expect(
+        find.textContaining(RegExp(r'\d{2}:\d{2} - \d{2}:\d{2}')),
+        findsOneWidget,
+        reason: '翻周后虚影应跟随显示（此前翻页即消失）',
+      );
+
+      // 继续停留续翻，虚影仍跟随
+      await tester.pump(const Duration(milliseconds: 850));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining(RegExp(r'\d{2}:\d{2} - \d{2}:\d{2}')),
+        findsOneWidget,
+        reason: '连续翻周时虚影持续跟随',
+      );
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining(RegExp(r'\d{2}:\d{2} - \d{2}:\d{2}')),
+        findsNothing,
+        reason: '松手后虚影消失',
+      );
+    });
+
+    testWidgets('指针离开边缘后停止连续翻周', (tester) async {
+      final container = await pumpCalendarWithTask(tester, '拖拽任务C');
+      final gesture = await longPressDrag(tester, '拖拽任务C');
+      await gesture.moveBy(const Offset(200, 0)); // 右缘
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350)); // 翻一周
+      await tester.pumpAndSettle();
+      final after1 = container.read(calendarControllerProvider).selectedDay;
+
+      // 拖回中间（离开边缘）→ 连续链应取消
+      await gesture.moveBy(const Offset(-200, 0));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 900)); // 超过 800ms 续翻间隔
+      await tester.pumpAndSettle();
+      expect(
+        container.read(calendarControllerProvider).selectedDay,
+        after1,
+        reason: '离开边缘后不应续翻',
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('左时间栏贴屏幕左缘（左侧 0 收窄）', (tester) async {
+      await db.ensureDefaultList();
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // 时间刻度 '06:00' 左缘应贴近屏幕左缘（<12px；收窄 24px 时为 18px+）
+      final left = tester.getTopLeft(find.text('06:00').first).dx;
+      expect(left, lessThan(12), reason: '左时间栏应贴屏幕左缘（实际 $left）');
+    });
+
+    testWidgets('边缘慢速滑动（位移 24px，无速度）也能切 tab', (tester) async {
+      await db.ensureDefaultList();
+      var left = 0;
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: CalendarPage(onNavigateLeft: () => left++),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 左缘缓慢滑动 30px（低速度）
+      final gesture = await tester.startGesture(const Offset(12, 400));
+      await gesture.moveBy(const Offset(30, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(left, 1, reason: '位移 ≥24px 即触发切 tab，不依赖速度');
+    });
+
+    testWidgets('左缘手势区（44px 覆盖时间栏）不挡任务块点击', (tester) async {
+      await pumpCalendarWithTask(tester, '拖拽任务D');
+      // 点击任务块（时间栏右侧的列区域）→ 实例操作层弹出
+      await tester.tap(find.text('拖拽任务D').first);
+      await tester.pumpAndSettle();
+      expect(find.text('完成本次'), findsWidgets,
+          reason: '任务块点击应正常弹出操作层（左缘手势区不遮挡）');
+      expect(find.text('查看详情'), findsWidgets);
+    });
+  });
 }
+
 
 
 

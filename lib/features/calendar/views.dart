@@ -81,13 +81,24 @@ class _WeekViewState extends ConsumerState<WeekView> {
   /// 0=未触发，1=向右已翻，-1=向左已翻；手指回中间才允许再次触发
   final ValueNotifier<int> _edgeState = ValueNotifier<int>(0);
 
+  // ---------- 共享拖拽状态（拖动任务改期跨页保持） ----------
+  /// 拖动中最后已知的全局指针位置（虚影/胶囊渲染坐标换算用）
+  final ValueNotifier<Offset?> dragGlobalPos = ValueNotifier<Offset?>(null);
+  /// 拖动中的任务 id（null = 无拖动）
+  final ValueNotifier<int?> dragTaskId = ValueNotifier<int?>(null);
+  /// 虚影/胶囊显示列（边缘翻页后由 _edgeTurn 更新为新页边缘列）
+  final ValueNotifier<DateTime?> dragActiveDay = ValueNotifier<DateTime?>(null);
+  /// 拖动任务显示信息（跨周后视图 items 不含旧周任务，虚影据此渲染）
+  final ValueNotifier<_DragGhostInfo?> dragGhostInfo =
+      ValueNotifier<_DragGhostInfo?>(null);
+  /// 共享边缘翻页控制器（连续翻周链跨页保持）
+  final _EdgeTurnController _edgeTurnCtrl = _EdgeTurnController();
+
   /// 共享垂直滚动位置（跨周翻页时新周继承当前滚动位置，避免跳回顶部）
   /// 优先使用外部传入的共享 notifier（周↔日切换连续）
   late final ValueNotifier<double> _sharedScrollOffset;
   ValueNotifier<double>? _ownScroll;
 
-  int _lastTurnMs = 0;
-  int _lastTurnDir = 0; // 跨页共享的方向节流：同方向短时间内不重复翻页
 
   /// P1-D：外部跳页目标页。跳页触发的 onPageChanged 只同步 _dragDay、
   /// 不回写 selectedDay（否则点"今天"后选中日被回归为周一）。
@@ -156,18 +167,19 @@ class _WeekViewState extends ConsumerState<WeekView> {
     _controller.dispose();
     _dragDay.dispose();
     _edgeState.dispose();
+    dragGlobalPos.dispose();
+    dragTaskId.dispose();
+    dragActiveDay.dispose();
+    dragGhostInfo.dispose();
+    _edgeTurnCtrl.timer?.cancel();
     // 仅释放自建的滚动 notifier（外部传入的由持有者管理）
     _ownScroll?.dispose();
     super.dispose();
   }
 
-  /// 边缘翻页（双节流：同方向 2 秒内不重复；翻页后手指需回中间才能再翻）
+  /// 边缘翻页（连续翻周：节奏由 _armEdgeTimer/_armContinuation 的
+  /// 300ms/800ms Timer 链控制，无需额外节流）
   void _edgeTurn(double dx) {
-    final nowMs = AppClock.now().millisecondsSinceEpoch;
-    final dir = dx > 0 ? 1 : -1;
-    if (dir == _lastTurnDir && nowMs - _lastTurnMs < 2000) return;
-    _lastTurnDir = dir;
-    _lastTurnMs = nowMs;
     final page = _controller.page?.round() ?? 500;
     if (dx > 0) {
       // 手指靠近右缘 → 下一页（下一周）
@@ -181,9 +193,13 @@ class _WeekViewState extends ConsumerState<WeekView> {
         curve: Curves.easeOutCubic,
       );
     }
-    // 同步目标日
+    // 同步目标日 + 虚影跟随到新页边缘列（右缘 → 新页最后一列，左缘 → 新页第一列）
     final offset = page - 500 + (dx > 0 ? 1 : -1);
-    _dragDay.value = _epochMonday.add(Duration(days: offset * 7));
+    final targetMonday = _epochMonday.add(Duration(days: offset * 7));
+    _dragDay.value = targetMonday;
+    dragActiveDay.value = dx > 0
+        ? targetMonday.add(const Duration(days: 6))
+        : targetMonday;
   }
 
   @override
@@ -226,6 +242,11 @@ class _WeekViewState extends ConsumerState<WeekView> {
             edgeState: _edgeState,
             scrollOffsetShare: _sharedScrollOffset,
             onEdgeTurn: _edgeTurn,
+            dragGlobalPos: dragGlobalPos,
+            dragTaskId: dragTaskId,
+            dragActiveDay: dragActiveDay,
+            dragGhostInfo: dragGhostInfo,
+            edgeTurnCtrl: _edgeTurnCtrl,
           ),
         );
       },
@@ -264,12 +285,20 @@ class _DayViewState extends ConsumerState<DayView> {
   /// 共享边缘滞回状态（同 WeekView）
   final ValueNotifier<int> _edgeState = ValueNotifier<int>(0);
 
+  // ---------- 共享拖拽状态（拖动任务改期跨页保持，同 WeekView） ----------
+  final ValueNotifier<Offset?> dragGlobalPos = ValueNotifier<Offset?>(null);
+  final ValueNotifier<int?> dragTaskId = ValueNotifier<int?>(null);
+  final ValueNotifier<DateTime?> dragActiveDay = ValueNotifier<DateTime?>(null);
+  /// 拖动任务显示信息（同 WeekView）
+  final ValueNotifier<_DragGhostInfo?> dragGhostInfo =
+      ValueNotifier<_DragGhostInfo?>(null);
+  /// 共享边缘翻页控制器（连续翻日链跨页保持）
+  final _EdgeTurnController _edgeTurnCtrl = _EdgeTurnController();
+
   /// 共享垂直滚动位置（跨日翻页时新日继承当前滚动位置）
   /// 优先使用外部传入的共享 notifier（周↔日切换连续）
   late final ValueNotifier<double> _sharedScrollOffset;
   ValueNotifier<double>? _ownScroll;
-  int _lastTurnMs = 0;
-  int _lastTurnDir = 0; // 跨页共享的方向节流
 
   int _pageFor(DateTime d) =>
       DateTime(d.year, d.month, d.day).difference(DateTime(2000, 1, 1)).inDays;
@@ -303,17 +332,17 @@ class _DayViewState extends ConsumerState<DayView> {
     _controller.dispose();
     _dragDay.dispose();
     _edgeState.dispose();
+    dragGlobalPos.dispose();
+    dragTaskId.dispose();
+    dragActiveDay.dispose();
+    dragGhostInfo.dispose();
+    _edgeTurnCtrl.timer?.cancel();
     // 仅释放自建的滚动 notifier（外部传入的由持有者管理）
     _ownScroll?.dispose();
     super.dispose();
   }
 
   void _edgeTurn(double dx) {
-    final nowMs = AppClock.now().millisecondsSinceEpoch;
-    final dir = dx > 0 ? 1 : -1;
-    if (dir == _lastTurnDir && nowMs - _lastTurnMs < 2000) return;
-    _lastTurnDir = dir;
-    _lastTurnMs = nowMs;
     final page = _controller.page?.round() ?? 0;
     if (dx > 0) {
       _controller.nextPage(
@@ -358,6 +387,11 @@ class _DayViewState extends ConsumerState<DayView> {
             edgeState: _edgeState,
             scrollOffsetShare: _sharedScrollOffset,
             onEdgeTurn: _edgeTurn,
+            dragGlobalPos: dragGlobalPos,
+            dragTaskId: dragTaskId,
+            dragActiveDay: dragActiveDay,
+            dragGhostInfo: dragGhostInfo,
+            edgeTurnCtrl: _edgeTurnCtrl,
           ),
         );
       },
@@ -402,6 +436,11 @@ class _TimeAxisView extends ConsumerStatefulWidget {
     this.edgeState,
     this.scrollOffsetShare,
     this.onEdgeTurn,
+    this.dragGlobalPos,
+    this.dragTaskId,
+    this.dragActiveDay,
+    this.dragGhostInfo,
+    this.edgeTurnCtrl,
   });
 
   final List<CalendarItem> items;
@@ -423,6 +462,15 @@ class _TimeAxisView extends ConsumerStatefulWidget {
 
   /// 边缘翻页回调（参数：手指靠近右缘为正、左缘为负）
   final ValueChanged<double>? onEdgeTurn;
+
+  /// 共享拖拽状态（WeekView/DayView 持有，翻页后新列据此恢复虚影/胶囊）
+  final ValueNotifier<Offset?>? dragGlobalPos;
+  final ValueNotifier<int?>? dragTaskId;
+  final ValueNotifier<DateTime?>? dragActiveDay;
+  final ValueNotifier<_DragGhostInfo?>? dragGhostInfo;
+
+  /// 共享边缘翻页控制器（连续翻周链跨页保持）
+  final _EdgeTurnController? edgeTurnCtrl;
 
   @override
   ConsumerState<_TimeAxisView> createState() => _TimeAxisViewState();
@@ -687,6 +735,11 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
                                           edgeState: widget.edgeState,
                                           scrollController: _scrollController,
                                           onEdgeTurn: widget.onEdgeTurn,
+                                          dragGlobalPos: widget.dragGlobalPos,
+                                          dragTaskId: widget.dragTaskId,
+                                          dragActiveDay: widget.dragActiveDay,
+                                          dragGhostInfo: widget.dragGhostInfo,
+                                          edgeTurnCtrl: widget.edgeTurnCtrl,
                                           // A13：列在视口内的左偏移（含分隔线）
                                           viewportLeft:
                                               i *
@@ -941,6 +994,31 @@ class _AllDayBar extends ConsumerWidget {
   }
 }
 
+/// 边缘翻页控制器（WeekView/DayView 持有，跨页共享）：
+/// 连续翻周链的 Timer/方向/最后位置不随列重建丢失，
+/// 离开边缘/松手时任意列都可统一取消
+class _EdgeTurnController {
+  Timer? timer;
+  int dir = 0;
+  double lastGlobalX = 0;
+}
+
+/// 拖动虚影渲染所需的任务信息（拖动开始时上报——
+/// 跨周后任务不在当前视图 items 中，虚影据此渲染而非查视图数据）
+class _DragGhostInfo {
+  final String title;
+  final int durationMinutes;
+  final String color;
+  final String listColor;
+
+  const _DragGhostInfo({
+    required this.title,
+    required this.durationMinutes,
+    required this.color,
+    required this.listColor,
+  });
+}
+
 /// 单日列（E7：长按拖动选择时间区间创建任务）
 class _DayColumn extends ConsumerStatefulWidget {
   const _DayColumn({
@@ -954,6 +1032,11 @@ class _DayColumn extends ConsumerStatefulWidget {
     this.scrollController,
     this.onEdgeTurn,
     this.viewportLeft = 0,
+    this.dragGlobalPos,
+    this.dragTaskId,
+    this.dragActiveDay,
+    this.dragGhostInfo,
+    this.edgeTurnCtrl,
   });
 
   final DateTime day;
@@ -985,6 +1068,16 @@ class _DayColumn extends ConsumerStatefulWidget {
   /// 周视图每列约 50px，胶囊 78px 必须跨列，钳制基准是整个视口）
   final double viewportLeft;
 
+  /// 共享拖拽状态（WeekView/DayView 持有——跨页后新列据此恢复虚影/胶囊；
+  /// 此前为列局部状态，翻页后新列无虚影、无法连续拖动）
+  final ValueNotifier<Offset?>? dragGlobalPos;
+  final ValueNotifier<int?>? dragTaskId;
+  final ValueNotifier<DateTime?>? dragActiveDay;
+  final ValueNotifier<_DragGhostInfo?>? dragGhostInfo;
+
+  /// 共享边缘翻页控制器（连续翻周链跨页保持，可统一取消）
+  final _EdgeTurnController? edgeTurnCtrl;
+
   @override
   ConsumerState<_DayColumn> createState() => _DayColumnState();
 }
@@ -994,24 +1087,19 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   double get columnWidth =>
       (widget.axisWidth - 44) / (widget.isWeek ? 7 : 1);
 
+  /// dragGlobalPos 为 null（无共享状态）时的兜底 notifier
+  static final ValueNotifier<Offset?> _noopPos = ValueNotifier<Offset?>(null);
+
+  /// 列容器 GlobalKey（虚影/胶囊全局→局部坐标换算基准）
+  final GlobalKey _columnKey = GlobalKey();
+
   // E7：拖动选时状态
   bool _dragSelecting = false;
   double? _dragStartY;
   double? _dragCurrentY;
-  /// A13：拖选时手指原始位置（_dragCurrentY 会被重写为选区大端，
-  /// 胶囊需显示"手指所指"的实时时间，故单独记录）
-  double? _dragFingerY;
 
-  // 拖动改期：当前拖入的任务与手指位置（顶部时间浮标）
-  int? _dragTaskId;
-  double? _dragY;
-  /// A12：拖动虚影位置通知器——onMove 高频更新只触发虚影层重建，
-  /// 不再 setState 重建整列任务块（此前拖动每帧重建整列 + O(n²) 布局）
-  final ValueNotifier<double?> _ghostY = ValueNotifier<double?>(null);
-
-  /// A13：悬浮时间胶囊位置（列内局部坐标）。
-  /// 拖动改期路径走 notifier 只重建胶囊层（保持 A12 性能优化），
-  /// 拖选路径在既有 setState 循环内同步更新。
+  /// 拖选胶囊位置（列内局部坐标；拖动任务路径的胶囊/虚影由共享状态
+  /// dragGlobalPos 驱动，见 Stack 渲染层）
   final ValueNotifier<Offset?> _hintPos = ValueNotifier<Offset?>(null);
 
   /// 选时目标日：
@@ -1036,13 +1124,10 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
 
   /// 拖动中靠近屏幕边缘自动翻页（右缘→下一页/下一周，左缘→上一页/上一周）
   ///
-  /// 三层防误触/防连翻：
+  /// 三层防误触：
   /// 1. 边缘区收紧到屏幕最外 6%/94%（周一/周日列约 14% 宽，拖任务到列内不误触）
   /// 2. 进入边缘区需持续停留 300ms 才触发（快速拖过定位不翻页）
-  /// 3. 共享滞回状态（WeekView/DayView 持有，翻页换列不丢）：
-  ///    同一方向翻页一次后需回中间区域才能再翻；拖动结束重置
-  Timer? _edgeTimer;
-  int _edgeDir = 0; // timer 的方向记录（切换方向时重新计时）
+  /// 3. 连续翻页链（Timer/方向/位置）存共享控制器（跨页保持，见 _EdgeTurnController）
 
   // ---------- 拖动垂直自动滚动（时间轴顶部/底部边缘） ----------
 
@@ -1091,48 +1176,64 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     _autoScrollTimer = null;
   }
 
+  /// 边缘翻周/日：进入边缘区停留 300ms 触发首次翻页；
+  /// 翻页后若指针仍停边缘 → 每 800ms 自动续翻（连续拖到多个周以后），
+  /// 离开边缘区或松手（_clearDragState）即停止。
+  /// Timer/方向/最后位置存共享控制器（跨页保持，任意列可取消）。
   void _maybeEdgeTurn(double globalX) {
     final onEdgeTurn = widget.onEdgeTurn;
     final state = widget.edgeState;
-    if (onEdgeTurn == null || state == null) return;
+    final ctrl = widget.edgeTurnCtrl;
+    if (onEdgeTurn == null || state == null || ctrl == null) return;
+    ctrl.lastGlobalX = globalX;
     final w = MediaQuery.of(context).size.width;
     if (globalX > w * 0.94) {
-      if (state.value == 1) return; // 同方向已触发，需回中间
-      if (_edgeTimer == null || _edgeDir != 1) {
-        _edgeTimer?.cancel();
-        _edgeDir = 1;
-        _edgeTimer = Timer(const Duration(milliseconds: 300), () {
-          _edgeTimer = null;
-          state.value = 1;
-          onEdgeTurn(1);
-        });
-      }
+      _armEdgeTimer(1, w, ctrl);
     } else if (globalX < w * 0.06) {
-      if (state.value == -1) return;
-      if (_edgeTimer == null || _edgeDir != -1) {
-        _edgeTimer?.cancel();
-        _edgeDir = -1;
-        _edgeTimer = Timer(const Duration(milliseconds: 300), () {
-          _edgeTimer = null;
-          state.value = -1;
-          onEdgeTurn(-1);
-        });
-      }
+      _armEdgeTimer(-1, w, ctrl);
     } else {
-      // 离开边缘区：取消计时并重置滞回
-      _edgeTimer?.cancel();
-      _edgeTimer = null;
-      _edgeDir = 0;
+      // 离开边缘区：取消计时（含连续链）
+      ctrl.timer?.cancel();
+      ctrl.timer = null;
+      ctrl.dir = 0;
       state.value = 0;
+    }
+  }
+
+  /// 调度边缘翻页：首次 300ms 延迟（快速拖过定位不误翻）；
+  /// 同向已有计时（含连续链）则不重复调度
+  void _armEdgeTimer(int dir, double w, _EdgeTurnController ctrl) {
+    if (ctrl.timer != null && ctrl.dir == dir) return;
+    ctrl.timer?.cancel();
+    ctrl.dir = dir;
+    ctrl.timer = Timer(const Duration(milliseconds: 300), () {
+      ctrl.timer = null;
+      widget.edgeState?.value = dir;
+      widget.onEdgeTurn?.call(dir.toDouble());
+      _armContinuation(dir, w, ctrl);
+    });
+  }
+
+  /// 连续翻页链：翻页后指针仍停边缘 → 800ms 后再翻，递归续链
+  void _armContinuation(int dir, double w, _EdgeTurnController ctrl) {
+    if (ctrl.lastGlobalX > w * 0.94 || ctrl.lastGlobalX < w * 0.06) {
+      ctrl.timer = Timer(const Duration(milliseconds: 800), () {
+        ctrl.timer = null;
+        widget.onEdgeTurn?.call(dir.toDouble());
+        _armContinuation(dir, w, ctrl);
+      });
     }
   }
 
   @override
   void dispose() {
-    _edgeTimer?.cancel();
     _stopAutoScroll();
-    _ghostY.dispose();
     _hintPos.dispose();
+    // 兜底：列被销毁（跨多周拖动超 cacheExtent 被 evict）时取消
+    // 共享连续翻页链 Timer（防 pending/幽灵翻页）；共享拖拽状态
+    // 由 onDraggableCanceled 清理（此处不动，避免误清其他列活跃拖动）
+    widget.edgeTurnCtrl?.timer?.cancel();
+    widget.edgeTurnCtrl?.dir = 0;
     super.dispose();
   }
 
@@ -1140,25 +1241,46 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   /// 指针拖出列范围/屏幕边缘空白区仍可靠检测；此前基于 DragTarget.onMove，
   /// 一旦 onLeave 触发即失效）
   void _handleDragGlobal(Offset global) {
+    // 共享拖拽位置（翻页后新列据此恢复虚影/胶囊）
+    widget.dragGlobalPos?.value = global;
     _maybeEdgeTurn(global.dx);
     _checkVerticalAutoScroll(global.dy);
   }
 
-  /// 拖动结束（松手）：统一清理边缘翻页/自动滚动状态（幂等，onAccept 后也会走）
-  void _handleDragEnd() {
+  /// 统一清理拖拽状态（松手/改期完成：共享虚影/胶囊 + 边缘/自动滚动）
+  void _clearDragState() {
+    widget.dragTaskId?.value = null;
+    widget.dragGlobalPos?.value = null;
+    widget.dragActiveDay?.value = null;
+    widget.dragGhostInfo?.value = null;
     _stopAutoScroll();
-    _edgeTimer?.cancel();
-    _edgeTimer = null;
-    _edgeDir = 0;
+    final ctrl = widget.edgeTurnCtrl;
+    ctrl?.timer?.cancel();
+    ctrl?.timer = null;
+    ctrl?.dir = 0;
     widget.edgeState?.value = 0;
-    _ghostY.value = null;
-    _hintPos.value = null;
-    if (mounted) {
-      setState(() {
-        _dragTaskId = null;
-        _dragY = null;
-      });
-    }
+  }
+
+  /// 拖动结束（松手）：统一清理（幂等，onAccept 后也会走）
+  void _handleDragEnd() {
+    _clearDragState();
+  }
+
+  /// 全局坐标 → 本列局部坐标（虚影/胶囊渲染换算）。
+  /// 用列容器 GlobalKey（build 期间 State.context 的 RenderObject 尚未
+  /// attach 返回 null——新列翻页后首次 build 时虚影会丢失）
+  Offset? _localFromGlobal(Offset gpos) {
+    final box = _columnKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
+    return box.globalToLocal(gpos);
+  }
+
+  /// 虚影/胶囊渲染换算兜底：列未布局（build 期间）时调度一帧后重算
+  void _retryLocalAfterLayout() {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   /// 是否显示在顶部置顶区（全天 / 无计划时间 / 跨天任务）
@@ -1168,48 +1290,39 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     final blocks = _layoutOverlap(widget.items);
     final notifier = ref.read(calendarControllerProvider.notifier);
     return DragTarget<int>(
+      key: _columnKey,
       onWillAcceptWithDetails: (_) => true,
       onMove: (details) {
-        _maybeEdgeTurn(details.offset.dx);
-        final box = context.findRenderObject() as RenderBox?;
-        if (box == null) return;
-        final local = box.globalToLocal(details.offset);
-        final dy = local.dy;
-        if (_dragTaskId == details.data &&
-            _dragY != null &&
-            (dy - _dragY!).abs() < 4) {
-          return; // 微小位移不重建
-        }
-        // A12：只更新字段 + 虚影通知器，不 setState 整列重建
-        _dragTaskId = details.data;
-        _dragY = dy;
-        _ghostY.value = dy;
-        // A13：悬浮时间胶囊跟随手指
-        _hintPos.value = Offset(local.dx, dy);
-        // 垂直自动滚动：手指接近时间轴视口顶部/底部时滚动
-        _checkVerticalAutoScroll(details.offset.dy);
+        // 共享拖拽状态：任务 id + 悬停列（虚影/胶囊渲染由共享
+        // dragGlobalPos 驱动，_handleDragGlobal 更新）
+        widget.dragTaskId?.value = details.data;
+        widget.dragActiveDay?.value = widget.day;
+        // 指针进入列内 = 离开屏幕边缘区 → 取消连续翻页链。
+        // onMove 由 avatar 悬停检测驱动（独立于 Draggable State）——
+        // 跨多周后 Draggable 被 dispose 时 onDragUpdate 失效，
+        // 此处是可靠的取消兜底（否则连续翻周停不下来）
+        final ctrl = widget.edgeTurnCtrl;
+        ctrl?.timer?.cancel();
+        ctrl?.timer = null;
+        ctrl?.dir = 0;
       },
       onLeave: (details) {
-        if (_dragTaskId == null) return;
-        _stopAutoScroll();
-        // 注意：不再取消 _edgeTimer——拖动离开列后指针仍可能停在
-        // 屏幕边缘（布局收窄后的边缘区），边缘翻周由 Draggable
-        // onDragUpdate 全局坐标继续驱动（_handleDragGlobal）；
+        // 注意：不再清共享拖拽状态——指针离开本列后虚影保留在
+        // 活动列（边缘翻周由 Draggable 全局坐标继续驱动）；
         // 松手时由 _handleDragEnd 统一清理
+        _stopAutoScroll();
         widget.edgeState?.value = 0; // 重置边缘滞回
-        _ghostY.value = null;
-        _hintPos.value = null;
-        setState(() {
-          _dragTaskId = null;
-          _dragY = null;
-        });
       },
       onAcceptWithDetails: (details) async {
-        // 落点局部坐标 → 吸附 10 分钟 → 改期（含时分，支持跨天）
+        // 落点局部坐标 → 吸附 10 分钟 → 改期（含时分，支持跨天）。
+        // 注意：details.offset 是相对拖拽锚点的偏移（SDK 内部
+        // _lastOffset = 指针 − dragStartPoint），不能当全局坐标用；
+        // 用共享 dragGlobalPos（Draggable 全局坐标）换算本列局部位置
+        final gpos = widget.dragGlobalPos?.value;
         final box = context.findRenderObject() as RenderBox?;
         var dy = 0.0;
-        if (box != null) {
-          dy = box.globalToLocal(details.offset).dy;
+        if (box != null && gpos != null) {
+          dy = box.globalToLocal(gpos).dy;
         }
         final minutes = (widget.startHour * 60 + dy / _pixelPerHour * 60)
             .roundToDouble()
@@ -1261,37 +1374,12 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
           );
           if (ok != true) {
             // 取消系列改期：同样清理拖动状态，避免浮标/幽灵块残留
-
-            _stopAutoScroll();
-            _edgeTimer?.cancel();
-            _edgeTimer = null;
-            _edgeDir = 0;
-            widget.edgeState?.value = 0; // 重置边缘滞回
-            _hintPos.value = null;
-            if (mounted) {
-              setState(() {
-                _dragTaskId = null;
-                _dragY = null;
-              });
-            }
+            _clearDragState();
             return;
           }
           await notifier.moveTaskToDateTimeSeries(details.data, target);
           // 拖动结束：清空状态让浮标消失
-
-          _stopAutoScroll();
-          _edgeTimer?.cancel();
-          _edgeTimer = null;
-          _edgeDir = 0;
-          widget.edgeState?.value = 0; // 重置边缘滞回
-          _ghostY.value = null;
-          _hintPos.value = null;
-          if (mounted) {
-            setState(() {
-              _dragTaskId = null;
-              _dragY = null;
-            });
-          }
+          _clearDragState();
           if (context.mounted) {
             showAppSnackBar(
               context,
@@ -1305,20 +1393,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
         }
         await notifier.moveTaskToDateTime(details.data, target);
         // 拖动结束：清空状态让浮标消失
-
-        _stopAutoScroll();
-        _edgeTimer?.cancel();
-        _edgeTimer = null;
-        _edgeDir = 0;
-        widget.edgeState?.value = 0; // 重置边缘滞回
-        _ghostY.value = null;
-        _hintPos.value = null;
-        if (mounted) {
-          setState(() {
-            _dragTaskId = null;
-            _dragY = null;
-          });
-        }
+        _clearDragState();
       },
       builder: (context, candidate, _) {
         return GestureDetector(
@@ -1351,7 +1426,6 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
           onLongPressStart: (details) {
             if (candidate.isNotEmpty) return;
             Haptics.select();
-            _dragFingerY = details.localPosition.dy;
             setState(() {
               _dragSelecting = true;
               _dragStartY = details.localPosition.dy;
@@ -1367,7 +1441,6 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
             if (!_dragSelecting) return;
             // 边缘自动翻页（选时跨周/跨天）
             _maybeEdgeTurn(details.globalPosition.dx);
-            _dragFingerY = details.localPosition.dy;
             // 实时吸附：预览高亮区跟随 10 分钟粒度，松手结果一致
             setState(() {
               final (sy, ey) = _snappedYRange(
@@ -1387,7 +1460,6 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
             if (!_dragSelecting) return;
             final start = _dragStartY ?? 0;
             final end = _dragCurrentY ?? start;
-            _dragFingerY = null;
             _hintPos.value = null;
             setState(() {
               _dragSelecting = false;
@@ -1459,6 +1531,23 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                           // 边缘翻周/日 + 垂直自动滚动：Draggable 全局坐标驱动
                           onDragPosition: _handleDragGlobal,
                           onDragEnd: _handleDragEnd,
+                          onDragCanceled: _clearDragState,
+                          onDragStartedTask: (id) {
+                            widget.dragTaskId?.value = id;
+                            // 上报任务显示信息：跨周后视图 items 不含旧周
+                            // 任务，虚影渲染据此（title/时长/颜色）
+                            for (final it in widget.items) {
+                              if (it.task.id == id) {
+                                widget.dragGhostInfo?.value = _DragGhostInfo(
+                                  title: it.task.title,
+                                  durationMinutes: it.task.durationMinutes,
+                                  color: it.task.color,
+                                  listColor: it.listColor,
+                                );
+                                break;
+                              }
+                            }
+                          },
                         ),
                       ),
                     ),
@@ -1498,118 +1587,72 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
                       ),
                     ),
                   ),
-                // 拖动改期虚影：目标位置实时预览（最上层，跟随手指）
-                // A12：ValueListenableBuilder 只重建虚影层（不再整列重建）；
-                // A11：AnimatedPositioned 80ms 平滑滑向吸附点（不再 10 分钟步进跳动）
-                ValueListenableBuilder<double?>(
-                  valueListenable: _ghostY,
-                  builder: (context, gy, _) {
-                    if (gy == null || _dragTaskId == null) {
+                // 拖动改期虚影：目标位置实时预览（最上层，跟随手指）。
+                // 由共享拖拽状态驱动（dragGlobalPos/dragTaskId/dragActiveDay）——
+                // 翻周/翻日后新列据此恢复虚影，可连续跨页拖动
+                ValueListenableBuilder<Offset?>(
+                  valueListenable: widget.dragGlobalPos ?? _noopPos,
+                  builder: (context, gpos, _) {
+                    if (gpos == null ||
+                        widget.dragTaskId?.value == null ||
+                        !_isActiveColumn()) {
+                      return const SizedBox.shrink();
+                    }
+                    final local = _localFromGlobal(gpos);
+                    if (local == null) {
+                      _retryLocalAfterLayout(); // 列未布局：下一帧重算
                       return const SizedBox.shrink();
                     }
                     return AnimatedPositioned(
                       duration: const Duration(milliseconds: 80),
                       curve: Curves.easeOut,
                       // P1-7：虚影位置 = 实际写入（C5-1 回退后）的开始时间
-                      top: _ghostTopFor(gy),
+                      top: _ghostTopFor(local.dy),
                       left: 2,
                       right: 2,
                       height: (_dragGhostHeight()),
-                      child: _dragGhost(),
+                      child: _dragGhost(local.dy),
                     );
                   },
                 ),
-                // A13：悬浮时间胶囊——跟随手指上方显示当前吸附时间，
-                // 防止手指遮挡（拖动改期 + 长按拖选共用；顶部空间不足时翻到手指下方）
+                // A13：拖动任务胶囊（共享状态驱动，跨页保持）
+                ValueListenableBuilder<Offset?>(
+                  valueListenable: widget.dragGlobalPos ?? _noopPos,
+                  builder: (context, gpos, _) {
+                    if (gpos == null ||
+                        widget.dragTaskId?.value == null ||
+                        !_isActiveColumn()) {
+                      return const SizedBox.shrink();
+                    }
+                    final local = _localFromGlobal(gpos);
+                    if (local == null) {
+                      _retryLocalAfterLayout(); // 列未布局：下一帧重算
+                      return const SizedBox.shrink();
+                    }
+                    final gStart = _draggedStartForMinutes(
+                      _snapMinutesForY(local.dy),
+                    );
+                    return _buildHintCapsule(
+                      local: local,
+                      anchorY: ((gStart.hour * 60 + gStart.minute) -
+                                  widget.startHour * 60) /
+                              60 *
+                              _pixelPerHour,
+                      text: DateUtilsEx.timeCn(gStart),
+                    );
+                  },
+                ),
+                // A13：拖选胶囊（长按选时，列局部状态——选区跨页保持不在本次范围）
                 ValueListenableBuilder<Offset?>(
                   valueListenable: _hintPos,
                   builder: (context, pos, _) {
-                    final text = _hintTimeText();
-                    if (pos == null || text == null) {
+                    if (pos == null || !_dragSelecting) {
                       return const SizedBox.shrink();
                     }
-                    const capH = 28.0;
-                    const capW = 78.0;
-                    final maxY = (_endHour - widget.startHour) * _pixelPerHour;
-                    // A13：垂直锚点 = 选区/虚影上端（而非手指位置），
-                    // 胶囊始终在任务块上方，不遮挡选区内容
-                    final double anchorY;
-                    if (_dragSelecting && _dragStartY != null) {
-                      anchorY = _dragStartY!; // move 后已写回吸附后的选区上端
-                    } else if (_dragTaskId != null && _dragY != null) {
-                      // P1-7：胶囊锚点 = 实际写入（回退后）的开始时间位置
-                      final gStart =
-                          _draggedStartForMinutes(_snapMinutesForY(_dragY!));
-                      anchorY = ((gStart.hour * 60 + gStart.minute) -
-                                  widget.startHour * 60) /
-                              60 *
-                              _pixelPerHour;
-                    } else {
-                      return const SizedBox.shrink();
-                    }
-                    var top = anchorY - capH - 12;
-                    if (top < 4) top = anchorY + 12; // 顶部空间不足 → 贴选区上端下方
-                    top = top.clamp(4.0, maxY - capH - 4);
-                    // A13：水平按整个时间轴视口宽 clamp（周视图单列仅约 50px，
-                    // 按列 clamp 会因 min>max 抛 ArgumentError 使整列崩溃；
-                    // 胶囊是浮层，允许跨列绘制）。
-                    // 列内 Positioned 坐标换算：视口内位置 = viewportLeft + 列内 dx，
-                    // 先钳制在视口内再减回列偏移——周日列胶囊右缘不再超出视口被裁
-                    final viewportW = columnWidth * (widget.isWeek ? 7 : 1);
-                    final left =
-                        (widget.viewportLeft + pos.dx - capW / 2).clamp(
-                              4.0,
-                              viewportW - capW - 4,
-                            ) -
-                        widget.viewportLeft;
-                    final scheme = Theme.of(context).colorScheme;
-                    return Positioned(
-                      top: top,
-                      left: left,
-                      width: capW,
-                      child: IgnorePointer(
-                        child: Container(
-                          height: capH,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          decoration: BoxDecoration(
-                            color: scheme.inverseSurface,
-                            borderRadius: BorderRadius.circular(capH / 2),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.25),
-                                blurRadius: 6,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            // 防溢出：Ahem 测试字体/系统大字体下 5 字符时间
-                            // 可超过胶囊可用宽，Flexible+ellipsis 兜底
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.schedule,
-                                size: 13,
-                                color: scheme.onInverseSurface,
-                              ),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  text,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: scheme.onInverseSurface,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    return _buildHintCapsule(
+                      local: pos,
+                      anchorY: _dragStartY ?? pos.dy,
+                      text: _selectionHintText(),
                     );
                   },
                 ),
@@ -1621,29 +1664,22 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     );
   }
 
-  /// 拖动改期虚影：目标位置实时预览（半透明任务块 + 标题 + 时间）
-  Widget _dragGhost() {
-    final draggingId = _dragTaskId;
-    final dragY = _dragY;
-    if (draggingId == null || dragY == null) return const SizedBox.shrink();
-    final itemsAll = ref.read(calendarControllerProvider).items;
-    CalendarItem? dragged;
-    for (final it in itemsAll) {
-      if (it.task.id == draggingId) {
-        dragged = it;
-        break;
-      }
-    }
-    if (dragged == null) return const SizedBox.shrink();
+  /// 拖动改期虚影：目标位置实时预览（半透明任务块 + 标题 + 时间）。
+  /// [localY]：指针在本列内的 y（由共享全局位置换算）。
+  /// 任务显示信息来自共享 dragGhostInfo（拖动开始时上报——跨周后
+  /// 视图 items 不含旧周任务，不可再按 id 查询）
+  Widget _dragGhost(double localY) {
+    final info = widget.dragGhostInfo?.value;
+    if (info == null) return const SizedBox.shrink();
     final brightness = Theme.of(context).brightness;
     final color =
-        TaskColors.colorOf(dragged.task.color, brightness) ??
-        colorFromHex(dragged.listColor);
+        TaskColors.colorOf(info.color, brightness) ??
+        colorFromHex(info.listColor);
     final onColor = TaskColors.textOn(color);
-    final snapped = _snapMinutesForY(dragY);
+    final snapped = _snapMinutesForY(localY);
     // P1-7：虚影显示实际写入的开始时间（C5-1 回退后），所见即所得
     final start = _draggedStartForMinutes(snapped);
-    final dur = dragged.task.durationMinutes;
+    final dur = info.durationMinutes;
     final end = start.add(Duration(minutes: dur));
     return IgnorePointer(
       child: Container(
@@ -1668,7 +1704,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              dragged.task.title,
+              info.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -1702,16 +1738,10 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
 
   /// 虚影高度（被拖任务时长对应；不足 30 分钟按 30 分钟，与实块一致）
   double _dragGhostHeight() {
-    final draggingId = _dragTaskId;
-    if (draggingId == null) return _pixelPerHour;
-    final itemsAll = ref.read(calendarControllerProvider).items;
-    for (final it in itemsAll) {
-      if (it.task.id == draggingId) {
-        final h = it.task.durationMinutes / 60 * _pixelPerHour;
-        return h < 32 ? 32 : h;
-      }
-    }
-    return _pixelPerHour;
+    final info = widget.dragGhostInfo?.value;
+    if (info == null) return _pixelPerHour;
+    final h = info.durationMinutes / 60 * _pixelPerHour;
+    return h < 32 ? 32 : h;
   }
 
   /// P1-7：拖动改期虚影的实际开始时间——落点分钟经 C5-1"时长不跨天"
@@ -1732,13 +1762,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
   }
 
   int? _draggedDurationMinutes() {
-    final draggingId = _dragTaskId;
-    if (draggingId == null) return null;
-    final itemsAll = ref.read(calendarControllerProvider).items;
-    for (final it in itemsAll) {
-      if (it.task.id == draggingId) return it.task.durationMinutes;
-    }
-    return null;
+    return widget.dragGhostInfo?.value?.durationMinutes;
   }
 
   /// P1-7：虚影在时间轴内的 top——基于实际写入（C5-1 回退后）的开始时间
@@ -1798,28 +1822,88 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     return '${DateUtilsEx.timeCn(t1)} - ${DateUtilsEx.timeCn(t2)}';
   }
 
-  /// A13：悬浮时间胶囊文本（单时间，防遮挡）：
-  /// - 拖动改期：实际写入的开始时间（C5-1 回退后，P1-7 与写入一致）
-  /// - 长按拖选：手指所指的实时时间（_dragFingerY，向上/向下拖都指哪显示哪）
-  String? _hintTimeText() {
-    if (_dragSelecting && _dragFingerY != null) {
-      final minutes = _snapMinutesForY(_dragFingerY!);
-      return DateUtilsEx.timeCn(
-        DateTime(
-          widget.day.year,
-          widget.day.month,
-          widget.day.day,
-          minutes ~/ 60,
-          minutes % 60,
+  /// 本列是否为共享拖拽的"活动列"（虚影/胶囊仅显示在活动列；
+  /// 边缘翻周后由 WeekView/DayView._edgeTurn 更新为新页边缘列）
+  bool _isActiveColumn() {
+    final active = widget.dragActiveDay?.value;
+    return active != null && DateUtilsEx.sameDay(active, widget.day);
+  }
+
+  /// 悬浮时间胶囊（拖动任务 + 长按拖选共用渲染）：
+  /// [local] 胶囊锚定位置（列内局部），[anchorY] 垂直锚点（选区/虚影上端），
+  /// 顶部空间不足时翻到锚点下方；水平按整个时间轴视口宽钳制（允许跨列绘制）
+  Widget _buildHintCapsule({
+    required Offset local,
+    required double anchorY,
+    required String text,
+  }) {
+    const capH = 28.0;
+    const capW = 78.0;
+    final maxY = (_endHour - widget.startHour) * _pixelPerHour;
+    var top = anchorY - capH - 12;
+    if (top < 4) top = anchorY + 12; // 顶部空间不足 → 贴锚点下方
+    top = top.clamp(4.0, maxY - capH - 4);
+    // A13：水平按整个时间轴视口宽 clamp（周视图单列仅约 50px，
+    // 按列 clamp 会因 min>max 抛 ArgumentError 使整列崩溃；
+    // 胶囊是浮层，允许跨列绘制）。
+    // 列内 Positioned 坐标换算：视口内位置 = viewportLeft + 列内 dx，
+    // 先钳制在视口内再减回列偏移——周日列胶囊右缘不再超出视口被裁
+    final viewportW = columnWidth * (widget.isWeek ? 7 : 1);
+    final left =
+        (widget.viewportLeft + local.dx - capW / 2).clamp(
+              4.0,
+              viewportW - capW - 4,
+            ) -
+        widget.viewportLeft;
+    final scheme = Theme.of(context).colorScheme;
+    return Positioned(
+      top: top,
+      left: left,
+      width: capW,
+      child: IgnorePointer(
+        child: Container(
+          height: capH,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: scheme.inverseSurface,
+            borderRadius: BorderRadius.circular(capH / 2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            // 防溢出：Ahem 测试字体/系统大字体下 5 字符时间
+            // 可超过胶囊可用宽，Flexible+ellipsis 兜底
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.schedule,
+                size: 13,
+                color: scheme.onInverseSurface,
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onInverseSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-      );
-    }
-    if (_dragTaskId != null && _dragY != null) {
-      return DateUtilsEx.timeCn(
-        _draggedStartForMinutes(_snapMinutesForY(_dragY!)),
-      );
-    }
-    return null;
+      ),
+    );
   }
 
   /// C6-1：点空白位置（预填计划时刻用）
@@ -2082,6 +2166,8 @@ class _TaskBlock extends ConsumerWidget {
     this.showTime = false,
     this.onDragPosition,
     this.onDragEnd,
+    this.onDragCanceled,
+    this.onDragStartedTask,
   });
 
   final CalendarItem item;
@@ -2093,6 +2179,10 @@ class _TaskBlock extends ConsumerWidget {
   final ValueChanged<Offset>? onDragPosition;
   /// 拖动结束（松手）回调：清理边缘/自动滚动状态
   final VoidCallback? onDragEnd;
+  /// 拖动被取消/任务列被 evict 时兜底清理（见 onDraggableCanceled）
+  final VoidCallback? onDragCanceled;
+  /// 拖动开始回调（上报任务 id——共享拖拽状态据此显示虚影/胶囊）
+  final ValueChanged<int>? onDragStartedTask;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -2109,11 +2199,20 @@ class _TaskBlock extends ConsumerWidget {
     if (allDay) return block;
     return LongPressDraggable<int>(
       data: item.task.id,
-      onDragStarted: () => Haptics.select(),
+      onDragStarted: () {
+        Haptics.select();
+        // 上报任务 id：共享拖拽状态据此显示虚影/胶囊
+        onDragStartedTask?.call(item.task.id);
+      },
       // 边缘翻周/日：Draggable 全局坐标驱动（此前依赖 DragTarget.onMove，
       // 指针离开列范围即失效）
       onDragUpdate: (d) => onDragPosition?.call(d.globalPosition),
       onDragEnd: (_) => onDragEnd?.call(),
+      // 兜底：拖动中任务所在列被 PageView evict（跨多周后超 cacheExtent）
+      // 导致 Draggable State dispose（mounted=false）时 onDragEnd 不回调
+      //（SDK 有 mounted 检查），onDraggableCanceled 无此限制——据此清理
+      // 共享拖拽状态与连续翻页链（否则 Timer pending/状态残留）
+      onDraggableCanceled: (_, _) => onDragCanceled?.call(),
       // 拖动不显示悬浮块：目标位置由虚影（_dragGhost）实时预览
       feedback: Material(
         color: Colors.transparent,
@@ -2609,4 +2708,7 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
     return l?.name ?? '';
   }
 }
+
+
+
 

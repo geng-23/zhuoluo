@@ -11,7 +11,8 @@ import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 日历页（E12：视图切换/月份选择/今天/添加收进左侧侧边栏）
 /// 丝滑交互：左右边缘 24dp 区域滑动切换底部 tab（左缘右滑 → 上一个，
 /// 右缘左滑 → 下一个），中间区域滑动翻月/翻周/翻日。
-/// 实现：body 视图收窄 24dp×2，边缘为独立手势区——与 PageView 零手势竞争，
+/// 实现：body 视图右缘收窄 rightEdge（左缘 0——时间栏贴屏幕左边），
+/// 左右边缘为独立手势区——与 PageView 零手势竞争，
 /// 任务块点击/长按/拖动不受影响（拖动边缘翻周由 Draggable 全局坐标驱动）。
 class CalendarPage extends ConsumerWidget {
   const CalendarPage({
@@ -25,8 +26,11 @@ class CalendarPage extends ConsumerWidget {
   /// 屏幕右边缘向左滑（切到下一个 tab，如四象限）
   final VoidCallback? onNavigateRight;
 
-  /// 边缘手势区宽度（dp）：视图整体收窄 2×edgeWidth
-  static const double edgeWidth = 24;
+  /// 左边缘手势区宽度（dp）：覆盖时间栏区域（时间栏无交互元素），
+  /// 视图左侧不收窄——时间栏贴屏幕左缘
+  static const double leftEdgeWidth = 44;
+  /// 右边缘手势区宽度（dp）：视图右缘收窄让位
+  static const double rightEdgeWidth = 40;
 
   static final GlobalKey<ScaffoldState> scaffoldKey =
       GlobalKey<ScaffoldState>();
@@ -63,10 +67,10 @@ class CalendarPage extends ConsumerWidget {
       ),
       body: Stack(
         children: [
-          // 中间视图（收窄，边缘让位给手势区）
+          // 中间视图（右缘收窄让位给手势区；左缘 0——时间栏贴屏幕左边）
           Positioned.fill(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: edgeWidth),
+              padding: const EdgeInsets.only(right: rightEdgeWidth),
               child: Column(
                 children: [
                   Expanded(
@@ -129,22 +133,22 @@ class CalendarPage extends ConsumerWidget {
             ),
           ),
         ),
-        // 左边缘手势区：右滑 → 上一个 tab（任务）
+        // 左边缘手势区（覆盖时间栏区域，44dp）：右滑 → 上一个 tab（任务）
         Positioned(
           left: 0,
           top: 0,
           bottom: 0,
-          width: edgeWidth,
+          width: leftEdgeWidth,
           child: _EdgeSwipeStrip(
             onSwipeRight: onNavigateLeft,
           ),
         ),
-        // 右边缘手势区：左滑 → 下一个 tab（四象限）
+        // 右边缘手势区（40dp）：左滑 → 下一个 tab（四象限）
         Positioned(
           right: 0,
           top: 0,
           bottom: 0,
-          width: edgeWidth,
+          width: rightEdgeWidth,
           child: _EdgeSwipeStrip(
             onSwipeLeft: onNavigateRight,
           ),
@@ -221,28 +225,41 @@ class CalendarPage extends ConsumerWidget {
 }
 
 /// 边缘滑动切 tab 手势区（丝滑交互）：
-/// 覆盖屏幕左/右边缘 24dp 独立区域（视图已收窄，与其零手势竞争），
-/// 快速右滑 → [onSwipeRight]，快速左滑 → [onSwipeLeft]。
+/// 覆盖屏幕左/右边缘独立区域（视图已让位，与其零手势竞争），
+/// 累计位移 ≥24dp 即触发（此前依赖 velocity>400 难以触发）；
+/// 右滑 → [onSwipeRight]，左滑 → [onSwipeLeft]。
 /// 拖动任务到边缘翻周/日由 Draggable 全局坐标驱动（views.dart _handleDragGlobal），
 /// 与此手势区互不干扰（拖动起点在任务块上，本区 recognizer 不参与）。
-class _EdgeSwipeStrip extends StatelessWidget {
+class _EdgeSwipeStrip extends StatefulWidget {
   const _EdgeSwipeStrip({this.onSwipeRight, this.onSwipeLeft});
 
   final VoidCallback? onSwipeRight;
   final VoidCallback? onSwipeLeft;
 
   @override
+  State<_EdgeSwipeStrip> createState() => _EdgeSwipeStripState();
+}
+
+class _EdgeSwipeStripState extends State<_EdgeSwipeStrip> {
+  /// 累计水平位移（手势内）
+  double _dx = 0;
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onHorizontalDragEnd: (details) {
-        final v = details.primaryVelocity ?? 0;
-        if (v > 400) {
-          onSwipeRight?.call();
-        } else if (v < -400) {
-          onSwipeLeft?.call();
+      onHorizontalDragStart: (_) => _dx = 0,
+      onHorizontalDragUpdate: (d) => _dx += d.delta.dx,
+      onHorizontalDragEnd: (_) {
+        // 位移 ≥24dp 且方向明确 → 切 tab（不依赖速度，慢速滑动也可触发）
+        if (_dx > 24) {
+          widget.onSwipeRight?.call();
+        } else if (_dx < -24) {
+          widget.onSwipeLeft?.call();
         }
+        _dx = 0;
       },
+      onHorizontalDragCancel: () => _dx = 0,
       child: const ColoredBox(color: Colors.transparent),
     );
   }

@@ -148,9 +148,15 @@ class AppDatabase extends _$AppDatabase {
   MigrationStrategy get migration => MigrationStrategy(
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');
-      // v3：旧库补唯一索引（新库由表定义 uniqueKeys 自动生成）
+      // v3：旧库补唯一索引（新库由表定义 uniqueKeys 自动生成）；
+      // 容错：不完整旧库可能无该表（与 v5 同款容错）
       if (details.versionBefore != null && details.versionBefore! < 3) {
-        await _dedupeCompletionsAndIndex();
+        try {
+          await _dedupeCompletionsAndIndex();
+        } catch (e) {
+          // ignore: avoid_print
+          print('v3 启动补索引跳过（task_completions 表缺失）: $e');
+        }
       }
       // v5：旧库补习惯打卡唯一索引（新库由表定义 uniqueKeys 自动生成）；
       // 容错：不完整旧库可能无该表
@@ -179,8 +185,14 @@ class AppDatabase extends _$AppDatabase {
         await m.addColumn(reminders, reminders.remindAtMinutes);
       }
       if (from < 3) {
-        // v3：task_completions 加唯一约束，先清理重复行（崩溃修复）
-        await _dedupeCompletionsAndIndex();
+        // v3：task_completions 加唯一约束，先清理重复行（崩溃修复）；
+        // 容错：不完整旧库可能无该表（与 v5 同款容错）
+        try {
+          await _dedupeCompletionsAndIndex();
+        } catch (e) {
+          // ignore: avoid_print
+          print('v3 迁移跳过（task_completions 表缺失）: $e');
+        }
       }
       if (from < 2) {
         // v0.2：scheduled_date+start_time+duration_minutes → plan_start+plan_end；due_date → due_time；新增 color

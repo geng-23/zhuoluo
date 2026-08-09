@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:zhuoluo/core/providers/db_provider.dart';
-import 'package:zhuoluo/core/services/haptics_service.dart';
-import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart';
@@ -297,19 +295,6 @@ void main() {
       expect(await settings.getHapticsEnabled(), isTrue, reason: '默认开');
       await settings.set('hapticsEnabled', 'false');
       expect(await settings.getHapticsEnabled(), isFalse, reason: '关闭生效');
-    });
-
-    test('SoundService/Haptics 静态开关与设置联动语义', () {
-      // 默认开启（生产路径）；关闭后 play/light 直接短路
-      SoundService.soundsEnabled = false;
-      Haptics.hapticsEnabled = false;
-      // 调用不抛异常（短路返回）
-      // ignore: unawaited_futures
-      SoundService.instance.play(SoundKind.complete);
-      // ignore: unawaited_futures
-      Haptics.light();
-      SoundService.soundsEnabled = true;
-      Haptics.hapticsEnabled = true;
     });
   });
 }

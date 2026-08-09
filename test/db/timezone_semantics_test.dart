@@ -2,10 +2,14 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/data/database/database.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
+
+import '../support/fake_notification_scheduler.dart';
 
 /// 跨时区语义测试：应用时区 ≠ 系统时区时，
 /// 任务墙上时间/提醒基准/RRULE 命中/完成记录归一化/日历按天索引
@@ -108,11 +112,21 @@ void main() {
       todayApp.millisecondsSinceEpoch,
       reason: '触发绝对时刻 = 应用时区今天 09:00',
     );
-    // 与系统时区（UTC+8）视角换算一致：纽约 09:00 = UTC 当天 13:00
+    // 与系统时区（UTC+8）视角换算一致：用 timezone 包动态换算纽约 09:00
+    // 的 UTC 时刻（夏令时 = 13:00，冬令时 = 14:00），不硬编码偏移
+    final nyLoc = tz.getLocation('America/New_York');
+    final expectedUtc = tz.TZDateTime(
+      nyLoc,
+      now.year,
+      now.month,
+      now.day,
+      9,
+      0,
+    ).toUtc();
     expect(
       trigger.millisecondsSinceEpoch,
-      DateTime.utc(now.year, now.month, now.day, 13, 0).millisecondsSinceEpoch,
-      reason: '纽约 09:00 = UTC 当天 13:00',
+      expectedUtc.millisecondsSinceEpoch,
+      reason: '纽约 09:00 = UTC 动态换算值',
     );
   });
 
@@ -304,5 +318,53 @@ void main() {
     );
     expect(counts[todayKey], 1,
         reason: '统计按完成时刻（应用时区今天）归组');
+  });
+
+  test('reminderTriggerAt：DB 读回任务（系统时区字段）不偏移', () async {
+    final id = await insertTask(
+      title: '早会',
+      start: AppClock.at(2026, 8, 10, 9, 0),
+      rrule: 'FREQ=DAILY',
+    );
+    final t = (await db.getTask(id))!;
+    // t.planStart 是 DB 读回值：绝对时刻正确但字段按系统时区（UTC+8）解释，
+    // 取字段前必须按应用时区重新解释（否则纽约 09:00 会读成 21:00）
+    final trigger = reminderTriggerAt(t, 0);
+    expect(trigger, isNotNull);
+    final now = AppClock.now();
+    final expected = AppClock.at(now.year, now.month, now.day, 9, 0);
+    expect(
+      trigger!.millisecondsSinceEpoch,
+      expected.millisecondsSinceEpoch,
+      reason: 'DB 往返后提醒基准仍为应用时区 09:00（修复前为系统时区 21:00）',
+    );
+  });
+
+  test('scheduleTask：DB 读回任务的提醒触发时刻按应用时区', () async {
+    final fake = FakeNotificationScheduler();
+    NotificationService.instance.debugOverrideScheduler = fake;
+    addTearDown(
+      () => NotificationService.instance.debugOverrideScheduler = null,
+    );
+    final id = await insertTask(
+      title: '早会',
+      start: AppClock.at(2026, 8, 10, 9, 0),
+      rrule: 'FREQ=DAILY',
+    );
+    await db.insertReminder(
+      RemindersCompanion.insert(
+        taskId: id,
+        remindMinutesBefore: const Value(0),
+      ),
+    );
+    final t = (await db.getTask(id))!;
+    final scheduler = ReminderScheduler(db);
+    final ok = await scheduler.scheduleTask(t, AppClock.now());
+    expect(ok, isTrue, reason: '调度应成功');
+    expect(fake.scheduled, isNotEmpty,
+        reason: '93 天窗口内应有实例通知');
+    final a = AppClock.asApp(fake.scheduled.first.when);
+    expect(a.hour, 9, reason: '通知时刻为应用时区 09:00（修复前为 21:00）');
+    expect(a.minute, 0);
   });
 }

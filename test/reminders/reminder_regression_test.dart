@@ -13,8 +13,10 @@ import '../support/fake_notification_scheduler.dart';
 /// - #6 系列改期保留过去命中的完成记录
 /// - #9 计划数统计含重复任务实例
 void main() {
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
+  // 固定基准日期（真实"今天"会让月初/深夜运行的测试间歇失败：
+  // #6 用例从当月 1 号逐日完成，断言记录数 >5，每月 1-5 日仅 1-5 条必挂）
+  final now = DateTime(2026, 8, 20, 10, 0);
+  final today = DateTime(2026, 8, 20);
 
   late AppDatabase db;
 

@@ -401,7 +401,16 @@ class _WeekViewState extends ConsumerState<WeekView> {
     final day = _dragDay.value.add(Duration(days: col));
     // 时间轴主体顶部全局 y（各页 post-frame 上报，当前页最后写入）
     final localDy = pos.dy - dragAxisTopY.value;
-    final startHour = effectiveStartHourFor(byDay: widget.byDay, days: [day]);
+    // 与时间轴渲染同口径（整周 7 天取最早任务）：单日口径在周内有
+    // 更早任务时落点会偏移 1 小时（所见非所得）；渲染周起点与
+    // build 中 weekStart 同式（_epochMonday + 当前页偏移）
+    final weekStart = _epochMonday.add(
+      Duration(days: (_activePage.value - 500) * 7),
+    );
+    final startHour = effectiveStartHourFor(
+      byDay: widget.byDay,
+      days: List.generate(7, (i) => weekStart.add(Duration(days: i))),
+    );
     final minutes = (startHour * 60 + localDy / pixelPerHour * 60)
         .roundToDouble()
         .clamp(startHour * 60.0, endHour * 60.0);
@@ -463,7 +472,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
     return PageView.builder(
       controller: _controller,
       // itemCount 随固定基准同步扩大（自 _epochMonday 起每周一页，
-      // 与 DayView 的 40000 对称，前后各覆盖约 380 年）
+      // 与 DayView 的 40000 对称，自 2000-01-01 起共约 109 年）
       itemCount: 40000,
       // A13：allowImplicitScrolling 预构建页在 widget 测试 teardown 时
       // 触发 deactivate 时序问题（NowLine Timer pending），暂不启用；
@@ -860,7 +869,15 @@ class _DayViewState extends ConsumerState<DayView> {
     final day = _dragDay.value;
     // 时间轴主体顶部全局 y（各页 post-frame 上报，当前页最后写入）
     final localDy = pos.dy - dragAxisTopY.value;
-    final startHour = effectiveStartHourFor(byDay: widget.byDay, days: [day]);
+    // 与时间轴渲染同口径（单日 = 渲染起点，与 build 中 day 同式）；
+    // _dragDay 可能已翻页 ≠ 渲染日，直接用渲染日避免换算偏移
+    final renderDay = AppClock.at(2000, 1, 1).add(
+      Duration(days: _activePage.value),
+    );
+    final startHour = effectiveStartHourFor(
+      byDay: widget.byDay,
+      days: [renderDay],
+    );
     final minutes = (startHour * 60 + localDy / pixelPerHour * 60)
         .roundToDouble()
         .clamp(startHour * 60.0, endHour * 60.0);

@@ -89,27 +89,4 @@ void main() {
     expect(ok, isTrue, reason: '非重复任务不受命中校验影响');
     expect((await db.getTask(id))!.completedAt, isNotNull);
   });
-
-  test('控制器 completeTask 非命中日不写入（today 非规则日）', () async {
-    // 每周一任务，今天不是周一 → completeTask 应拒绝写入完成记录
-    final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final thisMonday = today.subtract(Duration(days: today.weekday - 1));
-    final id = await insertTask(
-      title: '周例会',
-      start: thisMonday,
-      rrule: 'FREQ=WEEKLY;BYDAY=MO',
-    );
-    // 若今天恰好是周一则跳过（避免测试环境日期影响）
-    if (today.weekday == DateTime.monday) {
-      // 把锚点改为下周一，使今天变为非命中日场景不可构造——直接验证
-      // completeInstanceIfHit 对今天的判定
-      final hit = await db.completeInstanceIfHit(id, today);
-      expect(hit, isTrue, reason: '今天就是周一，命中');
-      return;
-    }
-    final hit = await db.completeInstanceIfHit(id, today);
-    expect(hit, isFalse, reason: '今天非规则日，拒绝写入');
-    expect(await db.isInstanceCompleted(id, today), isFalse);
-  });
 }

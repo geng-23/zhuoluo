@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/task_ext.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart';
@@ -342,10 +343,13 @@ void main() {
       expect(fake.scheduled, isEmpty,
           reason: '无提醒任务不应产生任何调度');
 
-      // 有未来提醒：替身模拟排期失败 → false
+      // 有未来提醒：替身模拟排期失败 → false。
+      // 计划时间用"现在 + 2 小时"而非"明天 00:00"：后者触发时刻为今天
+      // 23:50，测试若在 23:50-23:59 运行会被调度器按"已过时刻"跳过而误挂
+      final futureStart = AppClock.now().add(const Duration(hours: 2));
       final withReminder = await insertTask(
         title: '带提醒任务',
-        planStart: today.add(const Duration(days: 1)),
+        planStart: futureStart,
       );
       await db.insertReminder(
         RemindersCompanion.insert(
@@ -366,10 +370,8 @@ void main() {
           reason: '一条提醒应产生一条通知');
       final s = fake.scheduled.single;
       expect(s.title, '带提醒任务', reason: '通知标题 = 任务标题');
-      // 提醒时刻 = planStart（明天）− 10 分钟
-      final expectedWhen = today
-          .add(const Duration(days: 1))
-          .add(const Duration(minutes: -10));
+      // 提醒时刻 = 计划开始 − 10 分钟
+      final expectedWhen = futureStart.add(const Duration(minutes: -10));
       expect(
         s.when.difference(expectedWhen).inMinutes.abs(),
         lessThanOrEqualTo(1),

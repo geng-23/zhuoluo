@@ -58,7 +58,9 @@ class ReminderScheduler {
         instanceDate.minute,
       );
     }
-    return AppClock.at(d.year, d.month, d.day, ps.hour, ps.minute);
+    // ps 为 DB 读回值（系统时区字段），先按应用时区解释再取时分
+    final a = AppClock.asApp(ps);
+    return AppClock.at(d.year, d.month, d.day, a.hour, a.minute);
   }
 
   /// 调度单个任务的提醒（增量重排：先取消旧通知再排新）。
@@ -90,10 +92,12 @@ class ReminderScheduler {
         // 处理，默认 09:00）。此前调度器直接跳过，提醒静默失效。
         final due = task.dueTime;
         if (due == null) return true;
-        final day = AppClock.at(due.year, due.month, due.day);
+        final a = AppClock.asApp(due);
+        final day = AppClock.at(a.year, a.month, a.day);
         ok = await _scheduleDay(task, day, reminders) && ok;
       } else {
-        final day = AppClock.at(ps.year, ps.month, ps.day);
+        final a = AppClock.asApp(ps);
+        final day = AppClock.at(a.year, a.month, a.day);
         ok = await _scheduleDay(task, day, reminders) && ok;
       }
     } else {
@@ -188,9 +192,11 @@ class ReminderScheduler {
         // 仅截止时间的任务：与排期对称，按截止日当天取消
         final due = t.dueTime;
         if (due == null) return const [];
-        return [AppClock.at(due.year, due.month, due.day)];
+        final a = AppClock.asApp(due);
+        return [AppClock.at(a.year, a.month, a.day)];
       }
-      return [AppClock.at(ps.year, ps.month, ps.day)];
+      final a = AppClock.asApp(ps);
+      return [AppClock.at(a.year, a.month, a.day)];
     }
     final today = AppClock.now();
     final start = t.planStart ?? today;
@@ -208,7 +214,8 @@ class ReminderScheduler {
     for (final ex in exceptions) {
       final od = ex.overrideScheduledDate;
       if (ex.action == 'edit' && od != null) {
-        dates.add(AppClock.at(od.year, od.month, od.day));
+        final a = AppClock.asApp(od);
+        dates.add(AppClock.at(a.year, a.month, a.day));
       }
     }
     return dates;
@@ -314,12 +321,14 @@ class ReminderScheduler {
         final day = start.add(Duration(days: i));
         // 已打卡的日期不排提醒（无效打扰）
         if (await _db.isHabitDone(habit.id, day)) continue;
+        // reminderTime 为 DB 读回值（系统时区字段），先按应用时区解释
+        final a = AppClock.asApp(time);
         final when = AppClock.at(
           day.year,
           day.month,
           day.day,
-          time.hour,
-          time.minute,
+          a.hour,
+          a.minute,
         );
         // 已过去的提醒时刻（今天）跳过，从明天开始
         if (when.isBefore(now)) continue;
@@ -448,14 +457,16 @@ DateTime? reminderTriggerAt(
     // 与 _reminderBase 的全天式口径一致（默认 09:00）
     final due = task.dueTime;
     if (due == null) return null;
+    final a = AppClock.asApp(due);
     final min = remindAtMinutes ?? 540; // 默认 09:00
-    return AppClock.at(due.year, due.month, due.day)
+    return AppClock.at(a.year, a.month, a.day)
         .add(Duration(minutes: min))
         .subtract(Duration(minutes: remindMinutesBefore));
   }
+  final pa = AppClock.asApp(ps);
   final day = task.rrule.isNotEmpty
       ? today
-      : AppClock.at(ps.year, ps.month, ps.day);
+      : AppClock.at(pa.year, pa.month, pa.day);
   if (task.isAllDay) {
     final min = remindAtMinutes ?? 540; // 默认 09:00
     return day
@@ -466,7 +477,7 @@ DateTime? reminderTriggerAt(
     day.year,
     day.month,
     day.day,
-    ps.hour,
-    ps.minute,
+    pa.hour,
+    pa.minute,
   ).subtract(Duration(minutes: remindMinutesBefore));
 }

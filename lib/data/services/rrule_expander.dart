@@ -54,19 +54,40 @@ class RruleService {
 
   DateTime? _parseUntil(String s) {
     if (s.contains('T')) {
-      return DateTime.tryParse(s);
+      // RFC 5545 无分隔符格式：YYYYMMDDTHHMMSSZ（UTC）显式解析
+      //（DateTime.tryParse 不支持该格式，解析失败会静默降级为"永不结束"）
+      final m = RegExp(r'^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$')
+          .firstMatch(s);
+      if (m != null) {
+        return DateTime.utc(
+          int.parse(m[1]!),
+          int.parse(m[2]!),
+          int.parse(m[3]!),
+          int.parse(m[4]!),
+          int.parse(m[5]!),
+          int.parse(m[6]!),
+        );
+      }
+      final parsed = DateTime.tryParse(s);
+      if (parsed != null) return parsed;
+      // 无法解析的 UNTIL 视为规则已结束（返回远古日期）：避免静默
+      // 降级为"永不结束"；外部导入数据可触发，不抛异常以免破坏加载
+      return AppClock.at(1970, 1, 1);
     }
-    // YYYYMMDD 格式：解析为当日结束（23:59:59.999）。
+    // YYYYMMDD 格式：解析为当日结束（23:59:59.999），按应用时区解释。
     // 定时实例带时分（如 09:00），若解析为当日 00:00，
     // `_withinRule` 的 d.isAfter(until) 会把结束日当天的实例排除。
     if (s.length == 8) {
-      return DateTime(
-        int.parse(s.substring(0, 4)),
-        int.parse(s.substring(4, 6)),
-        int.parse(s.substring(6, 8)),
-      ).add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1));
+      final y = int.parse(s.substring(0, 4));
+      final mo = int.parse(s.substring(4, 6));
+      final d = int.parse(s.substring(6, 8));
+      return AppClock.at(y, mo, d)
+          .add(const Duration(days: 1))
+          .subtract(const Duration(milliseconds: 1));
     }
-    return DateTime.tryParse(s);
+    final parsed = DateTime.tryParse(s);
+    if (parsed != null) return parsed;
+    return AppClock.at(1970, 1, 1);
   }
 
   /// 从开始日期展开实例。

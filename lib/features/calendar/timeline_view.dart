@@ -332,9 +332,15 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                           : () async {
                               final now = AppClock.now();
                               // 日视图可翻至 2000-01-01，当前显示日超界
-                              // 会触发 DatePicker 断言崩溃，钳制到 [first, last]
-                              //（前后各 60 年，覆盖日视图可翻范围）
-                              final first = DateTime(now.year - 60);
+                              // 会触发 DatePicker 断言崩溃，钳制到 [first, last]；
+                              // 下限 2000-01-01（页号基准，早于此日期得负页号
+                              // 会被 PageController 静默钳制到基准日）
+                              final first =
+                                  DateTime(2000, 1, 1).isAfter(
+                                        DateTime(now.year - 60),
+                                      )
+                                      ? DateTime(2000, 1, 1)
+                                      : DateTime(now.year - 60);
                               final last = DateTime(now.year + 60);
                               final initial = widget.start;
                               final clamped = initial.isBefore(first)

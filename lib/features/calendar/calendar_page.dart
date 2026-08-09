@@ -167,8 +167,12 @@ class CalendarPage extends ConsumerWidget {
     CalendarState state,
   ) async {
     final now = AppClock.now();
-    // 前后各 60 年（覆盖周/日视图可翻范围，此前 ±5 年范围太小）
-    final first = DateTime(now.year - 60);
+    // 周/日视图页号以 2000-01-01 为基准：早于基准的日期得负页号会被
+    // PageController 钳制到第 0 页（静默显示 2000-01-01），下限限制到基准；
+    // 上限 now+60 年（覆盖可翻范围，此前 ±5 年范围太小）
+    final first = DateTime(2000, 1, 1).isAfter(DateTime(now.year - 60))
+        ? DateTime(2000, 1, 1)
+        : DateTime(now.year - 60);
     final last = DateTime(now.year + 60);
     // 周/日视图可翻数百年前，selectedDay 超界会触发 DatePicker
     // 断言崩溃，钳制到 [firstDate, lastDate]

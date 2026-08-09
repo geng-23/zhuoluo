@@ -344,8 +344,11 @@ class DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
       final now = AppClock.now();
       final ps = item.task.planStart;
       // 月视图可翻到很久以前，实例日期超界会触发 DatePicker 断言崩溃；
-      // 范围前后各 60 年（覆盖日常改期，超界时钳制到边界）
-      final first = DateTime(now.year - 60);
+      // 下限 2000-01-01（周/日视图页号基准，早于此日期静默钳制到基准日），
+      // 上限 now+60 年，超界时钳制到边界
+      final first = DateTime(2000, 1, 1).isAfter(DateTime(now.year - 60))
+          ? DateTime(2000, 1, 1)
+          : DateTime(now.year - 60);
       final last = DateTime(now.year + 60);
       final initial = item.instanceDate;
       final clamped = initial.isBefore(first)

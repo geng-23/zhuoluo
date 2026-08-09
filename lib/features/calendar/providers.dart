@@ -1,5 +1,6 @@
 ﻿import 'package:drift/drift.dart' show Value;
-import 'package:flutter/foundation.dart' show ValueNotifier, visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show ValueNotifier, visibleForTesting, debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
@@ -197,19 +198,28 @@ class CalendarController extends StateNotifier<CalendarState> {
     // 连续翻页在手势动画内零 DB
     final bufFrom = from.subtract(const Duration(days: 31));
     final bufTo = to.add(const Duration(days: 31));
-    final fetched = await _db.getCalendarItems(bufFrom, bufTo);
-    if (!mounted || seq != _loadSeq) return; // 过期请求结果丢弃
-    _cache
-      ..clear()
-      ..addAll(_byDayFor(fetched));
-    _cacheFromKey = _dayKey(bufFrom);
-    _cacheToKey = _dayKey(bufTo);
-    final items = _itemsInRange(from, to);
-    state = state.copyWith(
-      items: items,
-      byDay: _byDayFor(items),
-      loading: false,
-    );
+    try {
+      final fetched = await _db.getCalendarItems(bufFrom, bufTo);
+      if (!mounted || seq != _loadSeq) return; // 过期请求结果丢弃
+      _cache
+        ..clear()
+        ..addAll(_byDayFor(fetched));
+      _cacheFromKey = _dayKey(bufFrom);
+      _cacheToKey = _dayKey(bufTo);
+      final items = _itemsInRange(from, to);
+      state = state.copyWith(
+        items: items,
+        byDay: _byDayFor(items),
+        loading: false,
+      );
+    } catch (e) {
+      // 查询失败不崩溃（构造器 fire-and-forget 路径无兜底时异常为
+      // unhandled async error）；恢复 loading 避免 UI 卡在加载态
+      debugPrint('日历加载失败: $e');
+      if (seq == _loadSeq) {
+        state = state.copyWith(loading: false);
+      }
+    }
   }
 
   void setView(String view) {
@@ -261,6 +271,17 @@ class CalendarController extends StateNotifier<CalendarState> {
 
   /// 拖动改期到具体时刻（含时分，支持跨天；拖进时间轴即非全天）
   Future<void> moveTaskToDateTime(int taskId, DateTime target) async {
+    try {
+      await _moveTaskToDateTimeInner(taskId, target);
+    } catch (e) {
+      debugPrint('日历改期失败 taskId=$taskId: $e');
+    }
+  }
+
+  Future<void> _moveTaskToDateTimeInner(
+    int taskId,
+    DateTime target,
+  ) async {
     final t = await _db.getTask(taskId);
     if (t == null) return;
     SoundService.instance.play(SoundKind.drop);
@@ -299,6 +320,17 @@ class CalendarController extends StateNotifier<CalendarState> {
 
   /// 重复任务拖动改期：整个系列（统一锚点吸附 + 清理完成记录与例外，可撤销）
   Future<void> moveTaskToDateTimeSeries(int taskId, DateTime target) async {
+    try {
+      await _moveTaskToDateTimeSeriesInner(taskId, target);
+    } catch (e) {
+      debugPrint('日历系列改期失败 taskId=$taskId: $e');
+    }
+  }
+
+  Future<void> _moveTaskToDateTimeSeriesInner(
+    int taskId,
+    DateTime target,
+  ) async {
     final t = await _db.getTask(taskId);
     if (t == null || t.rrule.isEmpty) return;
     SoundService.instance.play(SoundKind.drop);
@@ -363,6 +395,14 @@ class CalendarController extends StateNotifier<CalendarState> {
 
   /// 撤销系列改期（恢复原计划时间 + 被清理的完成记录与例外）
   Future<void> undoMoveTaskSeries() async {
+    try {
+      await _undoMoveTaskSeriesInner();
+    } catch (e) {
+      debugPrint('撤销系列改期失败: $e');
+    }
+  }
+
+  Future<void> _undoMoveTaskSeriesInner() async {
     final s = _seriesUndo;
     if (s == null) return;
     _seriesUndo = null;
@@ -413,6 +453,14 @@ class CalendarController extends StateNotifier<CalendarState> {
 
   /// 任务完成/恢复（日历直接勾选）
   Future<void> toggleComplete(CalendarItem item) async {
+    try {
+      await _toggleCompleteInner(item);
+    } catch (e) {
+      debugPrint('日历完成/恢复失败 taskId=${item.task.id}: $e');
+    }
+  }
+
+  Future<void> _toggleCompleteInner(CalendarItem item) async {
     if (item.completed) {
       if (item.task.rrule.isNotEmpty) {
         await _db.uncompleteInstance(item.task.id, item.instanceDate);
@@ -449,24 +497,32 @@ class CalendarController extends StateNotifier<CalendarState> {
 
   /// 跳过重复实例
   Future<void> skipInstance(int taskId, DateTime instanceDate) async {
-    // 核心逻辑（暂存完成记录/容错/重排）统一在
-    // ReminderScheduler（任务页与日历页共用），控制器只负责反馈与刷新
-    final ok = await _scheduler.skipInstance(taskId, instanceDate);
-    if (!ok) return;
-    SoundService.instance.play(SoundKind.skip);
-    Haptics.light();
-    _bump();
-    load();
+    try {
+      // 核心逻辑（暂存完成记录/容错/重排）统一在
+      // ReminderScheduler（任务页与日历页共用），控制器只负责反馈与刷新
+      final ok = await _scheduler.skipInstance(taskId, instanceDate);
+      if (!ok) return;
+      SoundService.instance.play(SoundKind.skip);
+      Haptics.light();
+      _bump();
+      load();
+    } catch (e) {
+      debugPrint('跳过实例失败 taskId=$taskId: $e');
+    }
   }
 
   /// 撤销跳过实例（从 skippedDates 移除日期，并恢复被删除的完成记录）
   Future<void> unskipInstance(int taskId, DateTime instanceDate) async {
-    final ok = await _scheduler.unskipInstance(taskId, instanceDate);
-    if (!ok) return;
-    SoundService.instance.play(SoundKind.reopen);
-    Haptics.light();
-    _bump();
-    load();
+    try {
+      final ok = await _scheduler.unskipInstance(taskId, instanceDate);
+      if (!ok) return;
+      SoundService.instance.play(SoundKind.reopen);
+      Haptics.light();
+      _bump();
+      load();
+    } catch (e) {
+      debugPrint('撤销跳过失败 taskId=$taskId: $e');
+    }
   }
 }
 

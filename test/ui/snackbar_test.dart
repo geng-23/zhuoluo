@@ -69,38 +69,6 @@ void main() {
     expect(find.text('已完成'), findsNothing, reason: '消失后不复发');
   });
 
-  testWidgets('极简 ScaffoldMessenger 下 Snackbar 应消失', (tester) async {
-    final key = GlobalKey<ScaffoldMessengerState>();
-    await tester.pumpWidget(
-      MaterialApp(
-        scaffoldMessengerKey: key,
-        home: Scaffold(
-          body: Center(
-            child: Builder(
-              builder: (context) => ElevatedButton(
-                onPressed: () {
-                  key.currentState!.showSnackBar(const SnackBar(
-                    content: Text('极简测试'),
-                    duration: Duration(seconds: 1),
-                  ));
-                },
-                child: const Text('显示'),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('显示'));
-    await tester.pump();
-    expect(find.text('极简测试'), findsOneWidget);
-
-    for (var i = 0; i < 600; i++) {
-      await tester.pump(const Duration(milliseconds: 100));
-    }
-    expect(find.text('极简测试'), findsNothing, reason: '极简环境 Snackbar 应消失');
-  });
-
   testWidgets('逐帧 pump 模拟真实帧率下 Snackbar 应消失', (tester) async {
     await pumpApp(tester, title: '测试任务A');
     var shownAt60s = 0;

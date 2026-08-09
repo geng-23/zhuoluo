@@ -982,13 +982,19 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       helpText: '改期本次到',
     );
     if (picked == null || !mounted) return;
+    // ps 为 DB 读回值（系统时区字段），先按应用时区解释再取时分
+    final pa = ps == null ? null : AppClock.asApp(ps);
     final pickedTime = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay(hour: ps?.hour ?? 9, minute: ps?.minute ?? 0),
+      initialTime: TimeOfDay(
+        hour: pa?.hour ?? 9,
+        minute: pa?.minute ?? 0,
+      ),
       helpText: '选择实例时间',
     );
     if (pickedTime == null || !mounted) return;
-    final toDate = DateTime(
+    // 与详情页/日历弹层同口径：按应用时区构造（普通 DateTime 会按系统时区解释）
+    final toDate = AppClock.at(
       picked.year,
       picked.month,
       picked.day,

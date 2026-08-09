@@ -746,6 +746,118 @@ void main() {
       await gesture.up();
       await tester.pumpAndSettle();
     });
+
+    testWidgets('边缘翻页后新页继承滚动位置（不跳回顶部）', (tester) async {
+      await pumpCalendarWithTask(tester, '继承任务');
+      final scrollables = find.byType(Scrollable);
+      final count = tester.widgetList(scrollables).length;
+      // 滚动时间轴到中间（500px）——时间栏 + 内容都要跳（内容触发 share 更新）
+      for (var i = 0; i < count; i++) {
+        final pos = tester.state<ScrollableState>(scrollables.at(i)).position;
+        if (pos.axis == Axis.vertical) {
+          pos.jumpTo(500);
+        }
+      }
+      await tester.pumpAndSettle();
+      // 长按拖动到右缘翻一页（新页应继承滚动位置）
+      final block = find.text('继承任务');
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await gesture.moveTo(const Offset(760, 400));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      var pixels = -1.0;
+      for (var i = 0; i < count; i++) {
+        final pos = tester.state<ScrollableState>(scrollables.at(i)).position;
+        if (pos.axis == Axis.vertical) {
+          pixels = pos.pixels;
+          break;
+        }
+      }
+      expect(pixels, closeTo(500, 60),
+          reason: '翻页后新页应继承滚动位置（实际 $pixels，修复前被污染为 0）');
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('滚动后同页拖动任务松手：滚动位置保持（不跳回顶部）', (tester) async {
+      await pumpCalendarWithTask(tester, '保持任务');
+      final scrollables = find.byType(Scrollable);
+      final count = tester.widgetList(scrollables).length;
+      for (var i = 0; i < count; i++) {
+        final pos = tester.state<ScrollableState>(scrollables.at(i)).position;
+        if (pos.axis == Axis.vertical) {
+          pos.jumpTo(500);
+        }
+      }
+      await tester.pumpAndSettle();
+      // 同页内轻微拖动（不进边缘区、不翻页）后松手改期
+      final block = find.text('保持任务');
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await gesture.moveBy(const Offset(20, 40));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      var pixels = -1.0;
+      for (var i = 0; i < count; i++) {
+        final pos = tester.state<ScrollableState>(scrollables.at(i)).position;
+        if (pos.axis == Axis.vertical) {
+          pixels = pos.pixels;
+          break;
+        }
+      }
+      expect(pixels, closeTo(500, 60),
+          reason: '同页拖动松手后滚动位置应保持（实际 $pixels）');
+    });
+
+    testWidgets('远距离跳转停在目标位置：周/日/月视图不落在中间页', (tester) async {
+      await db.ensureDefaultList();
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final notifier = container.read(calendarControllerProvider.notifier);
+
+      // 周视图：远距离跳到 2021 年（此前动画被 onPageChanged 回跳打断，
+      // 可能停在中间周——如 2022）
+      final targetWeek = DateTime(2021, 3, 15);
+      notifier.setSelectedDay(targetWeek);
+      await tester.pumpAndSettle();
+      expect(
+        container.read(calendarControllerProvider).selectedDay,
+        targetWeek,
+        reason: '周视图远距离跳转应停在目标日期（不落在中间周）',
+      );
+
+      // 日视图：远距离跳转（此前停在中间日，如点 8/27 出 8/12）
+      final targetDay = DateTime(2021, 9, 27);
+      notifier.setSelectedDayWithView(targetDay, 'day');
+      await tester.pumpAndSettle();
+      expect(
+        container.read(calendarControllerProvider).selectedDay,
+        targetDay,
+        reason: '日视图远距离跳转应停在目标日期（不落在中间日）',
+      );
+
+      // 月视图：远距离跳月（此前停在中间月，如 2021→2022）
+      notifier.setSelectedDayWithView(DateTime(2026, 1, 10), 'month');
+      await tester.pumpAndSettle();
+      expect(
+        container.read(calendarControllerProvider).displayedMonth,
+        DateTime(2026, 1, 1),
+        reason: '月视图远距离跳转应停在目标月份（不落在中间月）',
+      );
+    });
   });
 }
 

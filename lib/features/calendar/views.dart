@@ -151,11 +151,14 @@ class _WeekViewState extends ConsumerState<WeekView> {
         final target = _pageForMonday(
           DateUtilsEx.mondayOf(widget.selectedDay),
         );
-        // P0-1：固定基准下初始页可能远离 500，jump 会触发
-        // onPageChanged——用 _pendingExternalPage 拦截回写
-        // selectedDay（与 didUpdateWidget 外部跳转同机制）
+        // 初始定位：jumpToPage 瞬跳（不产生 ScrollUpdateNotification，
+        // 不触发 onPageChanged）——无需动画拦截；下一帧兜底清除 pending
+        //（否则残留会误拦后续翻页的 onPageChanged 回写）
         _pendingExternalPage = target;
         _controller.jumpToPage(target);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _pendingExternalPage = null;
+        });
       }
     });
   }
@@ -177,11 +180,16 @@ class _WeekViewState extends ConsumerState<WeekView> {
       }
       // 外部切换日期（今天按钮/月视图选日）→ 平滑翻到对应周
       _pendingExternalPage = target;
-      _controller.animateToPage(
-        target,
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
-      );
+      _controller
+          .animateToPage(
+            target,
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic,
+          )
+          .whenComplete(() {
+        // 动画结束（含被手势打断）→ 结束拦截，防 pending 残留
+        if (mounted) _pendingExternalPage = null;
+      });
       _dragDay.value = newMonday;
     }
   }
@@ -485,15 +493,18 @@ class _WeekViewState extends ConsumerState<WeekView> {
       onPageChanged: (page) {
         final offset = page - 500;
         final weekMonday = _epochMonday.add(Duration(days: offset * 7));
-        // P1-D：外部跳页（今天按钮/日期选择）→ 只同步 _dragDay，
-        // 不回写 selectedDay（否则选中日被覆盖为周一）
-        if (_pendingExternalPage != null && page == _pendingExternalPage) {
-          _pendingExternalPage = null;
+        // P1-D：外部跳页（今天按钮/日期选择）动画期间——onPageChanged
+        // 在动画中（round 变化）多次触发，一律只同步 _dragDay、不回写
+        // selectedDay（否则回写→didUpdateWidget→animateToPage 回跳打断
+        // 动画，最终停在中间页/月）；到达目标页时结束拦截
+        if (_pendingExternalPage != null) {
           _dragDay.value = weekMonday;
+          if (page == _pendingExternalPage) {
+            _pendingExternalPage = null;
+          }
           return;
         }
-        _pendingExternalPage = null;
-        // P1-D：手动翻页时同步 _dragDay（与 DayView 一致），
+        // 手动翻页时同步 _dragDay（与 DayView 一致），
         // 修复翻周后长按选时创建到旧周的问题
         _dragDay.value = weekMonday;
         widget.onDayChanged(weekMonday);
@@ -607,12 +618,26 @@ class _DayViewState extends ConsumerState<DayView> {
     super.didUpdateWidget(old);
     if (!DateUtilsEx.sameDay(old.selectedDay, widget.selectedDay) &&
         _controller.hasClients) {
-      // A13：外部跳日平滑过渡（替代瞬间 jumpToPage）
-      _controller.animateToPage(
-        _pageFor(widget.selectedDay),
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
-      );
+      final target = _pageFor(widget.selectedDay);
+      final current = _controller.page?.round() ?? target;
+      // 手动翻页后 selectedDay 已同步（onPageChanged 回写）→ 当前页即
+      // 目标页，跳过（否则每次翻页追加 280ms 多余动画，观感发涩）
+      if (current == target) {
+        _dragDay.value = widget.selectedDay;
+        return;
+      }
+      // 外部跳日（今天按钮/DatePicker/头部）→ 平滑翻到对应页；动画期间
+      // onPageChanged 拦截回写（防回跳打断停在中间日）
+      _pendingExternalPage = target;
+      _controller
+          .animateToPage(
+            target,
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic,
+          )
+          .whenComplete(() {
+        if (mounted) _pendingExternalPage = null;
+      });
       _dragDay.value = widget.selectedDay;
     }
   }
@@ -667,6 +692,9 @@ class _DayViewState extends ConsumerState<DayView> {
   int? _dragTaskId;
   /// 拖动任务信息副本（同原因，落点兜底用）
   _DragGhostInfo? _dragInfo;
+  /// 外部跳日目标页（今天/DatePicker/头部）——动画期间 onPageChanged
+  /// 拦截回写 selectedDay，防回跳打断动画停在中间日
+  int? _pendingExternalPage;
 
   void _registerDragRoute(int taskId, int pointer) {
     _unregisterDragRoute();
@@ -894,8 +922,19 @@ class _DayViewState extends ConsumerState<DayView> {
       // 触发 deactivate 时序问题（_NowLine Timer pending），暂不启用；
       // 丝滑翻页主要靠窗口缓存（翻页零 DB）+ byDay 分组 build 减负
       onPageChanged: (page) {
-        _dragDay.value = DateTime(2000, 1, 1).add(Duration(days: page));
-        widget.onDayChanged(_dragDay.value);
+        final day = DateTime(2000, 1, 1).add(Duration(days: page));
+        // 外部跳日动画期间：onPageChanged 多次触发（round 变化），只同步
+        // _dragDay 不回写 selectedDay（防回跳打断动画停在中间日）；到达
+        // 目标页结束拦截（动画结束时 whenComplete 也会清理）
+        if (_pendingExternalPage != null) {
+          _dragDay.value = day;
+          if (page == _pendingExternalPage) {
+            _pendingExternalPage = null;
+          }
+          return;
+        }
+        _dragDay.value = day;
+        widget.onDayChanged(day);
       },
       itemBuilder: (context, page) {
         final day = DateTime(2000, 1, 1).add(Duration(days: page));
@@ -1069,10 +1108,17 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
 
   void _onScroll() {
     _syncTimeBar();
-    // 滚动位置同步到共享值（翻页后新页继承）
+    // 滚动位置同步到共享值（翻页后新页继承）。
+    // 防污染：页面重建时 ScrollPosition attach 会触发一次 offset=0 的
+    // 伪事件——跳过它（否则共享位置被写 0，新页 post-frame 恢复逻辑
+    // `if (share > 0)` 读到 0 不恢复 → 时间轴跳回顶部）
     final share = widget.scrollOffsetShare;
     if (share != null) {
-      share.value = _scrollController.offset;
+      final off = _scrollController.offset;
+      if (off > 0 || (off - _lastSharedOffset).abs() > 0.5) {
+        _lastSharedOffset = off;
+        share.value = off;
+      }
     }
     // 落点基准随滚动修正（时间轴主体在 ListView 内随内容移动）
     final top = widget.dragAxisTopY;
@@ -1083,6 +1129,8 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
 
   double? _baseAxisTopY;
   double _baseAxisOffset = 0;
+  /// 上次写入共享滚动位置的值（_onScroll 防污染用）
+  double _lastSharedOffset = 0;
 
   /// 本页时间轴 ListView 的 scrollController + 视口顶全局 y + 视口高上报
   ///（post-frame；当前页最后写入——翻页后 Draggable evict 时全局 route
@@ -1113,6 +1161,14 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
 
   @override
   void dispose() {
+    // 页面 State 销毁（如 PageView GC/keepalive 重建）前把本页滚动位置
+    // 写回共享值——重建后 post-frame 据此恢复，时间轴不跳回顶部
+    if (_scrollController.hasClients) {
+      final share = widget.scrollOffsetShare;
+      if (share != null) {
+        share.value = _scrollController.offset;
+      }
+    }
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _timeBarController.dispose();
@@ -1155,8 +1211,9 @@ class _TimeAxisViewState extends ConsumerState<_TimeAxisView> {
                           final now = AppClock.now();
                           // P1-27：日视图可翻至 2000-01-01，当前显示日超界
                           // 会触发 DatePicker 断言崩溃，钳制到 [first, last]
-                          final first = DateTime(now.year - 5);
-                          final last = DateTime(now.year + 5);
+                          //（前后各 60 年，覆盖日视图可翻范围）
+                          final first = DateTime(now.year - 60);
+                          final last = DateTime(now.year + 60);
                           final initial = widget.start;
                           final clamped = initial.isBefore(first)
                               ? first
@@ -3383,9 +3440,10 @@ class _DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
     if (action == 'reschedule') {
       final now = AppClock.now();
       final ps = item.task.planStart;
-      // P1-7：月视图可翻到很久以前，实例日期超界会触发 DatePicker 断言崩溃
-      final first = DateTime(now.year - 1);
-      final last = DateTime(now.year + 5);
+      // P1-7：月视图可翻到很久以前，实例日期超界会触发 DatePicker 断言崩溃；
+      // 范围前后各 60 年（覆盖日常改期，超界时钳制到边界）
+      final first = DateTime(now.year - 60);
+      final last = DateTime(now.year + 60);
       final initial = item.instanceDate;
       final clamped = initial.isBefore(first)
           ? first

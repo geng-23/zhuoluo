@@ -166,8 +166,9 @@ class CalendarPage extends ConsumerWidget {
     CalendarState state,
   ) async {
     final now = AppClock.now();
-    final first = DateTime(now.year - 5);
-    final last = DateTime(now.year + 5);
+    // 前后各 60 年（覆盖周/日视图可翻范围，此前 ±5 年范围太小）
+    final first = DateTime(now.year - 60);
+    final last = DateTime(now.year + 60);
     // P1-27：周/日视图可翻数百年前，selectedDay 超界会触发 DatePicker
     // 断言崩溃，钳制到 [firstDate, lastDate]
     final initial = state.selectedDay;
@@ -424,6 +425,9 @@ class MonthPager extends ConsumerStatefulWidget {
 class _MonthPagerState extends ConsumerState<MonthPager> {
   static const _baseYear = 2000;
   late final PageController _controller;
+  /// 外部跳月目标页（今天按钮/标题/日期选中）——动画期间 onPageChanged
+  /// 拦截回写 displayedMonth，防回跳打断动画停在中间月
+  int? _pendingExternalPage;
 
   int _indexOf(DateTime m) => (m.year - _baseYear) * 12 + m.month - 1;
 
@@ -441,11 +445,19 @@ class _MonthPagerState extends ConsumerState<MonthPager> {
     final oldIdx = _indexOf(old.displayedMonth);
     final newIdx = _indexOf(widget.displayedMonth);
     if (oldIdx != newIdx && _controller.hasClients) {
-      _controller.animateToPage(
-        newIdx,
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
-      );
+      final current = _controller.page?.round() ?? newIdx;
+      // 手动翻月后 displayedMonth 已同步（onPageChanged 回写）→ 跳过
+      if (current == newIdx) return;
+      _pendingExternalPage = newIdx;
+      _controller
+          .animateToPage(
+            newIdx,
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic,
+          )
+          .whenComplete(() {
+        if (mounted) _pendingExternalPage = null;
+      });
     }
   }
 
@@ -462,7 +474,17 @@ class _MonthPagerState extends ConsumerState<MonthPager> {
       onPageChanged: (page) {
         final year = _baseYear + page ~/ 12;
         final month = page % 12 + 1;
-        widget.onMonthChanged(DateTime(year, month, 1));
+        final m = DateTime(year, month, 1);
+        // 外部跳月动画期间：onPageChanged 多次触发（round 变化），只同步
+        // 目标月不回写 displayedMonth（防回跳打断动画停在中间月）；到达
+        // 目标页结束拦截（动画结束时 whenComplete 也会清理）
+        if (_pendingExternalPage != null) {
+          if (page == _pendingExternalPage) {
+            _pendingExternalPage = null;
+          }
+          return;
+        }
+        widget.onMonthChanged(m);
       },
       itemBuilder: (context, page) {
         final year = _baseYear + page ~/ 12;
@@ -532,91 +554,100 @@ class MonthView extends ConsumerWidget {
               .toList(),
         ),
         Expanded(
-          child: GridView.builder(
-            padding: EdgeInsets.zero,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 7,
-              childAspectRatio: 0.82,
-            ),
-            itemCount: totalCells,
-            itemBuilder: (context, index) {
-              final dayNum = index - leadingBlanks + 1;
-              if (dayNum < 1 || dayNum > daysInMonth) {
-                return const SizedBox.shrink();
-              }
-              final date = DateTime(
-                displayedMonth.year,
-                displayedMonth.month,
-                dayNum,
-              );
-              final isToday = DateUtilsEx.sameDay(date, AppClock.now());
-              final isSelected = DateUtilsEx.sameDay(date, selectedDay);
-              final dayItems = byDay[date.year * 10000 + date.month * 100 + date.day] ??
-                  const [];
-              return InkWell(
-                onTap: () => onDayTap(date),
-                onLongPress: () => onDayLongPress(date),
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: isSelected
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.transparent,
-                      width: 1.5,
-                    ),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  padding: const EdgeInsets.all(3),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isToday
-                              ? Theme.of(context).colorScheme.primary
-                              : null,
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          '$dayNum',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isToday
-                                ? Theme.of(context).colorScheme.onPrimary
-                                : null,
-                            fontWeight: isToday ? FontWeight.bold : null,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // 当天任务块均分填满格子（最多显示 5 个）
-                            for (final item in dayItems.take(_monthMaxItems))
-                              Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.only(top: 1),
-                                  child: _MonthTaskLine(item: item),
-                                ),
-                              ),
-                            if (dayItems.length > _monthMaxItems)
-                              Text(
-                                '+${dayItems.length - _monthMaxItems}',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+          // 月视图全屏：行高按可用高度自适应（此前固定 childAspectRatio
+          // 在窄屏下网格只占半屏、下半屏空白）；保底 72px（小屏内容超高时可滚动）
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final rows = totalCells ~/ 7;
+              final cellH = ((constraints.maxHeight - 12) / rows)
+                  .clamp(72.0, 320.0);
+              return GridView.builder(
+                padding: EdgeInsets.zero,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 7,
+                  mainAxisExtent: cellH,
                 ),
+                itemCount: totalCells,
+                itemBuilder: (context, index) {
+                  final dayNum = index - leadingBlanks + 1;
+                  if (dayNum < 1 || dayNum > daysInMonth) {
+                    return const SizedBox.shrink();
+                  }
+                  final date = DateTime(
+                    displayedMonth.year,
+                    displayedMonth.month,
+                    dayNum,
+                  );
+                  final isToday = DateUtilsEx.sameDay(date, AppClock.now());
+                  final isSelected = DateUtilsEx.sameDay(date, selectedDay);
+                  final dayItems = byDay[date.year * 10000 + date.month * 100 + date.day] ??
+                      const [];
+                  return InkWell(
+                    onTap: () => onDayTap(date),
+                    onLongPress: () => onDayLongPress(date),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: isSelected
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.transparent,
+                          width: 1.5,
+                        ),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      padding: const EdgeInsets.all(3),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isToday
+                                  ? Theme.of(context).colorScheme.primary
+                                  : null,
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              '$dayNum',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isToday
+                                    ? Theme.of(context).colorScheme.onPrimary
+                                    : null,
+                                fontWeight: isToday ? FontWeight.bold : null,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // 当天任务块均分填满格子（最多显示 5 个）
+                                for (final item in dayItems.take(_monthMaxItems))
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(top: 1),
+                                      child: _MonthTaskLine(item: item),
+                                    ),
+                                  ),
+                                if (dayItems.length > _monthMaxItems)
+                                  Text(
+                                    '+${dayItems.length - _monthMaxItems}',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               );
             },
           ),

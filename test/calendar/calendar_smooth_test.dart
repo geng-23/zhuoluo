@@ -709,6 +709,50 @@ void main() {
       );
     });
 
+    testWidgets('连续翻多页后松手：落点时间与不翻页一致（不偏到顶部）', (tester) async {
+      Future<DateTime> dropAt(String title, {required bool turnPages}) async {
+        await pumpCalendarWithTask(tester, title);
+        final taskId = (await db.allTasksForBackup())
+            .firstWhere((t) => t.title == title)
+            .id;
+        final block = find.text(title);
+        final gesture = await tester.startGesture(tester.getCenter(block.first));
+        for (var i = 0; i < 6; i++) {
+          await tester.pump(const Duration(milliseconds: 100));
+        }
+        if (turnPages) {
+          await gesture.moveTo(const Offset(760, 400)); // 右缘首翻
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 350));
+          await tester.pumpAndSettle();
+          // 连续续翻 6 次（Draggable 被 evict——落点走兜底）
+          for (var i = 0; i < 6; i++) {
+            await tester.pump(const Duration(milliseconds: 550));
+            await tester.pumpAndSettle();
+          }
+        }
+        // 移到视口中部同一位置松手
+        await gesture.moveTo(const Offset(400, 450));
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+        return (await db.getTask(taskId))!.planStart!;
+      }
+
+      final direct = await dropAt('落点A', turnPages: false);
+      final turned = await dropAt('落点B', turnPages: true);
+      expect(
+        turned.hour,
+        direct.hour,
+        reason: '翻多页后落点小时应与不翻页一致（修复前偏上到顶部）',
+      );
+      expect(
+        turned.minute,
+        direct.minute,
+        reason: '翻多页后落点分钟应与不翻页一致',
+      );
+    });
+
     testWidgets('胶囊在视口内且水平错开手指：不被上缘遮挡、不被手指挡住', (tester) async {
       await pumpCalendarWithTask(tester, '胶囊任务');
       final block = find.text('胶囊任务');

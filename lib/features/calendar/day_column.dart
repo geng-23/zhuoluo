@@ -64,6 +64,8 @@ class DayColumn extends ConsumerStatefulWidget {
     this.dragActiveDay,
     this.dragGhostInfo,
     this.dragDropped,
+    this.dragViewportTopY,
+    this.scrollOffsetShare,
     this.edgeTurnCtrl,
     this.onDragStartTracking,
   });
@@ -107,6 +109,15 @@ class DayColumn extends ConsumerStatefulWidget {
   /// 正常落点已处理标志（onAcceptWithDetails 设置——全局 route 的 up
   /// 兜底据此跳过，避免重复改期）
   final ValueNotifier<bool>? dragDropped;
+
+  /// 时间轴视口顶部全局 y（WeekView/DayView 持有，跨页稳定）。
+  /// 虚影/落点换算用它 + 共享滚动 offset 推算内容 y，
+  /// 不依赖当前页自身 offset 的瞬态（翻页恢复前的跳变）
+  final ValueNotifier<double>? dragViewportTopY;
+
+  /// 共享垂直滚动位置（跨页稳定：翻页时保持旧值，不被新页瞬态污染）。
+  /// 与 dragViewportTopY 配合计算内容 y
+  final ValueNotifier<double>? scrollOffsetShare;
 
   /// 共享边缘翻页控制器（连续翻周链跨页保持，可统一取消）
   final EdgeTurnController? edgeTurnCtrl;
@@ -370,6 +381,18 @@ class DayColumnState extends ConsumerState<DayColumn> {
     return box.globalToLocal(gpos);
   }
 
+  /// 手指 global y → 时间轴内容坐标（相对轴顶部，含滚动 offset）。
+  /// 用跨页稳定的「视口顶部 + 轴顶部 padding + 共享滚动 offset」计算，
+  /// 不依赖当前列自身 offset——翻页后新页 offset 从 0 恢复共享值的
+  /// 瞬态会让列容器坐标换算偏上，落点/虚影跳变。
+  /// 返回 null 表示基准未就绪（视口/共享 offset 未上报）。
+  double? _stableContentDy(double globalY) {
+    final viewportTop = widget.dragViewportTopY?.value;
+    final sharedOffset = widget.scrollOffsetShare?.value;
+    if (viewportTop == null || sharedOffset == null) return null;
+    return globalY - viewportTop - axisTopPadding + sharedOffset;
+  }
+
   /// 虚影/胶囊渲染换算兜底：列未布局（build 期间）时调度一帧后重算
   void _retryLocalAfterLayout() {
     if (!mounted) return;
@@ -412,15 +435,20 @@ class DayColumnState extends ConsumerState<DayColumn> {
         // _lastOffset = 指针 − dragStartPoint），不能当全局坐标用；
         // 用共享 dragGlobalPos（Draggable 全局坐标）换算本列局部位置
         final gpos = widget.dragGlobalPos?.value;
-        final box = context.findRenderObject() as RenderBox?;
-        // 长按未移动（无 move 事件，dragGlobalPos 为 null）或列未布局时
-        // 没有有效落点坐标——视为"未拖动"，取消改期。此前 dy=0 兜底会把
+        // 长按未移动（无 move 事件，dragGlobalPos 为 null）时没有有效
+        // 落点坐标——视为"未拖动"，取消改期。此前 dy=0 兜底会把
         // 落点算成 06:00（时间轴最顶部），长按不动松手任务被误改期。
-        if (gpos == null || box == null) {
+        if (gpos == null) {
           _clearDragState();
           return;
         }
-        final dy = box.globalToLocal(gpos).dy;
+        // 稳定基准换算内容 y：不依赖本列自身 scroll offset（跨页翻页
+        // 恢复前的瞬态会让落点偏上）；基准未就绪时取消改期
+        final dy = _stableContentDy(gpos.dy);
+        if (dy == null) {
+          _clearDragState();
+          return;
+        }
         final minutes = (widget.startHour * 60 + dy / pixelPerHour * 60)
             .roundToDouble()
             .clamp(widget.startHour * 60.0, endHour * 60.0);
@@ -712,20 +740,20 @@ class DayColumnState extends ConsumerState<DayColumn> {
                         !_isActiveColumn()) {
                       return const SizedBox.shrink();
                     }
-                    final local = _localFromGlobal(gpos);
-                    if (local == null) {
-                      _retryLocalAfterLayout(); // 列未布局：下一帧重算
+                    final dy = _stableContentDy(gpos.dy);
+                    if (dy == null) {
+                      _retryLocalAfterLayout(); // 基准未就绪：下一帧重算
                       return const SizedBox.shrink();
                     }
                     return AnimatedPositioned(
                       duration: const Duration(milliseconds: 80),
                       curve: Curves.easeOut,
                       // 虚影位置 = 实际写入（C5-1 回退后）的开始时间
-                      top: _ghostTopFor(local.dy),
+                      top: _ghostTopFor(dy),
                       left: 2,
                       right: 2,
                       height: (_dragGhostHeight()),
-                      child: _dragGhost(local.dy),
+                      child: _dragGhost(dy),
                     );
                   },
                 ),
@@ -743,8 +771,10 @@ class DayColumnState extends ConsumerState<DayColumn> {
                       _retryLocalAfterLayout(); // 列未布局：下一帧重算
                       return const SizedBox.shrink();
                     }
+                    // 垂直用稳定基准（local 仅用于水平 dx）
+                    final dy = _stableContentDy(gpos.dy) ?? local.dy;
                     final gStart = _draggedStartForMinutes(
-                      _snapMinutesForY(local.dy),
+                      _snapMinutesForY(dy),
                     );
                     return _buildHintCapsule(
                       local: local,

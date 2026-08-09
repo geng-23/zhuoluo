@@ -399,8 +399,10 @@ class _WeekViewState extends ConsumerState<WeekView> {
     final colWidth = (MediaQuery.sizeOf(context).width - 44) / 7;
     final col = ((pos.dx - 44) / colWidth).floor().clamp(0, 6);
     final day = _dragDay.value.add(Duration(days: col));
-    // 时间轴主体顶部全局 y（各页 post-frame 上报，当前页最后写入）
-    final localDy = pos.dy - dragAxisTopY.value;
+    // 稳定基准换算内容 y：视口顶部 + 轴顶部 padding + 共享滚动 offset。
+    // 不依赖各页自身 scroll offset（跨页翻页恢复前的瞬态会让落点偏上）
+    final localDy = pos.dy - dragViewportTopY.value - axisTopPadding +
+        _sharedScrollOffset.value;
     // 与时间轴渲染同口径（整周 7 天取最早任务）：单日口径在周内有
     // 更早任务时落点会偏移 1 小时（所见非所得）；渲染周起点与
     // build 中 weekStart 同式（_epochMonday + 当前页偏移）
@@ -875,8 +877,10 @@ class _DayViewState extends ConsumerState<DayView> {
       return;
     }
     final day = _dragDay.value;
-    // 时间轴主体顶部全局 y（各页 post-frame 上报，当前页最后写入）
-    final localDy = pos.dy - dragAxisTopY.value;
+    // 稳定基准换算内容 y：视口顶部 + 轴顶部 padding + 共享滚动 offset。
+    // 不依赖各页自身 scroll offset（跨页翻页恢复前的瞬态会让落点偏上）
+    final localDy = pos.dy - dragViewportTopY.value - axisTopPadding +
+        _sharedScrollOffset.value;
     // 与时间轴渲染同口径（单日 = 渲染起点，与 build 中 day 同式）；
     // _dragDay 可能已翻页 ≠ 渲染日，直接用渲染日避免换算偏移
     final renderDay = AppClock.at(2000, 1, 1).add(

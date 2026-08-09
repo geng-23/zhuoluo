@@ -443,7 +443,9 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                             controller: _timeBarController,
                             physics: const NeverScrollableScrollPhysics(),
                             // 上下各留半行高（与右侧内容对称），让首尾标签（6:00/23:00）完整显示
-                            padding: const EdgeInsets.symmetric(vertical: 32),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: axisTopPadding,
+                            ),
                             itemCount: totalHours + 1,
                             itemBuilder: (context, i) {
                               final hour = startEff + i;
@@ -480,7 +482,9 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                             controller: _scrollController,
                             // 与左侧时间栏同步偏移，保持线对齐；
                             // 上下各留半行（32px），6:00 上方与 23:00 下方留白对称
-                            padding: const EdgeInsets.symmetric(vertical: 32),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: axisTopPadding,
+                            ),
                             children: [
                               // 时间轴主体（18 行，6:00~23:00 线）
                               SizedBox(
@@ -534,6 +538,10 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                               dragGhostInfo:
                                                   widget.dragGhostInfo,
                                               dragDropped: widget.dragDropped,
+                                              dragViewportTopY:
+                                                  widget.dragViewportTopY,
+                                              scrollOffsetShare:
+                                                  widget.scrollOffsetShare,
                                               edgeTurnCtrl: widget.edgeTurnCtrl,
                                               onDragStartTracking:
                                                   widget.onDragStartTracking,

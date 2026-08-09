@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show Value;
+﻿import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +9,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/features/profile/profile_page.dart';
 import 'package:zhuoluo/features/task/task_page.dart';
 
-/// 语义修正回归测试（docs/00-code-audit-and-correctness-plan.md 第 5 章）
+/// 语义行为回归测试：重复任务已完成视图 / 习惯通知定位 / 快速添加入口
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final now = DateTime.now();
@@ -44,7 +44,7 @@ void main() {
     );
   }
 
-  group('5.2 重复任务进入"已完成"视图', () {
+  group('重复任务进入"已完成"视图', () {
     test('今日实例完成的重复任务出现在已完成，撤销后消失', () async {
       final id = await insertTask(
         title: '每日任务',
@@ -70,7 +70,7 @@ void main() {
     });
   });
 
-  group('5.4 习惯通知定位', () {
+  group('习惯通知定位', () {
     testWidgets('initialHabitId 时滚动定位到目标习惯并高亮', (tester) async {
       await db.ensureDefaultList();
       // 创建 15 个习惯，目标在列表中部（超出首屏）
@@ -97,7 +97,7 @@ void main() {
     });
   });
 
-  group('5.9 快速添加按钮文案', () {
+  group('快速添加按钮文案', () {
     testWidgets('"更多字段"改为"添加并编辑"', (tester) async {
       await db.ensureDefaultList();
       final container = ProviderContainer(

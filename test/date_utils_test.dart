@@ -1,12 +1,12 @@
-import 'package:flutter_test/flutter_test.dart';
+﻿import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/features/calendar/views.dart';
 
-/// P1-7：拖动"时长不跨天"回退（clampStartWithinDay）
-/// P1-8：时间轴动态起始小时（effectiveStartHourFor）
+/// 拖动"时长不跨天"回退（clampStartWithinDay）
+/// 时间轴动态起始小时（effectiveStartHourFor）
 void main() {
-  group('P1-7 clampStartWithinDay', () {
+  group('clampStartWithinDay', () {
     test('22:30 拖 2h 任务 → 回退到 21:00（23:00 前结束，不跨午夜）', () {
       final start = DateUtilsEx.clampStartWithinDay(
         DateTime(2026, 8, 8, 22, 30),
@@ -44,7 +44,7 @@ void main() {
     });
   });
 
-  group('P1-8 effectiveStartHourFor', () {
+  group('effectiveStartHourFor', () {
     final days = [DateTime(2026, 8, 8)];
 
     Task task({
@@ -80,7 +80,7 @@ void main() {
       listColor: '#4F8EF7',
     );
 
-    // P2-1：effectiveStartHourFor 改按天分组驱动（与 CalendarController.byDay 同口径）
+    // effectiveStartHourFor 按天分组驱动（与 CalendarController.byDay 同口径）
     Map<int, List<CalendarItem>> grouped(List<CalendarItem> items) {
       final m = <int, List<CalendarItem>>{};
       for (final it in items) {

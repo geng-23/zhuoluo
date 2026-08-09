@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
@@ -14,7 +14,7 @@ import 'package:zhuoluo/features/task/providers.dart';
 
 import 'support/fake_notification_scheduler.dart';
 
-/// P0 回归测试（docs/00-code-audit-and-correctness-plan.md 第 3 章）
+/// 回归测试：实例归一化 / 撤销 / 删除树 / 备份原子性 / 系列收口 / 子任务联动
 ///
 /// 覆盖：
 /// - 3.1 重复任务完成记录时间精度（实例日期归一化）
@@ -89,7 +89,7 @@ void main() {
   Future<void> drain() =>
       Future<void>.delayed(const Duration(milliseconds: 200));
 
-  group('P0-3.1 实例日期归一化', () {
+  group('实例日期归一化', () {
     test('计划时间 09:00 的重复任务：完成记录 00:00 与实例 09:00 互相识别', () async {
       final start = DateTime(today.year, today.month, today.day, 9, 0);
       final id = await insertTask(
@@ -106,7 +106,7 @@ void main() {
           DateTime(today.year, today.month, today.day, 9, 0),
         ),
         isTrue,
-        reason: '带时分的实例日期应命中 00:00 的完成记录（P0-3.1）',
+        reason: '带时分的实例日期应命中 00:00 的完成记录（实例归一化基准）',
       );
       // 存储的记录本身归一化为 00:00（不产生第二条同实例不同时刻的记录）
       final rows = await (db.select(
@@ -178,7 +178,7 @@ void main() {
     });
   });
 
-  group('P0-3.3 例外改期撤销', () {
+  group('例外改期撤销', () {
     test('撤销改期删除原例外，不新增反向例外', () async {
       final id = await insertTask(
         title: '周会',
@@ -205,7 +205,7 @@ void main() {
     });
   });
 
-  group('P0-3.4 删除任务树完整处理', () {
+  group('删除任务树完整处理', () {
     test('删除父任务连子树：子任务提醒/番茄记录/完成记录/例外全部清理，无外键错误', () async {
       final parentId = await insertTask(title: '父任务');
       final childId = await insertTask(
@@ -255,7 +255,7 @@ void main() {
     });
   });
 
-  group('P0-3.5 撤销删除恢复完整提醒字段', () {
+  group('撤销删除恢复完整提醒字段', () {
     test('全天任务提醒时刻 remindAtMinutes 在删除撤销后保留', () async {
       final container = makeContainer();
       await settle(container);
@@ -299,7 +299,7 @@ void main() {
       final restoredParent = await db.getReminders(parentId);
       final restoredChild = await db.getReminders(childId);
       expect(restoredParent.single.remindAtMinutes, 1260,
-          reason: 'P0-3.5：撤销删除后全天提醒时刻必须保留');
+          reason: '撤销删除后全天提醒时刻必须保留');
       expect(restoredChild.single.remindAtMinutes, 600,
           reason: '子任务提醒时刻同样恢复');
       expect(restoredParent.single.remindMinutesBefore, 0);
@@ -309,12 +309,12 @@ void main() {
         )..where((p) => p.taskId.equals(parentId)))
             .get(),
         hasLength(1),
-        reason: 'P0-3.4：关联番茄记录随撤销恢复',
+        reason: '关联番茄记录随撤销恢复',
       );
     });
   });
 
-  group('P0-3.6 备份恢复原子性', () {
+  group('备份恢复原子性', () {
     Future<String> validBackupJson() async {
       await db.ensureDefaultList();
       final list = await db.getDefaultList();
@@ -373,7 +373,7 @@ void main() {
       );
       final tasks = await db2.getAllUncompleted();
       expect(tasks.map((t) => t.title), contains('原数据'),
-          reason: 'P0-3.6：恢复失败不得清空原数据');
+          reason: '恢复失败不得清空原数据');
     });
 
     test('外键违反（listId 不存在）：事务回滚，原数据完整保留', () async {
@@ -419,7 +419,7 @@ void main() {
       );
       final tasks = await db2.getAllUncompleted();
       expect(tasks.map((t) => t.title), contains('原数据'),
-          reason: 'P0-3.6：外键失败回滚后原数据完整保留');
+          reason: '外键失败回滚后原数据完整保留');
       expect(await db2.getDefaultList(), isNotNull);
     });
 
@@ -434,7 +434,7 @@ void main() {
     });
   });
 
-  group('P0-3.8 重复规则收口清理', () {
+  group('重复规则收口清理', () {
     test('清除重复规则：删除全部实例完成记录与例外', () async {
       final start = today.subtract(const Duration(days: 10));
       final id = await insertTask(
@@ -504,7 +504,7 @@ void main() {
           start.add(const Duration(days: 1)),
         ),
         isFalse,
-        reason: 'P0-3.8：不再命中新规则的完成记录被清理',
+        reason: '不再命中新规则的完成记录被清理',
       );
       expect(await db.isInstanceCompleted(id, start), isTrue,
           reason: '仍命中新规则的过去实例保留');
@@ -513,7 +513,7 @@ void main() {
     });
   });
 
-  group('P0-1 批量完成撤销语义', () {
+  group('批量完成撤销语义', () {
     test('batchComplete 返回实际执行集合：跳过今日已完成的重复任务与已完成任务', () async {
       final container = makeContainer();
       await settle(container);
@@ -540,7 +540,7 @@ void main() {
     });
   });
 
-  group('P0-2 跳过/撤销跳过保留完成记录', () {
+  group('跳过/撤销跳过保留完成记录', () {
     test('跳过本次删除完成记录，撤销跳过恢复（含原完成时间）', () async {
       final container = makeContainer();
       await settle(container);
@@ -556,18 +556,18 @@ void main() {
       final notifier = container.read(tasksControllerProvider.notifier);
       await notifier.skipInstance(id, today);
       expect(await db.getInstanceCompletion(id, today), isNull,
-          reason: '跳过本次应删除当天完成记录（C1-1 语义不变）');
+          reason: '跳过本次应删除当天完成记录');
 
       await notifier.unskipInstance(id, today);
       final restored = await db.getInstanceCompletion(id, today);
-      expect(restored, isNotNull, reason: '撤销跳过应恢复完成记录（P0-2）');
+      expect(restored, isNotNull, reason: '撤销跳过应恢复完成记录（跳过撤销语义）');
       expect(restored!.completedAt, comp!.completedAt,
           reason: '恢复的记录应保留原完成时间，统计不漂移');
       await drain();
     });
   });
 
-  group('P1-12 skippedDates 非法 JSON 防护', () {
+  group('skippedDates 非法 JSON 防护', () {
     test('database 层：非法 skippedDates 下 expandTaskForDate 不抛异常', () async {
       final id = await insertTask(
         title: '每日任务',
@@ -606,7 +606,7 @@ void main() {
     });
   });
 
-  group('P0-4 批量删除父+子撤销外键', () {
+  group('批量删除父+子撤销外键', () {
     test('乱序 [子,父] 批量删除后批量撤销：父、子、关联数据全部恢复', () async {
       final container = makeContainer();
       await settle(container);
@@ -629,7 +629,7 @@ void main() {
       await drain();
 
       expect(await db.getTask(parentId), isNotNull,
-          reason: 'P0-4：撤销后父任务必须恢复（此前外键崩溃导致永久丢失）');
+          reason: '撤销后父任务必须恢复（此前外键崩溃导致永久丢失）');
       final restoredChild = await db.getTask(childId);
       expect(restoredChild, isNotNull, reason: '子任务一并恢复');
       expect(restoredChild!.parentId, parentId, reason: '子任务父引用恢复');
@@ -646,7 +646,7 @@ void main() {
     });
   });
 
-  group('P0-9 连带删除清单撤销外键', () {
+  group('连带删除清单撤销外键', () {
     test('删除清单连带任务后撤销：清单与任务全部恢复', () async {
       final container = makeContainer();
       await settle(container);
@@ -687,10 +687,10 @@ void main() {
       await drain();
 
       expect(await db.getListById(listId), isNotNull,
-          reason: 'P0-9：撤销后清单必须恢复');
+          reason: '撤销后清单必须恢复');
       final restoredParent = await db.getTask(parentId);
       expect(restoredParent, isNotNull,
-          reason: 'P0-9：撤销后任务必须恢复（此前 listId 外键崩溃永久丢失）');
+          reason: '撤销后任务必须恢复（此前 listId 外键崩溃永久丢失）');
       expect(restoredParent!.listId, listId, reason: '任务回到原清单');
       expect(
         (await db.getTasksByList(listId)).where((t) => t.parentId == parentId),
@@ -764,8 +764,8 @@ void main() {
     });
   });
 
-  group('P0-3/P1-24 系列改期收口', () {
-    test('每周一任务改到周二：旧锚点完成记录被清理（P0-3 孤儿收口）', () async {
+  group('系列改期收口', () {
+    test('每周一任务改到周二：旧锚点完成记录被清理（旧锚点孤儿收口）', () async {
       final monday = today.subtract(Duration(days: today.weekday - 1));
       final id = await insertTask(
         title: '周例会',
@@ -791,10 +791,10 @@ void main() {
         reason: '不再匹配新锚点的完成记录被清理',
       );
       expect(await db.getInstanceCompletion(id, monday), isNull,
-          reason: 'P0-3：旧锚点完成记录不再残留为孤儿');
+          reason: '旧锚点完成记录不再残留为孤儿');
     });
 
-    test('P1-24：锚点吸附到最近命中日（周二→回周一，规则日不变）', () async {
+    test('锚点吸附到最近命中日（周二→回周一，规则日不变）', () async {
       final tuesday = today.subtract(Duration(days: today.weekday - 2));
       final hit = RruleService.instance.nearestHitOnOrNear(
         tuesday,
@@ -802,11 +802,11 @@ void main() {
       );
       expect(hit, isNotNull);
       expect(hit!.weekday, DateTime.monday,
-          reason: 'P1-24：每周一任务改到周二应吸附回最近的周一（否则系列消失）');
+          reason: '每周一任务改到周二应吸附回最近的周一（否则系列消失）');
     });
   });
 
-  group('P1-25 改期本次迁移实例完成记录', () {
+  group('改期本次迁移实例完成记录', () {
     test('已完成实例"改期本次"：完成记录迁移到新日期并保留完成时间', () async {
       final container = makeContainer();
       await settle(container);
@@ -825,7 +825,7 @@ void main() {
 
       expect(exId, greaterThan(0));
       expect(await db.getInstanceCompletion(id, today), isNull,
-          reason: 'P1-25：原日期完成记录不再残留为孤儿');
+          reason: '原日期完成记录不再残留为孤儿');
       final moved = await db.getInstanceCompletion(id, toDate);
       expect(moved, isNotNull, reason: '完成记录迁移到新日期');
       expect(moved!.completedAt, comp.completedAt, reason: '保留原完成时间');
@@ -859,14 +859,14 @@ void main() {
       await drain();
 
       expect(await db.getInstanceCompletion(id, today), isNull,
-          reason: 'P1-25：更新例外分支同样迁移完成记录');
+          reason: '更新例外分支同样迁移完成记录');
       expect(await db.getInstanceCompletion(id, day3), isNotNull,
           reason: '完成记录跟随到最新目标日期');
       expect(await db.getException(exId), isNotNull);
     });
   });
 
-  group('P1-15 子任务联动完成父任务提醒', () {
+  group('子任务联动完成父任务提醒', () {
     test('重复子任务完成 → 非重复父任务联动完成且提醒重排不抛异常', () async {
       final container = makeContainer();
       await settle(container);
@@ -891,7 +891,7 @@ void main() {
       final parent = await db.getTask(parentId);
       expect(parent, isNotNull);
       expect(parent!.completedAt, isNotNull,
-          reason: 'P1-15：子任务全部完成后父任务联动完成');
+          reason: '子任务全部完成后父任务联动完成');
       // 修复后 scheduleTask(父) 无条件执行：非重复父任务旧提醒被取消
       //（测试环境通知平台不可用，调度内部吞异常不抛出）
     });
@@ -909,7 +909,7 @@ void main() {
       );
       await notifier.completeTask(childId);
       await drain();
-      // 直接对已完成的父任务调度（P1-15 路径：scheduleTask 取消旧提醒）
+      // 直接对已完成的父任务调度（scheduleTask 取消旧提醒路径）
       final parent = (await db.getTask(parentId))!;
       final ok = await container
           .read(reminderSchedulerProvider)

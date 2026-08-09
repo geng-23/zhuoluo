@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show Value;
+﻿import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
@@ -7,7 +7,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 
-/// P1-2 跨时区语义测试：应用时区 ≠ 系统时区时，
+/// 跨时区语义测试：应用时区 ≠ 系统时区时，
 /// 任务墙上时间/提醒基准/RRULE 命中/完成记录归一化/日历按天索引
 /// 必须按应用时区解释，不得出现偏移。
 void main() {
@@ -52,7 +52,7 @@ void main() {
     final t = AppClock.at(2026, 8, 10, 9, 0);
     final utc = DateTime.utc(2026, 8, 10, 13, 0);
     expect(t.millisecondsSinceEpoch, utc.millisecondsSinceEpoch,
-        reason: 'P1-2：应用时区墙上时间对应的绝对时刻应等于 UTC 换算值');
+        reason: '应用时区墙上时间对应的绝对时刻应等于 UTC 换算值');
     expect(t.hour, 9, reason: '字段按应用时区解释');
   });
 
@@ -68,11 +68,11 @@ void main() {
     expect(
       t.planStart!.millisecondsSinceEpoch,
       DateTime.utc(2026, 8, 10, 19, 0).millisecondsSinceEpoch,
-      reason: 'P1-2：写入的绝对时刻 = 应用时区 15:00（= UTC 19:00）',
+      reason: '写入的绝对时刻 = 应用时区 15:00（= UTC 19:00）',
     );
     final asApp = AppClock.asApp(t.planStart!);
     expect(asApp.hour, 15,
-        reason: 'P1-2：读回后按应用时区解释字段应为 15:00');
+        reason: '读回后按应用时区解释字段应为 15:00');
   });
 
   test('reminderTriggerAt：每天 09:00 任务的提醒基准按应用时区', () {
@@ -100,19 +100,19 @@ void main() {
     final trigger = reminderTriggerAt(task, 0);
     expect(trigger, isNotNull);
     final asApp = AppClock.asApp(trigger!);
-    expect(asApp.hour, 9, reason: 'P1-2：提醒触发按应用时区 09:00');
+    expect(asApp.hour, 9, reason: '提醒触发按应用时区 09:00');
     final now = AppClock.now();
     final todayApp = AppClock.at(now.year, now.month, now.day, 9, 0);
     expect(
       trigger.millisecondsSinceEpoch,
       todayApp.millisecondsSinceEpoch,
-      reason: 'P1-2：触发绝对时刻 = 应用时区今天 09:00',
+      reason: '触发绝对时刻 = 应用时区今天 09:00',
     );
     // 与系统时区（UTC+8）视角换算一致：纽约 09:00 = UTC 当天 13:00
     expect(
       trigger.millisecondsSinceEpoch,
       DateTime.utc(now.year, now.month, now.day, 13, 0).millisecondsSinceEpoch,
-      reason: 'P1-2：纽约 09:00 = UTC 当天 13:00',
+      reason: '纽约 09:00 = UTC 当天 13:00',
     );
   });
 
@@ -128,7 +128,7 @@ void main() {
         AppClock.at(2026, 8, 11, 0, 0),
       ),
       isTrue,
-      reason: 'P1-2：按应用时区日期命中（8/11 纽约 = 8/11 UTC 04:00）',
+      reason: '按应用时区日期命中（8/11 纽约 = 8/11 UTC 04:00）',
     );
     // 用系统时区（UTC+8）视角看 8/10 20:00 UTC（= 纽约 8/10 16:00）命中 8/10
     expect(
@@ -138,7 +138,7 @@ void main() {
         DateTime.utc(2026, 8, 10, 20, 0),
       ),
       isTrue,
-      reason: 'P1-2：UTC 8/10 20:00 按应用时区是 8/10，应命中',
+      reason: 'UTC 8/10 20:00 按应用时区是 8/10，应命中',
     );
     // 用系统时区（UTC+8）视角看 8/11 02:00 UTC（= 纽约 8/10 22:00）命中 8/10
     expect(
@@ -148,7 +148,7 @@ void main() {
         DateTime.utc(2026, 8, 11, 2, 0),
       ),
       isTrue,
-      reason: 'P1-2：UTC 8/11 02:00 按应用时区仍是 8/10（纽约 22:00），应命中',
+      reason: 'UTC 8/11 02:00 按应用时区仍是 8/10（纽约 22:00），应命中',
     );
     // 8/11 纽约 00:00 = UTC 04:00：按应用时区是 8/11，命中
     expect(
@@ -158,7 +158,7 @@ void main() {
         DateTime.utc(2026, 8, 11, 4, 0),
       ),
       isTrue,
-      reason: 'P1-2：UTC 8/11 04:00 = 纽约 8/11 00:00，应命中',
+      reason: 'UTC 8/11 04:00 = 纽约 8/11 00:00，应命中',
     );
   });
 
@@ -178,12 +178,12 @@ void main() {
     expect(
       comp.instanceDate.millisecondsSinceEpoch,
       DateTime.utc(2026, 8, 11, 4, 0).millisecondsSinceEpoch,
-      reason: 'P1-2：完成记录归一化为应用时区 00:00（纽约 8/11 00:00 = UTC 8/11 04:00）',
+      reason: '完成记录归一化为应用时区 00:00（纽约 8/11 00:00 = UTC 8/11 04:00）',
     );
     expect(
       await db.isInstanceCompleted(id, AppClock.at(2026, 8, 11)),
       isTrue,
-      reason: 'P1-2：按应用时区日期查询命中',
+      reason: '按应用时区日期查询命中',
     );
   });
 
@@ -202,9 +202,9 @@ void main() {
     final aug11 = items.where((i) =>
         AppClock.asApp(i.instanceDate).month == 8 &&
         AppClock.asApp(i.instanceDate).day == 11);
-    expect(aug11.length, 1, reason: 'P1-2：纽约 8/11 有一个实例');
+    expect(aug11.length, 1, reason: '纽约 8/11 有一个实例');
     expect(aug11.first.completed, isTrue,
-        reason: 'P1-2：纽约 8/11 实例完成状态正确');
+        reason: '纽约 8/11 实例完成状态正确');
   });
 
   test('统计按天分组：完成记录按应用时区日期归组', () async {
@@ -221,12 +221,12 @@ void main() {
     );
     // 完成记录 completedAt 是"现在"（真实时间），断言当月窗口包含该记录
     // 且 key 按应用时区归一化（纽约 00:00 绝对时刻）
-    expect(counts.isNotEmpty, isTrue, reason: 'P1-2：月窗口内应有完成记录');
+    expect(counts.isNotEmpty, isTrue, reason: '月窗口内应有完成记录');
     final keys = counts.keys.map(AppClock.asApp).toList();
     expect(
       keys.any((k) => k.year == 2026 && k.month == 8),
       isTrue,
-      reason: 'P1-2：统计 key 按应用时区解释为 2026-08',
+      reason: '统计 key 按应用时区解释为 2026-08',
     );
     // 计划数：纽约 8/10 起的每日任务在 8 月窗口展开 22 个实例（8/10-8/31）；
     // 原统计口径对重复任务的 planStart 额外计 1 次（8/10）→ 合计 23
@@ -237,7 +237,7 @@ void main() {
     expect(
       planned.values.fold<int>(0, (a, b) => a + b),
       23,
-      reason: 'P1-2：重复任务计划数 = 展开 22 + planStart 1（原口径）',
+      reason: '重复任务计划数 = 展开 22 + planStart 1（原口径）',
     );
   });
 
@@ -263,12 +263,12 @@ void main() {
     expect(
       counts[AppClock.at(2026, 8, 10)],
       1,
-      reason: 'P1-2：UTC 8/11 03:00 按应用时区（纽约 8/10 23:00）归到 8/10',
+      reason: 'UTC 8/11 03:00 按应用时区（纽约 8/10 23:00）归到 8/10',
     );
     expect(
       counts.containsKey(AppClock.at(2026, 8, 11)),
       isFalse,
-      reason: 'P1-2：不得按系统时区字段错归到 8/11',
+      reason: '不得按系统时区字段错归到 8/11',
     );
   });
 
@@ -288,13 +288,13 @@ void main() {
     final aug12 = items.where(
       (i) => AppClock.asApp(i.instanceDate).day == 12,
     );
-    expect(aug12.length, 1, reason: 'P1-2：纽约 8/12 一个实例');
-    expect(aug12.first.completed, isTrue, reason: 'P1-2：8/12 已完成');
+    expect(aug12.length, 1, reason: '纽约 8/12 一个实例');
+    expect(aug12.first.completed, isTrue, reason: '8/12 已完成');
     final aug13 = items.where(
       (i) => AppClock.asApp(i.instanceDate).day == 13,
     );
-    expect(aug13.length, 1, reason: 'P1-2：8/13 一个实例');
-    expect(aug13.first.completed, isFalse, reason: 'P1-2：8/13 未完成');
+    expect(aug13.length, 1, reason: '8/13 一个实例');
+    expect(aug13.first.completed, isFalse, reason: '8/13 未完成');
     // 统计按 completedAt（完成时刻=应用时区今天）归组
     final now = AppClock.now();
     final todayKey = AppClock.at(now.year, now.month, now.day);
@@ -303,6 +303,6 @@ void main() {
       todayKey.add(const Duration(days: 1)),
     );
     expect(counts[todayKey], 1,
-        reason: 'P1-2：统计按完成时刻（应用时区今天）归组');
+        reason: '统计按完成时刻（应用时区今天）归组');
   });
 }

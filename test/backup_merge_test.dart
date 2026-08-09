@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
@@ -187,7 +187,7 @@ void main() {
       expect(await target.getSetting('themeMode'), 'dark');
     });
 
-    test('P1-22：备份含多个默认清单时合并不产生新的默认清单', () async {
+    test('备份含多个默认清单时合并不产生新的默认清单', () async {
       await db.ensureDefaultList();
       final workId = await db.insertList('工作', '#FF0000', 1);
       // 模拟旧版本/手工备份的脏数据：另一个清单也标记为默认
@@ -208,7 +208,7 @@ void main() {
           .where((l) => l.isDefault)
           .toList();
       expect(defaults, hasLength(1),
-          reason: 'P1-22：合并导入后默认清单必须唯一');
+          reason: '合并导入后默认清单必须唯一');
       final work = (await target.getAllLists())
           .firstWhere((l) => l.name == '工作');
       expect(work.isDefault, isFalse, reason: '新导入清单不继承默认标记');

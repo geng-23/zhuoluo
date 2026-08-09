@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show Value;
+﻿import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/data/database/database.dart';
@@ -70,7 +70,7 @@ void main() {
   });
 
   test('#1 提醒通知 ID 与习惯通知 ID 区段分离（大 reminderId 范围）', () {
-    // reminderId 为全局自增主键，验证累积到远超 64（N-P1-4 修复点）仍安全
+    // reminderId 为全局自增主键，验证累积到远超 64 仍安全
     for (var reminderId = 1; reminderId <= 100000; reminderId += 997) {
       final reminderIdMax = NotificationIds.forReminder(
         reminderId,
@@ -205,7 +205,7 @@ void main() {
         reason: '仅有截止时间的任务应按截止日计入计划数');
   });
 
-  test('P0-6 通知 ID 无碰撞：同任务多条提醒跨实例、同实例均互异', () {
+  test('通知 ID 无碰撞：同任务多条提醒跨实例、同实例均互异', () {
     final day1 = DateTime(2026, 8, 10);
     final day2 = DateTime(2026, 8, 11);
     // 同任务两条提醒 reminderId 差 1（旧公式在此场景跨实例碰撞的临界形态）
@@ -229,7 +229,7 @@ void main() {
     expect(ids.length, 64, reason: '同实例提醒 id 段位内必须全部唯一');
   });
 
-  test('N-P1-4 提醒自增 ID 累积远超 64 仍无碰撞（修复回归）', () {
+  test('提醒自增 ID 累积远超 64 仍无碰撞（修复回归）', () {
     final day1 = DateTime(2026, 8, 10);
     final day2 = DateTime(2026, 8, 11);
     final day3 = DateTime(2026, 8, 12);
@@ -258,7 +258,7 @@ void main() {
     }
   });
 
-  test('P0-7 测试通知 ID 不与第 10 个习惯提醒 ID 碰撞', () {
+  test('测试通知 ID 不与第 10 个习惯提醒 ID 碰撞', () {
     expect(
       NotificationIds.forTest,
       isNot(NotificationIds.forHabit(10, DateTime(2050, 12, 31))),
@@ -267,7 +267,7 @@ void main() {
     expect(NotificationIds.forTest, greaterThan(2100000000));
   });
 
-  test('N-P1-1 权限缓存刷新在无平台宿主时不抛异常且返回 true', () async {
+  test('权限缓存刷新在无平台宿主时不抛异常且返回 true', () async {
     // 清空替身：验证真实容错路径（平台插件未初始化时吞异常兜底 true）
     NotificationService.instance.debugOverrideScheduler = null;
     final svc = NotificationService.instance;
@@ -276,13 +276,13 @@ void main() {
         reason: '测试环境无原生宿主，权限查询应兜底返回 true');
   });
 
-  test('P1-10 习惯提醒 ID 含日期维度且段位不碰撞', () {
+  test('习惯提醒 ID 含日期维度且段位不碰撞', () {
     final day1 = DateTime(2026, 8, 10);
     final day2 = DateTime(2026, 8, 11);
     expect(
       NotificationIds.forHabit(1, day1),
       isNot(NotificationIds.forHabit(1, day2)),
-      reason: 'P1-10：逐日排期后同习惯不同日期 ID 必须不同（按天跳过打卡）',
+      reason: '逐日排期后同习惯不同日期 ID 必须不同（按天跳过打卡）',
     );
     expect(
       NotificationIds.forHabit(1, day1),
@@ -295,7 +295,17 @@ void main() {
     expect(maxHabit, greaterThan(0));
   });
 
-  test('P0-6 rescheduleIfStale 未过期时短路（不重复全量重排）', () async {
+  test('测试通知 ID 不与任务/习惯区段重叠', () {
+    final testId = NotificationIds.forTest;
+    final habitId = NotificationIds.forHabit(1, DateTime(2050, 12, 31));
+    final taskId = NotificationIds.forReminder(1, DateTime(2026, 8, 10));
+    expect(testId, isNot(equals(habitId)));
+    expect(testId, isNot(equals(taskId)));
+    expect(testId, greaterThan(habitId),
+        reason: '测试段在 int32 上限附近，高于习惯段');
+  });
+
+  test('rescheduleIfStale 未过期时短路（不重复全量重排）', () async {
     // setUp 已注入记录型替身（FakeNotificationScheduler）：
     // 断言门控逻辑（此前依赖平台插件不可用时的异常吞掉行为，
     // 属"假绿"——无法验证是否真的短路）
@@ -304,15 +314,15 @@ void main() {
     final scheduler = ReminderScheduler(db);
     await scheduler.rescheduleAll();
     // 全量重排：cancelAll 1 次 + 重新调度
-    expect(fake.cancelAllCount, 1, reason: 'P0-6：rescheduleAll 先全量取消');
+    expect(fake.cancelAllCount, 1, reason: 'rescheduleAll 先全量取消');
     final afterFull = fake.scheduled.length;
     expect(afterFull, greaterThanOrEqualTo(0));
 
     // 立即调用 rescheduleIfStale（<24h）应被门控短路：不再次 cancelAll
     await scheduler.rescheduleIfStale();
     expect(fake.cancelAllCount, 1,
-        reason: 'P0-6：<24h 门控应短路，不得二次全量重排');
+        reason: '<24h 门控应短路，不得二次全量重排');
     expect(fake.scheduled.length, afterFull,
-        reason: 'P0-6：短路后不得新增调度');
+        reason: '短路后不得新增调度');
   });
 }

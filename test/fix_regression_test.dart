@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
@@ -15,13 +15,12 @@ import 'package:zhuoluo/features/task/providers.dart';
 
 import 'support/fake_notification_scheduler.dart';
 
-/// 2026-08-08 21:27 总览新发现 3 项 + 第二批 3 项（P1-27 纯 UI 钳制，
-/// 与既有 7 处同模式，analyze 覆盖）回归测试：
-/// - 新发现①：日历侧跳过/撤销跳过与任务页统一（完成记录暂存恢复 + JSON 容错）
-/// - 新发现③：applyRecurringChange 返回被清理的完成记录/例外（改期撤销恢复）
-/// - 新发现②：习惯提醒走独立渠道（schedule 渠道参数路径不抛异常）
-/// - P1-21：导入缺表键兜底
-/// - P1-4：导入完成/打卡日期归一化（00:00 基准）
+/// 修复回归测试：
+/// - 日历侧跳过/撤销跳过与任务页统一（完成记录暂存恢复 + JSON 容错）
+/// - applyRecurringChange 返回被清理的完成记录/例外（改期撤销恢复）
+/// - 习惯提醒走独立渠道（schedule 渠道参数路径）
+/// - 导入缺表键兜底
+/// - 导入完成/打卡日期归一化（00:00 基准）
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final now = DateTime.now();
@@ -68,7 +67,7 @@ void main() {
     return container;
   }
 
-  group('新发现① 日历侧跳过/撤销与任务页统一（P0-2 日历入口 + P2-40）', () {
+  group('日历侧跳过/撤销与任务页统一', () {
     test('日历侧跳过→撤销：完成记录恢复且完成时间保留', () async {
       final start = today.subtract(const Duration(days: 5));
       final id = await insertTask(
@@ -103,7 +102,7 @@ void main() {
       );
     });
 
-    test('日历侧跳过：非法 skippedDates JSON 不抛异常（P2-40 容错）', () async {
+    test('日历侧跳过：非法 skippedDates JSON 不抛异常（容错）', () async {
       final start = today.subtract(const Duration(days: 5));
       final id = await insertTask(
         title: '每日任务',
@@ -147,7 +146,7 @@ void main() {
     });
   });
 
-  group('新发现③ 改期撤销恢复被清理的完成记录/例外（P2-52）', () {
+  group('改期撤销恢复被清理的完成记录/例外', () {
     test('applyRecurringChange 返回被清理的例外列表', () async {
       final start = today.subtract(const Duration(days: 10));
       final id = await insertTask(
@@ -266,7 +265,7 @@ void main() {
     });
   });
 
-  group('新发现② 习惯提醒独立渠道（P2-51）', () {
+  group('习惯提醒独立渠道', () {
     test('scheduleHabitReminder 走习惯渠道 + 逐日排期 + 已打卡跳过', () async {
       // 注入记录型替身：断言真实调度结果（此前依赖平台插件不可用时的
       // 异常吞掉行为，属"假绿"——断言的是环境失败而非功能正确性）
@@ -286,19 +285,19 @@ void main() {
       await db.checkHabit(habitId, todayKey);
 
       final ok = await scheduler.scheduleHabitReminder(habit);
-      expect(ok, isTrue, reason: 'P2-51：替身环境调度成功应返回 true');
+      expect(ok, isTrue, reason: '替身环境调度成功应返回 true');
       // 93 天窗口 − 今天（已打卡跳过）= 92 条，全部走习惯渠道
       expect(fake.scheduled.length, 92,
-          reason: 'P2-51：93 天逐日排期，今天已打卡跳过');
+          reason: '93 天逐日排期，今天已打卡跳过');
       expect(
         fake.scheduled.every((s) => s.channel == 'habit_reminder_v3'),
         isTrue,
-        reason: 'P2-51：习惯提醒走独立渠道',
+        reason: '习惯提醒走独立渠道',
       );
       expect(
         fake.scheduled.every((s) => s.payload == 'h$habitId'),
         isTrue,
-        reason: 'P2-51：深链载荷定位习惯',
+        reason: '深链载荷定位习惯',
       );
       // 第一条 = 明天 09:00
       final first = fake.scheduled.first;
@@ -307,12 +306,12 @@ void main() {
           DateTime(now.year, now.month, now.day + 1, 9, 0),
         ).inMinutes.abs(),
         lessThanOrEqualTo(1),
-        reason: 'P2-51：明天 09:00 开始排期',
+        reason: '明天 09:00 开始排期',
       );
     });
   });
 
-  group('P1-21 导入缺表键兜底', () {
+  group('导入缺表键兜底', () {
     test('缺 lists/tasks 以外表键的备份：parseBackupStats 非 null 且可导入', () async {
       final json = jsonEncode({
         'version': 1,
@@ -384,7 +383,7 @@ void main() {
     });
   });
 
-  group('P1-4 导入完成/打卡日期归一化', () {
+  group('导入完成/打卡日期归一化', () {
     test('导入带时分的实例完成记录：恢复后"已完成"状态不丢', () async {
       final json = jsonEncode({
         'version': 1,
@@ -485,7 +484,7 @@ void main() {
     });
   });
 
-  group('P2-1 N+1 批量预取', () {
+  group('N+1 批量预取', () {
     test('批量预取方法：空 ids 防空返回空（不生成 IN () 非法 SQL）', () async {
       expect(await db.getExceptionsForTasks([]), isEmpty);
       expect(await db.getCompletedSetForTasks([], today, today), isEmpty);

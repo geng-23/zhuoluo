@@ -65,33 +65,33 @@ void main() {
       expect(r.matched, false);
     });
 
-    test('P0-11：下午3点到5点 → 15:00-17:00（继承下午时段）', () {
+    test('下午3点到5点 → 15:00-17:00（继承下午时段）', () {
       final r = ChineseDateParser.instance.parse('下午3点到5点', now: base);
       expect(r.time!.hour, 15);
       expect(r.endTime!.hour, 17,
           reason: '结束应为当天 17:00 而非次日凌晨 05:00');
     });
 
-    test('P0-11：晚上11点到1点 → 23:00-01:00（跨午夜仍正确）', () {
+    test('晚上11点到1点 → 23:00-01:00（跨午夜仍正确）', () {
       final r = ChineseDateParser.instance.parse('晚上11点到1点', now: base);
       expect(r.time!.hour, 23);
       expect(r.endTime!.hour, 1, reason: '次日凌晨 1 点');
     });
 
-    test('P0-11：显式结束时段优先（早上9点到下午2点）', () {
+    test('显式结束时段优先（早上9点到下午2点）', () {
       final r = ChineseDateParser.instance.parse('早上9点到下午2点', now: base);
       expect(r.time!.hour, 9);
       expect(r.endTime!.hour, 14);
     });
 
-    test('P0-11：结束支持点半（下午3点到4点半）', () {
+    test('结束支持点半（下午3点到4点半）', () {
       final r = ChineseDateParser.instance.parse('下午3点到4点半', now: base);
       expect(r.time!.hour, 15);
       expect(r.endTime!.hour, 16);
       expect(r.endTime!.minute, 30);
     });
 
-    test('P0-12：下3点 → 15:00', () {
+    test('下3点 → 15:00', () {
       final r = ChineseDateParser.instance.parse('下3点开会', now: base);
       expect(r.time!.hour, 15);
       final r2 = ChineseDateParser.instance.parse('下3点半', now: base);
@@ -99,7 +99,7 @@ void main() {
       expect(r2.time!.minute, 30);
     });
 
-    test('P0-16：每N周补 BYDAY=起始星期；每2周三显式星期三', () {
+    test('每N周补 BYDAY=起始星期；每2周三显式星期三', () {
       // base 2026-08-05 周三
       final r = ChineseDateParser.instance.parse('每2周', now: base);
       expect(r.rrule, 'FREQ=WEEKLY;INTERVAL=2;BYDAY=WE');
@@ -111,20 +111,20 @@ void main() {
       expect(r3.date, DateTime(2026, 8, 8), reason: '本周六 8/8');
     });
 
-    test('P1-15：每周一 → BYDAY=MO（死代码删除后仍正常）', () {
+    test('每周一 → BYDAY=MO（死代码删除后仍正常）', () {
       final r = ChineseDateParser.instance.parse('每周一', now: base);
       expect(r.rrule, 'FREQ=WEEKLY;BYDAY=MO');
       expect(r.date, DateTime(2026, 8, 10), reason: '本周一已过取下周');
     });
 
-    test('P1-16：下个月月底 → 下月最后一天（不受当月月底抢占）', () {
+    test('下个月月底 → 下月最后一天（不受当月月底抢占）', () {
       final r = ChineseDateParser.instance.parse('下个月月底交报告', now: base);
       expect(r.date, DateTime(2026, 9, 30));
       final r2 = ChineseDateParser.instance.parse('月底', now: base);
       expect(r2.date, DateTime(2026, 8, 31));
     });
 
-    test('P2-21：裸"3天"不解析，仅"3天后/3天之后"为相对日期', () {
+    test('裸"3天"不解析，仅"3天后/3天之后"为相对日期', () {
       final r = ChineseDateParser.instance.parse('3天交报告', now: base);
       expect(r.matched, isFalse);
       expect(r.date, isNull);
@@ -134,7 +134,7 @@ void main() {
       expect(r3.date, DateTime(2026, 8, 8));
     });
 
-    test('P2-22：晚上12点为午夜 00:00', () {
+    test('晚上12点为午夜 00:00', () {
       final r = ChineseDateParser.instance.parse('晚上12点', now: base);
       expect(r.time!.hour, 0);
       final r2 = ChineseDateParser.instance.parse('晚上12点半', now: base);
@@ -209,19 +209,19 @@ void main() {
   });
 
   group('extractTaskTitle 同步（P1-D）', () {
-    test('P0-16：每2周三整体切除', () {
+    test('每2周三整体切除', () {
       expect(extractTaskTitle('每2周三跑步'), '跑步');
     });
-    test('P1-16：下个月月底整体切除', () {
+    test('下个月月底整体切除', () {
       expect(extractTaskTitle('下个月月底交报告'), '交报告');
     });
-    test('P0-12：下3点', () {
+    test('下3点', () {
       expect(extractTaskTitle('下3点开会'), '开会');
     });
-    test('P2-21：裸3天保留', () {
+    test('裸3天保留', () {
       expect(extractTaskTitle('3天交报告'), '3天交报告');
     });
-    test('P0-11：下午3点到5点整体切除', () {
+    test('下午3点到5点整体切除', () {
       expect(extractTaskTitle('下午3点到5点交报告'), '交报告');
     });
     test('中文数字标题同步', () {

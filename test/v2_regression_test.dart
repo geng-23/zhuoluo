@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show Value;
+﻿import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -45,7 +45,7 @@ void main() {
     );
   }
 
-  group('P1-B UNTIL 边界', () {
+  group('UNTIL 边界', () {
     test('UNTIL=YYYYMMDD 时结束日当天的定时实例保留', () {
       final r = RruleService.instance;
       // 每天 09:00 开始，至 2026-08-10 结束（定时实例带时分）
@@ -91,7 +91,7 @@ void main() {
     });
   });
 
-  group('P1-B 番茄统计窗口', () {
+  group('番茄统计窗口', () {
     test('to=月末 00:00 时当天完成的番茄记录计入', () async {
       final id = await insertTask(title: '番茄任务');
       // 月末 23:59 完成的记录
@@ -129,7 +129,7 @@ void main() {
     });
   });
 
-  group('P1-B 例外时分渲染数据', () {
+  group('例外时分渲染数据', () {
     test('例外改期到当天的实例携带 displayTime（时分）', () async {
       final start = today.subtract(const Duration(days: 30));
       final id = await insertTask(
@@ -164,7 +164,7 @@ void main() {
     });
   });
 
-  group('P1-A 删除主路径 bump dataVersion', () {
+  group('删除主路径 bump dataVersion', () {
     test('deleteTaskWithUndo 后 dataVersion 递增', () async {
       // 先建默认清单再建容器：避免控制器 init 的 ensureDefaultList 与
       // 测试内 ensureDefaultList 并发导致双插（getDefaultList 报 Too many）
@@ -193,7 +193,7 @@ void main() {
     });
   });
 
-  group('P1-D 快速添加标题提取', () {
+  group('快速添加标题提取', () {
     testWidgets('时间词整体切除，标题不再被撕裂', (tester) async {
       await db.ensureDefaultList();
       final container = ProviderContainer(

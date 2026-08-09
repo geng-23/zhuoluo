@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
@@ -113,7 +113,7 @@ void main() {
     expect(await db.isInstanceCompleted(id, newStart), isTrue);
   });
 
-  test('P0-7：长间隔重复任务（每 2 年）不误判系列结束', () async {
+  test('长间隔重复任务（每 2 年）不误判系列结束', () async {
     final db = await newDb();
     addTearDown(db.close);
     final list = await db.getDefaultList();
@@ -128,7 +128,7 @@ void main() {
     expect(
       await db.hasFutureInstances(t),
       isTrue,
-      reason: 'P0-7：每 2 年任务在 370 天窗口内无实例，此前被误判系列结束',
+      reason: '每 2 年任务在 370 天窗口内无实例，此前被误判系列结束',
     );
     expect(RruleService.windowDaysFor('FREQ=YEARLY;INTERVAL=2'), 733,
         reason: '窗口至少覆盖一个完整周期（2*366+1 天缓冲）');
@@ -136,7 +136,7 @@ void main() {
     expect(RruleService.windowDaysFor('FREQ=WEEKLY;INTERVAL=4'), 370);
   });
 
-  test('P1-20：并发打卡同一习惯同一天不产生重复记录', () async {
+  test('并发打卡同一习惯同一天不产生重复记录', () async {
     final db = await newDb();
     addTearDown(db.close);
     final habitId = await db.insertHabit('阅读', '⭐', null);
@@ -148,7 +148,7 @@ void main() {
     ]);
     final rows = await db.getHabitRecords(habitId);
     expect(rows.length, lessThanOrEqualTo(1),
-        reason: 'P1-20：并发打卡不得产生重复记录（此前 isHabitDone 崩溃）');
+        reason: '并发打卡不得产生重复记录（此前 isHabitDone 崩溃）');
     // 唯一约束屏障：绕过幂等直接插入重复行应抛错
     await expectLater(
       db.insertHabitRecordFull(

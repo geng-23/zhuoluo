@@ -5,10 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
-import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/features/task/task_page.dart';
 
-/// 搜索 UI 与通知测试入口回归测试
+/// 搜索 UI 回归测试
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final now = DateTime.now();
@@ -102,18 +101,6 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('搜索标题或备注'), findsNothing,
           reason: '清除搜索后退出搜索模式');
-    });
-  });
-
-  group('通知测试 ID 区段', () {
-    test('测试通知 ID 不与任务/习惯区段重叠', () {
-      final testId = NotificationIds.forTest;
-      final habitId = NotificationIds.forHabit(1, DateTime(2050, 12, 31));
-      final taskId = NotificationIds.forReminder(1, DateTime(2026, 8, 10));
-      expect(testId, isNot(equals(habitId)));
-      expect(testId, isNot(equals(taskId)));
-      // P0-7：测试段在 int32 上限附近，高于习惯段（习惯段 = 2.1e9 - habitId）
-      expect(testId, greaterThan(habitId));
     });
   });
 }

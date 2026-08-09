@@ -39,9 +39,7 @@ void main() {
         planStart: Value(start),
         // 带计划开始的任务需有 planEnd 才会命中"今天"窗口（与正常创建一致）
         planEnd: Value(
-          start == null
-              ? null
-              : start.add(const Duration(hours: 1)),
+          start?.add(const Duration(hours: 1)),
         ),
         createdAt: now,
       ),

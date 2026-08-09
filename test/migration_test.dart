@@ -108,7 +108,7 @@ void main() {
       (1, 1, '定时任务', ${unix(DateTime(2026, 8, 10))}, NULL, 0, ${unix(DateTime(2026, 8, 10, 14, 30))}, 90, ${unix(DateTime(2026, 8, 1))}),
       (2, 1, '全天任务', ${unix(DateTime(2026, 8, 11))}, NULL, 1, NULL, 60, ${unix(DateTime(2026, 8, 1))}),
       (3, 1, '有截止', NULL, ${unix(DateTime(2026, 8, 15))}, 0, NULL, 60, ${unix(DateTime(2026, 8, 1))})''');
-    db.dispose();
+    db.close();
     return file;
   }
 

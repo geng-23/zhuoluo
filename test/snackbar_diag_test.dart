@@ -66,7 +66,7 @@ void main() {
 
     // 诊断：TickerMode / 路由状态 / ScaffoldMessenger build 条件
     final smElement = tester.element(find.byType(ScaffoldMessenger).first);
-    final tickerMode = TickerMode.of(smElement);
+    final tickerMode = TickerMode.valuesOf(smElement).enabled;
     final route = ModalRoute.of(smElement);
     debugPrint('DIAG tickerModeEnabled=$tickerMode');
     debugPrint('DIAG routeIsCurrent=${route?.isCurrent} routeIsFirst=${route?.isFirst}');

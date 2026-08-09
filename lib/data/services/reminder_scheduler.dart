@@ -180,7 +180,12 @@ class ReminderScheduler {
   Future<List<DateTime>> _cancelDatesFor(Task t) async {
     if (t.rrule.isEmpty) {
       final ps = t.planStart;
-      if (ps == null) return const [];
+      if (ps == null) {
+        // 仅截止时间的任务：与排期对称，按截止日当天取消
+        final due = t.dueTime;
+        if (due == null) return const [];
+        return [DateTime(due.year, due.month, due.day)];
+      }
       return [DateTime(ps.year, ps.month, ps.day)];
     }
     final today = AppClock.now();
@@ -423,17 +428,27 @@ class ReminderScheduler {
 /// 计算某条提醒在"目标实例日"的触发时间：
 /// - 全天任务：实例日 00:00 + [remindAtMinutes]（null = 默认 09:00）− 提前量
 /// - 定时任务：实例日 + planStart 时分 − 提前量
+/// - 仅截止时间任务：截止日 + [remindAtMinutes]（与调度器口径一致）
 /// 实例日：重复任务 = 今天；非重复 = planStart 当天。
-/// 返回 null 表示任务没有计划时间（无法判断）。
+/// 返回 null 表示任务没有计划/截止时间（无法判断）。
 DateTime? reminderTriggerAt(
   Task task,
   int remindMinutesBefore, {
   int? remindAtMinutes,
 }) {
   final ps = task.planStart;
-  if (ps == null) return null;
   final now = AppClock.now();
   final today = DateTime(now.year, now.month, now.day);
+  if (ps == null) {
+    // 仅截止时间的任务（备份兼容路径）：按截止日当天 + 提醒时刻 − 提前量，
+    // 与 _reminderBase 的全天式口径一致（默认 09:00）
+    final due = task.dueTime;
+    if (due == null) return null;
+    final min = remindAtMinutes ?? 540; // 默认 09:00
+    return DateTime(due.year, due.month, due.day)
+        .add(Duration(minutes: min))
+        .subtract(Duration(minutes: remindMinutesBefore));
+  }
   final day = task.rrule.isNotEmpty
       ? today
       : DateTime(ps.year, ps.month, ps.day);

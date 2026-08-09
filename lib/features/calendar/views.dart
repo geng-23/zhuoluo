@@ -2313,7 +2313,7 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
               t2,
             );
           },
-          child: Container(
+          child: SizedBox(
             height: (_endHour - widget.startHour) * _pixelPerHour,
             // 拖入不整列变蓝（用户反馈太丑），仅保留顶部时间浮标与指示线
             child: Stack(
@@ -2944,8 +2944,9 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
       var minStart = intervals[members.first].start;
       var maxEnd = intervals[members.first].end;
       for (final i in members) {
-        if (intervals[i].start.isBefore(minStart))
+        if (intervals[i].start.isBefore(minStart)) {
           minStart = intervals[i].start;
+        }
         if (intervals[i].end.isAfter(maxEnd)) maxEnd = intervals[i].end;
       }
       if (members.length <= 2) {

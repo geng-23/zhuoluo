@@ -237,7 +237,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                     // C1-2：完成未来系列实例时明确提示实际日期
                     // （界面"今天"状态不变，否则看起来"点了没反应"）
                     final doneDay = await _notifier.completeTask(t.id);
-                    if (mounted &&
+                    if (context.mounted &&
                         t.rrule.isNotEmpty &&
                         doneDay != null &&
                         !DateUtilsEx.sameDay(doneDay, AppClock.now())) {
@@ -375,7 +375,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                   await _notifier.completeTask(t.id);
                   _load();
                   // C4-3：与任务页一致——完成/撤销本次带撤销条
-                  if (mounted) {
+                  if (context.mounted) {
                     showAppSnackBar(
                       context,
                       done ? '已撤销今天的完成' : '已完成今天的实例',
@@ -401,7 +401,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                 await _notifier.skipInstance(t.id, instDay);
                 _load();
                 // C4-2：与其余入口一致——跳过带撤销条
-                if (mounted) {
+                if (context.mounted) {
                   showAppSnackBar(
                     context,
                     '已跳过 ${DateUtilsEx.dateCn(instDay)} 的实例',
@@ -1371,6 +1371,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         )..where((c) => c.taskId.equals(t.id)))
                 .get())
             .length;
+        if (!mounted) return;
         final ok = await showDialog<bool>(
           context: context,
           builder: (c) => AlertDialog(
@@ -2002,13 +2003,23 @@ class _RepeatRuleSheetState extends State<RepeatRuleSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+    // HCI-7：键盘避让（viewInsets 动画内边距）+ 可滚动 + 最大高度限制，
+    // 聚焦"每 N 天/月"或"共 N 次"输入框时确认按钮不被键盘遮挡
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
               '重复规则',
@@ -2305,7 +2316,9 @@ class _RepeatRuleSheetState extends State<RepeatRuleSheet> {
           ],
         ),
       ),
-    );
+    ),
+  ),
+);
   }
 
   String _freqLabel() {

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
-import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/features/calendar/calendar_page.dart';
 import 'package:zhuoluo/features/profile/profile_page.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';

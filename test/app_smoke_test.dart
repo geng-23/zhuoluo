@@ -79,15 +79,15 @@ void main() {
     // 纪念日已删除（#28）
     expect(find.text('倒数纪念日'), findsNothing);
 
-    // 关于：版本号 + 点击弹窗含联系方式
-    await tester.scrollUntilVisible(find.text('着落 v1.0.5'), 200,
+    // 关于：版本号 + 点击弹窗含联系方式（不写死版本号，避免升级后失配）
+    await tester.scrollUntilVisible(find.textContaining('着落 v'), 200,
         scrollable: find.byType(Scrollable).last);
     // 多滚一段，避免条目停在底部导航栏后方被遮挡
     await tester.drag(find.byType(Scrollable).last, const Offset(0, -80));
     await tester.pumpAndSettle();
-    expect(find.text('着落 v1.0.5'), findsOneWidget);
+    expect(find.textContaining('着落 v'), findsOneWidget);
     expect(find.text('无账号'), findsNothing);
-    await tester.tap(find.text('着落 v1.0.5'));
+    await tester.tap(find.textContaining('着落 v'));
     await tester.pumpAndSettle();
     expect(find.textContaining('confusion_geng@protonmail.com'), findsOneWidget,
         reason: '关于弹窗应显示联系方式');

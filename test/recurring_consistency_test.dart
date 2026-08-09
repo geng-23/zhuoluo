@@ -189,7 +189,7 @@ void main() {
       'VALUES (1, 100, 100), (1, 100, 200), (1, 101, 300)',
     );
     raw.execute('PRAGMA user_version = 2');
-    raw.dispose();
+    raw.close();
 
     final db = AppDatabase.forTesting(NativeDatabase(file));
     addTearDown(db.close);

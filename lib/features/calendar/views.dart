@@ -341,7 +341,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
     }
     if (globalX > w * 0.85) {
       _armEdgeTimer(1, w);
-    } else if (globalX < w * 0.06) {
+    } else if (globalX < w * 0.12) {
       _armEdgeTimer(-1, w);
     } else {
       _edgeTurnCtrl.timer?.cancel();
@@ -826,7 +826,7 @@ class _DayViewState extends ConsumerState<DayView> {
     }
     if (globalX > w * 0.85) {
       _armEdgeTimer(1, w);
-    } else if (globalX < w * 0.06) {
+    } else if (globalX < w * 0.12) {
       _armEdgeTimer(-1, w);
     } else {
       _edgeTurnCtrl.timer?.cancel();

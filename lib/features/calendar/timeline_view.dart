@@ -175,6 +175,9 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
       return;
     }
     _restoreAttempts = 0;
+    // 尽力同步恢复（active 变化时 controller 可能已 attach）；post-frame
+    // 兜底（_scheduleRestore）处理布局未完成的帧
+    _restoreSharedScroll();
     _scheduleRestore();
   }
 
@@ -196,11 +199,17 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
       return;
     }
     if (!_scrollController.hasClients) {
-      if (_restoreAttempts++ < 4) _scheduleRestore();
+      // 页面尚未 attach：放宽重试上限（连续快速翻页 + 数据重建时布局
+      // 延迟），耗尽后仍尽力上报基准，避免拖拽中基准长期陈旧
+      if (_restoreAttempts++ < 12) {
+        _scheduleRestore();
+      } else {
+        _reportAxisTopY();
+      }
       return;
     }
     final max = _scrollController.position.maxScrollExtent;
-    if (max == 0 && _restoreAttempts++ < 4) {
+    if (max == 0 && _restoreAttempts++ < 12) {
       _scheduleRestore();
       return;
     }

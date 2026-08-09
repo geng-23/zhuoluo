@@ -195,9 +195,10 @@ class CalendarController extends StateNotifier<CalendarState> {
     }
     loadCount++;
     // 扩展缓冲：月视图 ±1 月、周/日视图覆盖前后多周/多日，
-    // 连续翻页在手势动画内零 DB
-    final bufFrom = from.subtract(const Duration(days: 31));
-    final bufTo = to.add(const Duration(days: 31));
+    // 连续翻页在手势动画内零 DB。±45 天（约 6 周）把连续边缘翻页的
+    // 缓存未命中点推迟到第 6/12 页附近，降低拖拽中异步重建的 jank
+    final bufFrom = from.subtract(const Duration(days: 45));
+    final bufTo = to.add(const Duration(days: 45));
     try {
       final fetched = await _db.getCalendarItems(bufFrom, bufTo);
       if (!mounted || seq != _loadSeq) return; // 过期请求结果丢弃

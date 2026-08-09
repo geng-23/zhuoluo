@@ -252,7 +252,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
     }
     if (globalX > w * 0.85) {
       _armEdgeTimer(1, w, ctrl);
-    } else if (globalX < w * 0.06) {
+    } else if (globalX < w * 0.12) {
       _armEdgeTimer(-1, w, ctrl);
     } else {
       // 离开边缘区：取消计时（含连续链）
@@ -381,16 +381,20 @@ class DayColumnState extends ConsumerState<DayColumn> {
     return box.globalToLocal(gpos);
   }
 
-  /// 手指 global y → 时间轴内容坐标（相对轴顶部，含滚动 offset）。
-  /// 用跨页稳定的「视口顶部 + 轴顶部 padding + 共享滚动 offset」计算，
-  /// 不依赖当前列自身 offset——翻页后新页 offset 从 0 恢复共享值的
-  /// 瞬态会让列容器坐标换算偏上，落点/虚影跳变。
-  /// 返回 null 表示基准未就绪（视口/共享 offset 未上报）。
-  double? _stableContentDy(double globalY) {
+  /// 手指全局坐标 → 时间轴内容坐标（相对轴顶部，含滚动 offset）。
+  /// 优先用跨页稳定的「视口顶部 + 轴顶部 padding + 共享滚动 offset」，
+  /// 避免依赖当前列自身 offset（翻页后新页 offset 从 0 恢复共享值的
+  /// 瞬态会让列容器坐标换算偏上，落点/虚影跳变）。
+  /// 共享基准未就绪（视口从未上报，值为初始 0）时回退到本列容器
+  /// transform（offset 恢复后恒正确），避免返回 null 导致虚影消失。
+  /// 返回 null 表示两种换算都不可用（列未布局）。
+  double? _stableContentDy(Offset gpos) {
     final viewportTop = widget.dragViewportTopY?.value;
-    final sharedOffset = widget.scrollOffsetShare?.value;
-    if (viewportTop == null || sharedOffset == null) return null;
-    return globalY - viewportTop - axisTopPadding + sharedOffset;
+    if (viewportTop != null && viewportTop > 0) {
+      final sharedOffset = widget.scrollOffsetShare?.value ?? 0;
+      return gpos.dy - viewportTop - axisTopPadding + sharedOffset;
+    }
+    return _localFromGlobal(gpos)?.dy;
   }
 
   /// 虚影/胶囊渲染换算兜底：列未布局（build 期间）时调度一帧后重算
@@ -414,6 +418,10 @@ class DayColumnState extends ConsumerState<DayColumn> {
         // 共享拖拽状态：任务 id + 悬停列（虚影/胶囊渲染由共享
         // dragGlobalPos 驱动，_handleDragGlobal 更新）
         widget.dragTaskId?.value = details.data;
+        // 连续翻页链激活（armed）时，活动列由定时链（_edgeTurn）单一
+        // 权威驱动——onMove 不再覆盖，否则翻页动画中手指悬停的中间/
+        // 旧页列会把 dragActiveDay 钉到将 evict 的列，虚影随之消失
+        if (widget.edgeTurnCtrl?.armed == true) return;
         widget.dragActiveDay?.value = widget.day;
         // 注意：不再取消共享连续翻页链——onMove 由 avatar 悬停检测
         // 驱动，测试环境无 move 事件时也会触发（长按后/翻页后），
@@ -444,7 +452,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
         }
         // 稳定基准换算内容 y：不依赖本列自身 scroll offset（跨页翻页
         // 恢复前的瞬态会让落点偏上）；基准未就绪时取消改期
-        final dy = _stableContentDy(gpos.dy);
+        final dy = _stableContentDy(gpos);
         if (dy == null) {
           _clearDragState();
           return;
@@ -740,7 +748,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
                         !_isActiveColumn()) {
                       return const SizedBox.shrink();
                     }
-                    final dy = _stableContentDy(gpos.dy);
+                    final dy = _stableContentDy(gpos);
                     if (dy == null) {
                       _retryLocalAfterLayout(); // 基准未就绪：下一帧重算
                       return const SizedBox.shrink();
@@ -772,7 +780,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
                       return const SizedBox.shrink();
                     }
                     // 垂直用稳定基准（local 仅用于水平 dx）
-                    final dy = _stableContentDy(gpos.dy) ?? local.dy;
+                    final dy = _stableContentDy(gpos) ?? local.dy;
                     final gStart = _draggedStartForMinutes(
                       _snapMinutesForY(dy),
                     );

@@ -709,8 +709,9 @@ void main() {
       );
     });
 
-    testWidgets('连续翻多页后松手：落点时间与不翻页一致（不偏到顶部）', (tester) async {
-      Future<DateTime> dropAt(String title, {required bool turnPages}) async {
+    testWidgets('连续翻多页后松手：落点时间与不翻页一致（左/右缘跨缓存点）', (tester) async {
+      Future<DateTime> dropAt(String title,
+          {required int pages, required double edgeX}) async {
         await pumpCalendarWithTask(tester, title);
         final taskId = (await db.allTasksForBackup())
             .firstWhere((t) => t.title == title)
@@ -720,13 +721,13 @@ void main() {
         for (var i = 0; i < 6; i++) {
           await tester.pump(const Duration(milliseconds: 100));
         }
-        if (turnPages) {
-          await gesture.moveTo(const Offset(760, 400)); // 右缘首翻
+        if (pages > 0) {
+          await gesture.moveTo(Offset(edgeX, 400)); // 边缘首翻
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 350));
           await tester.pumpAndSettle();
-          // 连续续翻 6 次（Draggable 被 evict——落点走兜底）
-          for (var i = 0; i < 6; i++) {
+          // 连续续翻（Draggable 被 evict——落点走兜底）
+          for (var i = 0; i < pages; i++) {
             await tester.pump(const Duration(milliseconds: 550));
             await tester.pumpAndSettle();
           }
@@ -739,17 +740,30 @@ void main() {
         return (await db.getTask(taskId))!.planStart!;
       }
 
-      final direct = await dropAt('落点A', turnPages: false);
-      final turned = await dropAt('落点B', turnPages: true);
+      final direct = await dropAt('落点A', pages: 0, edgeX: 0);
+      // 右缘翻 10 页（跨 ±45 天缓存重基点；此前第 10 页附近失效）
+      final right = await dropAt('落点B', pages: 10, edgeX: 760);
+      // 左缘翻 6 页（此前第 5 页附近失效；左缘触发区 x<12%）
+      final left = await dropAt('落点C', pages: 6, edgeX: 16);
       expect(
-        turned.hour,
+        right.hour,
         direct.hour,
-        reason: '翻多页后落点小时应与不翻页一致（修复前偏上到顶部）',
+        reason: '右缘翻 10 页后落点小时应与不翻页一致（修复前第 10 页失效）',
       );
       expect(
-        turned.minute,
+        right.minute,
         direct.minute,
-        reason: '翻多页后落点分钟应与不翻页一致',
+        reason: '右缘翻 10 页后落点分钟应与不翻页一致',
+      );
+      expect(
+        left.hour,
+        direct.hour,
+        reason: '左缘翻 6 页后落点小时应与不翻页一致（修复前第 5 页失效）',
+      );
+      expect(
+        left.minute,
+        direct.minute,
+        reason: '左缘翻 6 页后落点分钟应与不翻页一致',
       );
     });
 

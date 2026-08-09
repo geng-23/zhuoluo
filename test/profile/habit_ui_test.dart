@@ -7,7 +7,7 @@ import 'package:zhuoluo/core/services/haptics_service.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
-import 'package:zhuoluo/features/profile/profile_page.dart';
+import 'package:zhuoluo/features/profile/habit_page.dart';
 
 import '../support/fake_notification_scheduler.dart';
 

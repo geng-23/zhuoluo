@@ -6,7 +6,6 @@ import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
-import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_service.dart';
 import 'package:zhuoluo/features/profile/backup_page.dart';
 import 'package:zhuoluo/features/profile/habit_page.dart';

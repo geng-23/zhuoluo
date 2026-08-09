@@ -85,26 +85,26 @@ class CalendarController extends StateNotifier<CalendarState> {
     final state = this.state;
     switch (state.view) {
       case 'month':
-        final first = DateTime(
+        final first = AppClock.at(
           state.displayedMonth.year,
           state.displayedMonth.month,
           1,
         );
-        final last = DateTime(
+        final last = AppClock.at(
           state.displayedMonth.year,
           state.displayedMonth.month + 1,
           0,
         );
         return (first, last);
       case 'week':
-        final monday = DateTime(
+        final monday = AppClock.at(
           state.selectedDay.year,
           state.selectedDay.month,
           state.selectedDay.day,
         ).subtract(Duration(days: state.selectedDay.weekday - 1));
         return (monday, monday.add(const Duration(days: 6)));
       case 'day':
-        final d = DateTime(
+        final d = AppClock.at(
           state.selectedDay.year,
           state.selectedDay.month,
           state.selectedDay.day,

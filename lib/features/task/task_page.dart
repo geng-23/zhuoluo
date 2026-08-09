@@ -850,7 +850,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     final notifier = ref.read(tasksControllerProvider.notifier);
     final ps = t.planStart;
     final pe = t.planEnd;
-    final newStart = DateTime(
+    final newStart = AppClock.at(
       picked.year,
       picked.month,
       picked.day,
@@ -868,11 +868,11 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     var effectiveStart = newStart;
     if (t.rrule.isNotEmpty) {
       final hit = RruleService.instance.nearestHitOnOrNear(
-        DateTime(newStart.year, newStart.month, newStart.day),
+        AppClock.at(newStart.year, newStart.month, newStart.day),
         t.rrule,
       );
       if (hit != null) {
-        effectiveStart = DateTime(
+        effectiveStart = AppClock.at(
           hit.year,
           hit.month,
           hit.day,

@@ -469,7 +469,7 @@ class TasksController extends StateNotifier<TasksState> {
     if (parsed.time != null) {
       isAllDay = false;
       final date = parsed.date ?? now;
-      ps = DateTime(
+      ps = AppClock.at(
         date.year,
         date.month,
         date.day,
@@ -480,9 +480,9 @@ class TasksController extends StateNotifier<TasksState> {
         var eh = parsed.endTime!.hour;
         final em = parsed.endTime!.minute;
         if (eh < parsed.time!.hour) {
-          pe = DateTime(date.year, date.month, date.day + 1, eh, em);
+          pe = AppClock.at(date.year, date.month, date.day + 1, eh, em);
         } else {
-          pe = DateTime(date.year, date.month, date.day, eh, em);
+          pe = AppClock.at(date.year, date.month, date.day, eh, em);
         }
       } else {
         pe = ps.add(const Duration(hours: 1));
@@ -490,16 +490,16 @@ class TasksController extends StateNotifier<TasksState> {
     } else if (parsed.date != null && parsed.rrule.isEmpty) {
       isAllDay = true;
       final d = parsed.date!;
-      ps = DateTime(d.year, d.month, d.day);
-      pe = DateTime(d.year, d.month, d.day + 1);
+      ps = AppClock.at(d.year, d.month, d.day);
+      pe = AppClock.at(d.year, d.month, d.day + 1);
     }
     if (ps == null && parsed.rrule.isNotEmpty) {
       // 重复任务起始日期用解析出的日期（此前"明天每天阅读"
       // 会忽略日期直接落到今天）；无明确时间 → 全天任务
       isAllDay = true;
       final d = parsed.date ?? now;
-      ps = DateTime(d.year, d.month, d.day);
-      pe = DateTime(d.year, d.month, d.day + 1);
+      ps = AppClock.at(d.year, d.month, d.day);
+      pe = AppClock.at(d.year, d.month, d.day + 1);
     }
     return addTask(
       title: title,

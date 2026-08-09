@@ -126,7 +126,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       // 子任务完成状态——重复子任务按今日实例完成记录判断
       // （此前一律用 completedAt，重复子任务今天已完成仍显示未完成）
       final now = AppClock.now();
-      final today = DateTime(now.year, now.month, now.day);
+      final today = AppClock.at(now.year, now.month, now.day);
       for (final s in _subTasks) {
         _subTasksDone[s.id] = s.rrule.isNotEmpty
             ? await db.isInstanceCompleted(s.id, today)
@@ -902,7 +902,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       helpText: '选择截止时间',
     );
     if (pickedTime == null || !mounted) return;
-    final due = DateTime(
+    final due = AppClock.at(
       pickedDate.year,
       pickedDate.month,
       pickedDate.day,
@@ -1316,12 +1316,12 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         // 锚点吸附：开始日期自动对齐到距锚点最近的规则命中日
         // （A13：改为 nearestHitOnOrNear——此前仅向未来吸附，周三设"每周一"
         // 会落到下周一，当前周窗口无实例导致任务从日历"消失"）
-        var startDay = DateTime(anchor.year, anchor.month, anchor.day);
+        var startDay = AppClock.at(anchor.year, anchor.month, anchor.day);
         final hit = RruleService.instance.nearestHitOnOrNear(startDay, rrule);
         if (hit != null) {
-          startDay = DateTime(hit.year, hit.month, hit.day);
+          startDay = AppClock.at(hit.year, hit.month, hit.day);
         }
-        final newStart = DateTime(
+        final newStart = AppClock.at(
           startDay.year,
           startDay.month,
           startDay.day,
@@ -1429,7 +1429,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       helpText: '选择实例时间',
     );
     if (pickedTime == null || !mounted) return;
-    final toDate = DateTime(
+    final toDate = AppClock.at(
       picked.year,
       picked.month,
       picked.day,
@@ -1838,7 +1838,7 @@ class _PlanTimeSheetState extends State<_PlanTimeSheet> {
   }
 
   void _submit() {
-    final start = DateTime(
+    final start = AppClock.at(
       _startDate.year,
       _startDate.month,
       _startDate.day,
@@ -1852,7 +1852,7 @@ class _PlanTimeSheetState extends State<_PlanTimeSheet> {
     }
     if (_endTime != null) {
       final endDate = _endDate ?? _startDate;
-      var end = DateTime(
+      var end = AppClock.at(
         endDate.year,
         endDate.month,
         endDate.day,
@@ -1862,7 +1862,7 @@ class _PlanTimeSheetState extends State<_PlanTimeSheet> {
       // C5-3：全天转定时时，若结束时间仍是"次日 00:00"（全天任务遗留
       // 的 planEnd），视为未设置 → 按开始时间 +1 小时，
       // 否则会静默变成 15 小时跨天任务
-      final nextMidnight = DateTime(
+      final nextMidnight = AppClock.at(
         start.year,
         start.month,
         start.day + 1,

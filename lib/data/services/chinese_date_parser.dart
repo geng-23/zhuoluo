@@ -70,7 +70,7 @@ class ChineseDateParser {
   /// 解析输入文本
   ParseResult parse(String input, {DateTime? now}) {
     final base = now ?? AppClock.now();
-    final today = DateTime(base.year, base.month, base.day);
+    final today = AppClock.at(base.year, base.month, base.day);
     String rrule = '';
     DateTime? date;
     TimeOfDay? time;
@@ -222,7 +222,9 @@ class ChineseDateParser {
           // 必须构造后回读校验，非法则忽略该匹配
           final v = _tryDate(base.year, month, day);
           if (v != null) {
-            date = month < base.month ? DateTime(base.year + 1, month, day) : v;
+            date = month < base.month
+                ? AppClock.at(base.year + 1, month, day)
+                : v;
             matched = true;
             rest = rest.replaceAll(m.group(0)!, '');
           }
@@ -252,14 +254,14 @@ class ChineseDateParser {
         final nextMonth = base.month + 1;
         final y = nextMonth > 12 ? base.year + 1 : base.year;
         final m1 = nextMonth > 12 ? 1 : nextMonth;
-        date = DateTime(y, m1 + 1, 0);
+        date = AppClock.at(y, m1 + 1, 0);
         matched = true;
         rest = rest.replaceAll(m.group(0)!, '');
       }
     }
     // 月底
     if (date == null && rest.contains('月底')) {
-      date = DateTime(base.year, base.month + 1, 0);
+      date = AppClock.at(base.year, base.month + 1, 0);
       matched = true;
       rest = rest.replaceAll('月底', '');
     }
@@ -296,7 +298,7 @@ class ChineseDateParser {
           if (v != null) {
             date = day >= base.day
                 ? v
-                : DateTime(base.year, base.month + 1, day);
+                : AppClock.at(base.year, base.month + 1, day);
             matched = true;
             rest = rest.replaceAll(m.group(0)!, '');
           }
@@ -461,7 +463,7 @@ class ChineseDateParser {
   /// 如 13月40号 → 次年2月9日，必须构造后回读校验），非法返回 null
   static DateTime? _tryDate(int year, int month, int day) {
     if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-    final d = DateTime(year, month, day);
+    final d = AppClock.at(year, month, day);
     if (d.year != year || d.month != month || d.day != day) return null;
     return d;
   }

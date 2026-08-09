@@ -1441,7 +1441,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
   Future<void> _addHabit() async {
     final controller = TextEditingController();
     var remind = false;
-    var time = DateTime(
+    var time = AppClock.at(
       AppClock.now().year,
       AppClock.now().month,
       AppClock.now().day,
@@ -1695,7 +1695,7 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
     var remind = habit.reminderTime != null;
     var time =
         habit.reminderTime ??
-        DateTime(
+        AppClock.at(
           AppClock.now().year,
           AppClock.now().month,
           AppClock.now().day,
@@ -1730,7 +1730,7 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
                     );
                     if (picked != null) {
                       setDialogState(
-                        () => time = DateTime(
+                        () => time = AppClock.at(
                           time.year,
                           time.month,
                           time.day,

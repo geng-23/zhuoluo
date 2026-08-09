@@ -412,8 +412,8 @@ class AppDatabase extends _$AppDatabase {
 
   /// 时间范围智能清单（含重复任务实例展开）
   Future<List<Task>> _tasksForRange(DateTime from, DateTime to) async {
-    final start = DateTime(from.year, from.month, from.day);
-    final end = DateTime(
+    final start = AppClock.at(from.year, from.month, from.day);
+    final end = AppClock.at(
       to.year,
       to.month,
       to.day,
@@ -492,8 +492,8 @@ class AppDatabase extends _$AppDatabase {
     DateTime to,
   ) async {
     if (ids.isEmpty) return {};
-    final start = DateTime(from.year, from.month, from.day);
-    final end = DateTime(
+    final start = AppClock.at(from.year, from.month, from.day);
+    final end = AppClock.at(
       to.year,
       to.month,
       to.day,
@@ -551,7 +551,7 @@ class AppDatabase extends _$AppDatabase {
   Future<List<Task>> getCompletedTasks({int limit = 200}) async {
     final rows = await select(tasks).get();
     final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = AppClock.at(now.year, now.month, now.day);
     // 预取今日重复实例完成时间（排序用）
     final todayCompletions = await (select(
       taskCompletions,
@@ -677,7 +677,7 @@ class AppDatabase extends _$AppDatabase {
   ) async {
     if (rrule.isEmpty) return const [];
     final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = AppClock.at(now.year, now.month, now.day);
     // 从 newStart 全量展开（含过去）：过去命中新规则的日期保留完成记录
     final instances = RruleService.instance.expand(
       newStart,
@@ -687,7 +687,10 @@ class AppDatabase extends _$AppDatabase {
     );
     if (instances.isEmpty) return const []; // 展开失败则保守不清理
     final keepDays = instances
-        .map((d) => DateTime(d.year, d.month, d.day).millisecondsSinceEpoch)
+        .map(
+          (d) =>
+              AppClock.at(d.year, d.month, d.day).millisecondsSinceEpoch,
+        )
         .toSet();
     // 例外改期日期同样保留（其上的完成记录合法）
     final exceptions = await (select(
@@ -696,7 +699,9 @@ class AppDatabase extends _$AppDatabase {
     for (final ex in exceptions) {
       final od = ex.overrideScheduledDate;
       if (od != null) {
-        keepDays.add(DateTime(od.year, od.month, od.day).millisecondsSinceEpoch);
+        keepDays.add(
+          AppClock.at(od.year, od.month, od.day).millisecondsSinceEpoch,
+        );
       }
     }
     final all = await (select(
@@ -704,7 +709,7 @@ class AppDatabase extends _$AppDatabase {
     )..where((c) => c.taskId.equals(taskId))).get();
     final removed = <TaskCompletion>[];
     for (final c in all) {
-      final d = DateTime(
+      final d = AppClock.at(
         c.instanceDate.year,
         c.instanceDate.month,
         c.instanceDate.day,
@@ -825,7 +830,7 @@ class AppDatabase extends _$AppDatabase {
   /// 子任务"今天完成"？（重复任务看今日实例，非重复看 completedAt）
   Future<bool> _childDoneToday(Task c) async {
     final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = AppClock.at(now.year, now.month, now.day);
     if (c.rrule.isNotEmpty) return isInstanceCompleted(c.id, today);
     return c.completedAt != null;
   }
@@ -841,7 +846,7 @@ class AppDatabase extends _$AppDatabase {
       if (!await _childDoneToday(c)) return;
     }
     final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = AppClock.at(now.year, now.month, now.day);
     if (parent.rrule.isNotEmpty) {
       if (!await isInstanceCompleted(parentId, today)) {
         await completeInstance(parentId, today);
@@ -857,7 +862,7 @@ class AppDatabase extends _$AppDatabase {
     final parent = await getTask(parentId);
     if (parent == null) return;
     final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = AppClock.at(now.year, now.month, now.day);
     final parentDone = parent.rrule.isNotEmpty
         ? await isInstanceCompleted(parentId, today)
         : parent.completedAt != null;
@@ -924,8 +929,8 @@ class AppDatabase extends _$AppDatabase {
 
   /// 获取某日期范围内的所有任务（日历用，含完成状态）
   Future<List<Task>> getTasksInRange(DateTime from, DateTime to) async {
-    final start = DateTime(from.year, from.month, from.day);
-    final end = DateTime(
+    final start = AppClock.at(from.year, from.month, from.day);
+    final end = AppClock.at(
       to.year,
       to.month,
       to.day,
@@ -947,8 +952,8 @@ class AppDatabase extends _$AppDatabase {
     DateTime from,
     DateTime to,
   ) async {
-    final start = DateTime(from.year, from.month, from.day);
-    final end = DateTime(
+    final start = AppClock.at(from.year, from.month, from.day);
+    final end = AppClock.at(
       to.year,
       to.month,
       to.day,
@@ -997,7 +1002,7 @@ class AppDatabase extends _$AppDatabase {
           // 仅截止时间的任务 → 在截止日展示一个实例
           final due = t.dueTime;
           if (due == null) continue;
-          final dueDay = DateTime(due.year, due.month, due.day);
+          final dueDay = AppClock.at(due.year, due.month, due.day);
           if (!dueDay.isBefore(start) && dueDay.isBefore(end)) {
             items.add(
               CalendarItem(
@@ -1011,7 +1016,7 @@ class AppDatabase extends _$AppDatabase {
           continue;
         }
         final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
-        var d = DateTime(ps.year, ps.month, ps.day);
+        var d = AppClock.at(ps.year, ps.month, ps.day);
         while (d.isBefore(end) && d.isBefore(pe)) {
           if (!d.isBefore(start)) {
             items.add(
@@ -1030,7 +1035,7 @@ class AppDatabase extends _$AppDatabase {
       // 重复任务：逐日判断规则命中（含跳过/例外），完成状态查预取集合
       var day = start;
       while (day.isBefore(end)) {
-        final dayStart = DateTime(day.year, day.month, day.day);
+        final dayStart = AppClock.at(day.year, day.month, day.day);
         final hit = await expandTaskForDateWith(
           t,
           dayStart,
@@ -1088,7 +1093,7 @@ class AppDatabase extends _$AppDatabase {
           hit.day == ps.day) {
         continue; // 锚点已命中规则，无需调整
       }
-      final newStart = DateTime(
+      final newStart = AppClock.at(
         hit.year,
         hit.month,
         hit.day,
@@ -1146,7 +1151,7 @@ class AppDatabase extends _$AppDatabase {
       final ps = t.planStart;
       if (ps == null) return [];
       final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
-      final dayStart = DateTime(date.year, date.month, date.day);
+      final dayStart = AppClock.at(date.year, date.month, date.day);
       final dayEnd = dayStart.add(const Duration(days: 1));
       if (ps.isBefore(dayEnd) && pe.isAfter(dayStart)) return [t];
       return [];
@@ -1159,7 +1164,7 @@ class AppDatabase extends _$AppDatabase {
           .map((e) => DateTime.parse(e as String))
           .toList();
     } catch (_) {}
-    final dateKey = DateTime(date.year, date.month, date.day);
+    final dateKey = AppClock.at(date.year, date.month, date.day);
     if (skipped.any(
       (s) =>
           s.year == dateKey.year &&
@@ -1292,7 +1297,7 @@ class AppDatabase extends _$AppDatabase {
       );
 
   Future<bool> isHabitDone(int habitId, DateTime date) async {
-    final d = DateTime(date.year, date.month, date.day);
+    final d = AppClock.at(date.year, date.month, date.day);
     final found =
         await (select(habitRecords)
               ..where((h) => h.habitId.equals(habitId) & h.date.equals(d)))
@@ -1304,7 +1309,7 @@ class AppDatabase extends _$AppDatabase {
   /// 第二次调用看到第一次的提交结果（查→删/插），不会并发插入重复记录
   ///（配合 habit_records 唯一索引双保险）
   Future<void> checkHabit(int habitId, DateTime date) async {
-    final d = DateTime(date.year, date.month, date.day);
+    final d = AppClock.at(date.year, date.month, date.day);
     await transaction(() async {
       final existing =
           await (select(habitRecords)
@@ -1354,7 +1359,7 @@ class AppDatabase extends _$AppDatabase {
     if (to != null) {
       // 与 getCompletedCountByDay 口径一致——to 排他 + 内部 +1 天，
       // 否则统计页传"周日/月末/12-31 00:00"时当天记录全部漏计
-      final end = DateTime(
+      final end = AppClock.at(
         to.year,
         to.month,
         to.day,
@@ -1384,8 +1389,8 @@ class AppDatabase extends _$AppDatabase {
     DateTime from,
     DateTime to,
   ) async {
-    final start = DateTime(from.year, from.month, from.day);
-    final end = DateTime(
+    final start = AppClock.at(from.year, from.month, from.day);
+    final end = AppClock.at(
       to.year,
       to.month,
       to.day,
@@ -1413,7 +1418,7 @@ class AppDatabase extends _$AppDatabase {
     }
     for (final c in completions) {
       if (!topLevelTaskIds.contains(c.taskId)) continue;
-      final d = DateTime(
+      final d = AppClock.at(
         c.completedAt.year,
         c.completedAt.month,
         c.completedAt.day,
@@ -1432,7 +1437,7 @@ class AppDatabase extends _$AppDatabase {
             ))
             .get();
     for (final t in doneTasks) {
-      final d = DateTime(
+      final d = AppClock.at(
         t.completedAt!.year,
         t.completedAt!.month,
         t.completedAt!.day,
@@ -1449,8 +1454,8 @@ class AppDatabase extends _$AppDatabase {
     DateTime from,
     DateTime to,
   ) async {
-    final start = DateTime(from.year, from.month, from.day);
-    final end = DateTime(
+    final start = AppClock.at(from.year, from.month, from.day);
+    final end = AppClock.at(
       to.year,
       to.month,
       to.day,
@@ -1458,7 +1463,7 @@ class AppDatabase extends _$AppDatabase {
     final result = <DateTime, int>{};
 
     void add(DateTime d) {
-      final key = DateTime(d.year, d.month, d.day);
+      final key = AppClock.at(d.year, d.month, d.day);
       result[key] = (result[key] ?? 0) + 1;
     }
 

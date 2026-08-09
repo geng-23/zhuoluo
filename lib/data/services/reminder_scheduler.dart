@@ -38,7 +38,11 @@ class ReminderScheduler {
   /// - 全天任务：当天 [Reminder.remindAtMinutes] 时刻（null = 默认 09:00）
   /// - 定时任务：实例时间（例外改期带时分时用实例时分），否则 planStart 的时分
   DateTime _reminderBase(Task task, DateTime instanceDate, Reminder r) {
-    final d = DateTime(instanceDate.year, instanceDate.month, instanceDate.day);
+    final d = AppClock.at(
+      instanceDate.year,
+      instanceDate.month,
+      instanceDate.day,
+    );
     final ps = task.planStart;
     if (task.isAllDay || ps == null) {
       final remindAt = r.remindAtMinutes ?? 540; // 默认 09:00
@@ -46,7 +50,7 @@ class ReminderScheduler {
     }
     // 例外改期到带时分的目标（如改期本次选了具体时间）
     if (instanceDate.hour != 0 || instanceDate.minute != 0) {
-      return DateTime(
+      return AppClock.at(
         d.year,
         d.month,
         d.day,
@@ -54,7 +58,7 @@ class ReminderScheduler {
         instanceDate.minute,
       );
     }
-    return DateTime(d.year, d.month, d.day, ps.hour, ps.minute);
+    return AppClock.at(d.year, d.month, d.day, ps.hour, ps.minute);
   }
 
   /// 调度单个任务的提醒（增量重排：先取消旧通知再排新）。
@@ -86,10 +90,10 @@ class ReminderScheduler {
         // 处理，默认 09:00）。此前调度器直接跳过，提醒静默失效。
         final due = task.dueTime;
         if (due == null) return true;
-        final day = DateTime(due.year, due.month, due.day);
+        final day = AppClock.at(due.year, due.month, due.day);
         ok = await _scheduleDay(task, day, reminders) && ok;
       } else {
-        final day = DateTime(ps.year, ps.month, ps.day);
+        final day = AppClock.at(ps.year, ps.month, ps.day);
         ok = await _scheduleDay(task, day, reminders) && ok;
       }
     } else {
@@ -184,9 +188,9 @@ class ReminderScheduler {
         // 仅截止时间的任务：与排期对称，按截止日当天取消
         final due = t.dueTime;
         if (due == null) return const [];
-        return [DateTime(due.year, due.month, due.day)];
+        return [AppClock.at(due.year, due.month, due.day)];
       }
-      return [DateTime(ps.year, ps.month, ps.day)];
+      return [AppClock.at(ps.year, ps.month, ps.day)];
     }
     final today = AppClock.now();
     final start = t.planStart ?? today;
@@ -198,13 +202,13 @@ class ReminderScheduler {
       limit: 500,
     );
     final dates = instances
-        .map((d) => DateTime(d.year, d.month, d.day))
+        .map((d) => AppClock.at(d.year, d.month, d.day))
         .toList();
     final exceptions = await _db.getExceptions(t.id);
     for (final ex in exceptions) {
       final od = ex.overrideScheduledDate;
       if (ex.action == 'edit' && od != null) {
-        dates.add(DateTime(od.year, od.month, od.day));
+        dates.add(AppClock.at(od.year, od.month, od.day));
       }
     }
     return dates;
@@ -305,12 +309,12 @@ class ReminderScheduler {
       if (time == null) return true;
       var ok = true;
       final now = AppClock.now();
-      final start = DateTime(now.year, now.month, now.day);
+      final start = AppClock.at(now.year, now.month, now.day);
       for (var i = 0; i < 93; i++) {
         final day = start.add(Duration(days: i));
         // 已打卡的日期不排提醒（无效打扰）
         if (await _db.isHabitDone(habit.id, day)) continue;
-        final when = DateTime(
+        final when = AppClock.at(
           day.year,
           day.month,
           day.day,
@@ -340,7 +344,7 @@ class ReminderScheduler {
   /// 取消习惯提醒（未来 93 天窗口逐日取消，ID 含日期维度）
   Future<void> cancelHabitReminder(int habitId) async {
     final now = AppClock.now();
-    final start = DateTime(now.year, now.month, now.day);
+    final start = AppClock.at(now.year, now.month, now.day);
     for (var i = 0; i < 93; i++) {
       await NotificationService.instance.cancel(
         NotificationIds.forHabit(habitId, start.add(Duration(days: i))),
@@ -438,27 +442,27 @@ DateTime? reminderTriggerAt(
 }) {
   final ps = task.planStart;
   final now = AppClock.now();
-  final today = DateTime(now.year, now.month, now.day);
+  final today = AppClock.at(now.year, now.month, now.day);
   if (ps == null) {
     // 仅截止时间的任务（备份兼容路径）：按截止日当天 + 提醒时刻 − 提前量，
     // 与 _reminderBase 的全天式口径一致（默认 09:00）
     final due = task.dueTime;
     if (due == null) return null;
     final min = remindAtMinutes ?? 540; // 默认 09:00
-    return DateTime(due.year, due.month, due.day)
+    return AppClock.at(due.year, due.month, due.day)
         .add(Duration(minutes: min))
         .subtract(Duration(minutes: remindMinutesBefore));
   }
   final day = task.rrule.isNotEmpty
       ? today
-      : DateTime(ps.year, ps.month, ps.day);
+      : AppClock.at(ps.year, ps.month, ps.day);
   if (task.isAllDay) {
     final min = remindAtMinutes ?? 540; // 默认 09:00
     return day
         .add(Duration(minutes: min))
         .subtract(Duration(minutes: remindMinutesBefore));
   }
-  return DateTime(
+  return AppClock.at(
     day.year,
     day.month,
     day.day,

@@ -44,6 +44,10 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# 发布签名密钥与凭据（不入库）
+/android/key.properties
+/android/app/*.keystore
+
 # 本机环境路径（SDK/Flutter 位置，不入库）
 local.properties
 

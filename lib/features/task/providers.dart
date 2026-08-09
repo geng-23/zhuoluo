@@ -166,7 +166,7 @@ class TasksController extends StateNotifier<TasksState> {
   /// 重复任务"今天实例"完成状态
   Future<Map<int, bool>> _loadInstanceDone(List<Task> tasks) async {
     final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = AppClock.at(now.year, now.month, now.day);
     // 批量预取今日完成记录（此前逐任务查库）
     final ids = tasks.where((t) => t.rrule.isNotEmpty).map((t) => t.id).toList();
     final doneSet = await _db.getCompletedSetForTasks(
@@ -185,7 +185,7 @@ class TasksController extends StateNotifier<TasksState> {
   /// 重复任务"今天是否命中规则"
   Future<Map<int, bool>> _loadTodayHas(List<Task> tasks) async {
     final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = AppClock.at(now.year, now.month, now.day);
     // 批量预取例外（此前逐任务查库）
     final ids = tasks.where((t) => t.rrule.isNotEmpty).map((t) => t.id).toList();
     final exMap = await _db.getExceptionsForTasks(ids);
@@ -205,7 +205,7 @@ class TasksController extends StateNotifier<TasksState> {
   /// 重复任务"下一个未完成实例"（今天起向后找；系列已结束/全部完成 → null）
   Future<Map<int, DateTime?>> _loadNextInstances(List<Task> tasks) async {
     final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = AppClock.at(now.year, now.month, now.day);
     // 批量预取例外 + 未来窗口完成记录（此前每个任务 2-3 次查库）；
     // 窗口按所有重复任务中最大的 windowDaysFor 覆盖
     final recTasks = tasks.where((t) => t.rrule.isNotEmpty).toList();
@@ -294,7 +294,8 @@ class TasksController extends StateNotifier<TasksState> {
   DateTime _sortTime(Task t) {
     final ps = t.planStart;
     if (ps == null) return DateTime(0);
-    return DateTime(ps.year, ps.month, ps.day, ps.hour, ps.minute);
+    final a = AppClock.asApp(ps);
+    return AppClock.at(a.year, a.month, a.day, a.hour, a.minute);
   }
 
   void selectList(int id) {
@@ -368,7 +369,7 @@ class TasksController extends StateNotifier<TasksState> {
       if (hit != null &&
           !(hit.year == ps.year && hit.month == ps.month && hit.day == ps.day)) {
         final dur = pe?.difference(ps);
-        ps = DateTime(hit.year, hit.month, hit.day, ps.hour, ps.minute);
+        ps = AppClock.at(hit.year, hit.month, hit.day, ps.hour, ps.minute);
         pe = dur == null ? ps.add(const Duration(hours: 1)) : ps.add(dur);
       }
     }
@@ -600,10 +601,11 @@ class TasksController extends StateNotifier<TasksState> {
 
   DateTime _currentInstanceDate(Task t) {
     final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = AppClock.at(now.year, now.month, now.day);
     final ps = t.planStart;
     if (ps == null) return today;
-    final psDay = DateTime(ps.year, ps.month, ps.day);
+    final a = AppClock.asApp(ps);
+    final psDay = AppClock.at(a.year, a.month, a.day);
     // 未来实例提前完成 → 记录到计划日（日历上该实例显示已完成）；
     // 已开始/过去的系列 → 默认完成今天的实例
     return psDay.isAfter(today) ? psDay : today;
@@ -835,7 +837,7 @@ class TasksController extends StateNotifier<TasksState> {
     // C8-2：跳过"今天已完成"的重复任务——completeTask 是切换语义，
     // 批量完成会把它们反过来"撤销完成"（与用户意图相反）
     final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = AppClock.at(now.year, now.month, now.day);
     final acted = <int>[];
     for (final id in ids) {
       final t = await _db.getTask(id);
@@ -936,10 +938,11 @@ class TasksController extends StateNotifier<TasksState> {
   /// 列表页操作用的"当前实例日期"（供 UI 显示/删除选择框）
   static DateTime currentInstanceDate(Task t) {
     final now = AppClock.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = AppClock.at(now.year, now.month, now.day);
     final ps = t.planStart;
     if (ps == null) return today;
-    final psDay = DateTime(ps.year, ps.month, ps.day);
+    final a = AppClock.asApp(ps);
+    final psDay = AppClock.at(a.year, a.month, a.day);
     return psDay.isAfter(today) ? psDay : today;
   }
 

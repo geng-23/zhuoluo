@@ -184,4 +184,38 @@ void main() {
     expect(aug11.first.completed, isTrue,
         reason: 'P1-2：上海 8/11 实例完成状态正确');
   });
+
+  test('统计按天分组：完成记录按应用时区日期归组', () async {
+    final id = await insertTask(
+      title: '每日任务',
+      start: AppClock.at(2026, 8, 10, 9, 0),
+      rrule: 'FREQ=DAILY',
+    );
+    await db.completeInstance(id, AppClock.at(2026, 8, 11));
+    // 月窗口：上海 2026-08 全月
+    final counts = await db.getCompletedCountByDay(
+      AppClock.at(2026, 8, 1),
+      AppClock.at(2026, 8, 31),
+    );
+    // 完成记录 completedAt 是"现在"（真实时间），断言当月窗口包含该记录
+    // 且 key 按应用时区归一化（上海 00:00 绝对时刻）
+    expect(counts.isNotEmpty, isTrue, reason: 'P1-2：月窗口内应有完成记录');
+    final keys = counts.keys.map(AppClock.asApp).toList();
+    expect(
+      keys.any((k) => k.year == 2026 && k.month == 8),
+      isTrue,
+      reason: 'P1-2：统计 key 按应用时区解释为 2026-08',
+    );
+    // 计划数：上海 8/10 起的每日任务在 8 月窗口展开 22 个实例（8/10-8/31）；
+    // 原统计口径对重复任务的 planStart 额外计 1 次（8/10）→ 合计 23
+    final planned = await db.getPlannedCountByDay(
+      AppClock.at(2026, 8, 1),
+      AppClock.at(2026, 8, 31),
+    );
+    expect(
+      planned.values.fold<int>(0, (a, b) => a + b),
+      23,
+      reason: 'P1-2：重复任务计划数 = 展开 22 + planStart 1（原口径）',
+    );
+  });
 }

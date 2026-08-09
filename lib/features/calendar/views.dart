@@ -22,8 +22,11 @@ const _startHour = 6;
 const _endHour = 23;
 const _pixelPerHour = 64.0;
 
-/// 按天索引 key（与 CalendarController 的 byDay 同口径）
-int _dayKey(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
+/// 按天索引 key（与 CalendarController 的 byDay 同口径；P1-2 统一按应用时区）
+int _dayKey(DateTime d) {
+  final a = AppClock.asApp(d);
+  return a.year * 10000 + a.month * 100 + a.day;
+}
 
 /// 时间轴起始小时——显示范围内最早 timed 任务（非全天/非跨天/
 /// 有计划时间）的开始小时，与默认值取小：只扩展不收缩，多数情况保持
@@ -2639,8 +2642,8 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
     }
     final d = _targetDay;
     return (
-      DateTime(d.year, d.month, d.day, snapped1 ~/ 60, snapped1 % 60),
-      DateTime(d.year, d.month, d.day, snapped2 ~/ 60, snapped2 % 60),
+      AppClock.at(d.year, d.month, d.day, snapped1 ~/ 60, snapped1 % 60),
+      AppClock.at(d.year, d.month, d.day, snapped2 ~/ 60, snapped2 % 60),
     );
   }
 
@@ -2885,16 +2888,16 @@ class _DayColumnState extends ConsumerState<_DayColumn> {
       // 例外改期目标时刻（displayTime）优先，否则 planStart 时分
       final dt = i.displayTime;
       final s = ps == null
-          ? DateTime(day.year, day.month, day.day)
+          ? AppClock.at(day.year, day.month, day.day)
           : dt != null
-          ? DateTime(day.year, day.month, day.day, dt.hour, dt.minute)
-          : DateTime(day.year, day.month, day.day, ps.hour, ps.minute);
+          ? AppClock.at(day.year, day.month, day.day, dt.hour, dt.minute)
+          : AppClock.at(day.year, day.month, day.day, ps.hour, ps.minute);
       final endTime = pe ?? ps?.add(const Duration(hours: 1));
       var e = endTime == null
           ? s.add(const Duration(hours: 1))
           : dt != null
           ? s.add(endTime.difference(ps ?? endTime))
-          : DateTime(
+          : AppClock.at(
               day.year,
               day.month,
               day.day,

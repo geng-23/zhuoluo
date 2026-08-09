@@ -367,7 +367,7 @@ class _CalendarDrawer extends ConsumerWidget {
                     icon: const Icon(Icons.chevron_left),
                     onPressed: () {
                       final m = state.displayedMonth;
-                      onPickDate(DateTime(m.year, m.month - 1, 1));
+                      onPickDate(AppClock.at(m.year, m.month - 1, 1));
                     },
                   ),
                   Expanded(
@@ -380,7 +380,7 @@ class _CalendarDrawer extends ConsumerWidget {
                     icon: const Icon(Icons.chevron_right),
                     onPressed: () {
                       final m = state.displayedMonth;
-                      onPickDate(DateTime(m.year, m.month + 1, 1));
+                      onPickDate(AppClock.at(m.year, m.month + 1, 1));
                     },
                   ),
                 ],

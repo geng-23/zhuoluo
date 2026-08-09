@@ -56,16 +56,16 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
         to = from.add(const Duration(days: 6));
         break;
       case 'month':
-        from = DateTime(now.year, now.month, 1);
-        to = DateTime(now.year, now.month + 1, 0);
+        from = AppClock.at(now.year, now.month, 1);
+        to = AppClock.at(now.year, now.month + 1, 0);
         break;
       case 'year':
-        from = DateTime(now.year, 1, 1);
-        to = DateTime(now.year, 12, 31);
+        from = AppClock.at(now.year, 1, 1);
+        to = AppClock.at(now.year, 12, 31);
         break;
       default:
-        from = DateTime(now.year, now.month, 1);
-        to = DateTime(now.year, now.month + 1, 0);
+        from = AppClock.at(now.year, now.month, 1);
+        to = AppClock.at(now.year, now.month + 1, 0);
     }
     final completed = await db.getCompletedCountByDay(from, to);
     final planned = await db.getPlannedCountByDay(from, to);
@@ -79,13 +79,13 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
       final map = <DateTime, bool>{};
       for (var d = 0; d < 90; d++) {
         final day = habitStart.add(Duration(days: d));
-        map[DateTime(day.year, day.month, day.day)] = false;
+        map[AppClock.at(day.year, day.month, day.day)] = false;
       }
       heatByHabit[h.id] = map;
     }
     final records = await db.getAllHabitRecords();
     for (final r in records) {
-      final day = DateTime(r.date.year, r.date.month, r.date.day);
+      final day = AppClock.at(r.date.year, r.date.month, r.date.day);
       final map = heatByHabit[r.habitId];
       if (map != null && map.containsKey(day)) {
         map[day] = true;
@@ -107,7 +107,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
   Map<DateTime, int> _pomodoroDayMap(List<PomodoroRecord> records) {
     final map = <DateTime, int>{};
     for (final r in records) {
-      final d = DateTime(
+      final d = AppClock.at(
         r.completedAt.year,
         r.completedAt.month,
         r.completedAt.day,
@@ -439,8 +439,8 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
 
   Future<void> _load() async {
     final now = AppClock.now();
-    final from = DateTime(now.year, 1, 1);
-    final to = DateTime(now.year, 12, 31);
+    final from = AppClock.at(now.year, 1, 1);
+    final to = AppClock.at(now.year, 12, 31);
     final counts = await widget.db.getCompletedCountByDay(from, to);
     if (mounted) setState(() => _counts = counts);
   }
@@ -455,8 +455,8 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
         .clamp(1, 10)
         .toInt();
     // 闰年 366 天（此前固定 365 格漏掉 12/31）
-    final daysInYear = DateTime(now.year + 1, 1, 1).difference(
-      DateTime(now.year, 1, 1),
+    final daysInYear = AppClock.at(now.year + 1, 1, 1).difference(
+      AppClock.at(now.year, 1, 1),
     ).inDays;
     return Card(
       child: Padding(
@@ -501,11 +501,11 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
                     itemCount: daysInYear,
                     itemBuilder: (context, i) {
                       final day =
-                          DateTime(now.year, 1, 1).add(Duration(days: i));
+                          AppClock.at(now.year, 1, 1).add(Duration(days: i));
                       if (day.isAfter(now)) {
                         return Container(color: Colors.transparent);
                       }
-                      final c = counts[DateTime(
+                      final c = counts[AppClock.at(
                             day.year,
                             day.month,
                             day.day,

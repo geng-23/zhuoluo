@@ -1,7 +1,13 @@
+import 'package:zhuoluo/core/utils/app_clock.dart';
+
 /// RRULE 展开服务（简化实现：支持 FREQ/INTERVAL/COUNT/UNTIL/BYDAY/BYMONTHDAY）
 ///
 /// 参考设计文档：完整 RRULE（自定义间隔 + 结束 + 单次例外）
 /// 例外由数据库层（task_exceptions）处理，此处仅判断"某日期是否命中规则"。
+///
+/// P1-2 统一时间模型：所有入口参数先经 `AppClock.asApp()` 按应用时区解释，
+/// 内部日期字段（year/month/day/weekday）与构造（AppClock.at）均按应用时区，
+/// 绝对时刻运算（Duration/difference）不受影响；未设置时区时行为不变。
 class RruleService {
   RruleService._();
 
@@ -73,25 +79,29 @@ class RruleService {
     DateTime? to,
     int limit = 400,
   }) {
+    // P1-2：入口统一按应用时区解释（未设置时区 = 原样）
+    final s = AppClock.asApp(start);
+    final f = from == null ? null : AppClock.asApp(from);
+    final t = to == null ? null : AppClock.asApp(to);
     final rule = parse(rrule);
     final result = <DateTime>[];
     var emitted = 0;
 
     // 返回是否继续遍历
     bool emit(DateTime d) {
-      if (d.isBefore(start) && !_sameDay(d, start)) return true;
+      if (d.isBefore(s) && !_sameDay(d, s)) return true;
       if (!_withinRule(d, rule)) return false; // UNTIL 之后不再有实例
       if (rule.count != null && emitted >= rule.count!) return false;
       emitted++;
-      if (from != null && d.isBefore(from)) return true;
-      if (to != null && d.isAfter(to)) return false; // 超出窗口上界
+      if (f != null && d.isBefore(f)) return true;
+      if (t != null && d.isAfter(t)) return false; // 超出窗口上界
       result.add(d);
       return result.length < limit;
     }
 
     // 遍历上限：覆盖窗口跨度 + 目标数量，并防 INTERVAL=0 等非法规则死循环
-    final spanDays = (to ?? from ?? start)
-        .difference(start)
+    final spanDays = (t ?? f ?? s)
+        .difference(s)
         .inDays
         .clamp(0, 1 << 31);
     final step = switch (rule.freq) {
@@ -105,7 +115,7 @@ class RruleService {
     if (rule.freq == 'DAILY') {
       for (var i = 0; i < maxIter; i++) {
         if (!emit(
-          start.add(
+          s.add(
             Duration(days: i * (rule.interval > 0 ? rule.interval : 1)),
           ),
         )) {
@@ -115,13 +125,13 @@ class RruleService {
     } else if (rule.freq == 'WEEKLY') {
       // 无 BYDAY 时默认锚点星期（此前固定周一，旧"每N周"任务错落周一；
       // 与解析器"每N周补 BYDAY=起始星期"语义一致）
-      final days = rule.byDay ?? [_byDayCode(start.weekday)];
+      final days = rule.byDay ?? [_byDayCode(s.weekday)];
       // 从 start 所在周周一起算
-      final monday = DateTime(
-        start.year,
-        start.month,
-        start.day,
-      ).subtract(Duration(days: start.weekday - 1));
+      final monday = AppClock.at(
+        s.year,
+        s.month,
+        s.day,
+      ).subtract(Duration(days: s.weekday - 1));
       for (var i = 0; i < maxIter; i++) {
         final base = monday.add(
           Duration(days: i * 7 * (rule.interval > 0 ? rule.interval : 1)),
@@ -134,14 +144,14 @@ class RruleService {
     } else if (rule.freq == 'MONTHLY') {
       final mds = (rule.byMonthDay?.isNotEmpty ?? false)
           ? (List<int>.from(rule.byMonthDay!)..sort())
-          : [start.day];
+          : [s.day];
       final interval = rule.interval > 0 ? rule.interval : 1;
       for (var i = 0; i < maxIter; i++) {
-        final targetMonth = start.month + i * interval;
-        final targetYear = start.year + (targetMonth - 1) ~/ 12;
+        final targetMonth = s.month + i * interval;
+        final targetYear = s.year + (targetMonth - 1) ~/ 12;
         final targetMonthOfYear = (targetMonth - 1) % 12 + 1;
         for (final md in mds) {
-          final d = DateTime(targetYear, targetMonthOfYear, md);
+          final d = AppClock.at(targetYear, targetMonthOfYear, md);
           // 无效日（如 31 号遇到小月）被 DateTime 自动进位，校验后跳过
           if (d.month != targetMonthOfYear || d.year != targetYear) continue;
           if (!emit(d)) return result;
@@ -149,10 +159,10 @@ class RruleService {
       }
     } else if (rule.freq == 'YEARLY') {
       for (var i = 0; i < maxIter; i++) {
-        final d = DateTime(
-          start.year + i * (rule.interval > 0 ? rule.interval : 1),
-          start.month,
-          start.day,
+        final d = AppClock.at(
+          s.year + i * (rule.interval > 0 ? rule.interval : 1),
+          s.month,
+          s.day,
         );
         if (!emit(d)) return result;
       }
@@ -164,7 +174,8 @@ class RruleService {
   /// 用于"开始日期自动吸附到规则首个实例"（计划时间与规则不匹配时）。
   /// 内部按当天 00:00 归一：锚点带时分时，当天的实例不应被 from 过滤掉。
   DateTime? firstHitOnOrAfter(DateTime anchor, String rrule) {
-    final day = DateTime(anchor.year, anchor.month, anchor.day);
+    final a = AppClock.asApp(anchor);
+    final day = AppClock.at(a.year, a.month, a.day);
     final hits = expand(
       day,
       rrule,
@@ -185,8 +196,9 @@ class RruleService {
   /// 规则：锚点本身命中 → 原地；COUNT 规则 → 仅向后（向前展开无意义）；
   /// 否则比较"前一个命中日"与"后一个命中日"取天数差更近者。
   DateTime? nearestHitOnOrNear(DateTime anchor, String rrule) {
+    final a = AppClock.asApp(anchor);
     final rule = parse(rrule);
-    final day = DateTime(anchor.year, anchor.month, anchor.day);
+    final day = AppClock.at(a.year, a.month, a.day);
     if (hitsOn(rrule, day, day)) return day;
     if (rule.count != null) return firstHitOnOrAfter(day, rrule);
     final next = firstHitOnOrAfter(day, rrule);
@@ -210,21 +222,24 @@ class RruleService {
 
   /// 判断 [date] 是否命中规则（含 COUNT/UNTIL 边界）
   bool hitsOn(String rrule, DateTime start, DateTime date) {
+    // P1-2：入口统一按应用时区解释（绝对时刻不变）
+    final s = AppClock.asApp(start);
+    final d = AppClock.asApp(date);
     final rule = parse(rrule);
-    if (date.isBefore(start) && !_sameDay(date, start)) return false;
-    if (!_withinRule(date, rule)) return false;
+    if (d.isBefore(s) && !_sameDay(d, s)) return false;
+    if (!_withinRule(d, rule)) return false;
     if (rule.count != null) {
       // 展开到 date 为止；若 date 被 COUNT 截断（第 count+1 个及以后）则不命中
       // A13：to 必须覆盖 date 当天——实例带时分（如 07:50）大于 date 的 00:00，
       // 用 to: date 会被 expand 的 to 过滤，COUNT 规则下的时段任务当天
       // 误判不命中（全天任务 00:00 恰好不被过滤，表现为"全天显示时段不显示"）
       final upTo = expand(
-        start,
+        s,
         rrule,
-        to: DateTime(date.year, date.month, date.day + 1),
+        to: AppClock.at(d.year, d.month, d.day + 1),
         limit: rule.count! + 1,
       );
-      final inCount = upTo.any((d) => _sameDay(d, date));
+      final inCount = upTo.any((x) => _sameDay(x, d));
       if (!inCount) return false;
     }
     // FREQ 匹配
@@ -232,38 +247,38 @@ class RruleService {
       case 'DAILY':
         // 天数差必须按"日"归一：dateKey 是 00:00 而 start 带时分，
         // 直接用 inDays 会让间隔>1 的实例错位（如 20:00 起的每2天任务）
-        final startDay = DateTime(start.year, start.month, start.day);
-        final dateDay = DateTime(date.year, date.month, date.day);
+        final startDay = AppClock.at(s.year, s.month, s.day);
+        final dateDay = AppClock.at(d.year, d.month, d.day);
         return dateDay.difference(startDay).inDays %
                 (rule.interval > 0 ? rule.interval : 1) ==
             0;
       case 'WEEKLY':
-        final days = rule.byDay ?? [_byDayCode(start.weekday)];
+        final days = rule.byDay ?? [_byDayCode(s.weekday)];
         final offsets = days.map(_weekdayIndex).toSet();
-        if (!offsets.contains(date.weekday - 1)) return false;
+        if (!offsets.contains(d.weekday - 1)) return false;
         // 从 start 所在周周一起算周差
-        final startMonday = DateTime(
-          start.year,
-          start.month,
-          start.day,
-        ).subtract(Duration(days: start.weekday - 1));
-        final weeks = date.difference(startMonday).inDays ~/ 7;
+        final startMonday = AppClock.at(
+          s.year,
+          s.month,
+          s.day,
+        ).subtract(Duration(days: s.weekday - 1));
+        final weeks = d.difference(startMonday).inDays ~/ 7;
         return weeks % (rule.interval > 0 ? rule.interval : 1) == 0;
       case 'MONTHLY':
         if (rule.byMonthDay != null && rule.byMonthDay!.isNotEmpty) {
-          return rule.byMonthDay!.contains(date.day) &&
-              ((date.year - start.year) * 12 + (date.month - start.month)) %
+          return rule.byMonthDay!.contains(d.day) &&
+              ((d.year - s.year) * 12 + (d.month - s.month)) %
                       (rule.interval > 0 ? rule.interval : 1) ==
                   0;
         }
-        return date.day == start.day &&
-            ((date.year - start.year) * 12 + (date.month - start.month)) %
+        return d.day == s.day &&
+            ((d.year - s.year) * 12 + (d.month - s.month)) %
                     (rule.interval > 0 ? rule.interval : 1) ==
                 0;
       case 'YEARLY':
-        return date.month == start.month &&
-            date.day == start.day &&
-            (date.year - start.year) %
+        return d.month == s.month &&
+            d.day == s.day &&
+            (d.year - s.year) %
                     (rule.interval > 0 ? rule.interval : 1) ==
                 0;
     }

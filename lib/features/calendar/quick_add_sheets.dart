@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/core/utils/task_title.dart';
@@ -267,7 +268,7 @@ class _QuickAddSheetWithDefaultsState
     DateTime? pe;
     if (parsed.time != null) {
       isAllDay = false;
-      ps = DateTime(
+      ps = AppClock.at(
         date.year,
         date.month,
         date.day,
@@ -278,14 +279,14 @@ class _QuickAddSheetWithDefaultsState
         var eh = parsed.endTime!.hour;
         final em = parsed.endTime!.minute;
         pe = eh < parsed.time!.hour
-            ? DateTime(date.year, date.month, date.day + 1, eh, em)
-            : DateTime(date.year, date.month, date.day, eh, em);
+            ? AppClock.at(date.year, date.month, date.day + 1, eh, em)
+            : AppClock.at(date.year, date.month, date.day, eh, em);
       } else {
         pe = ps.add(const Duration(hours: 1));
       }
     } else {
-      ps = DateTime(date.year, date.month, date.day);
-      pe = DateTime(date.year, date.month, date.day + 1);
+      ps = AppClock.at(date.year, date.month, date.day);
+      pe = AppClock.at(date.year, date.month, date.day + 1);
     }
     // C3-1：重复+无明确时间 → 保持全天（此前强改 isAllDay=false，
     // 生成 00:00-00:00 的"定时跨天"任务，与任务页入口行为不一致）

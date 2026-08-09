@@ -129,7 +129,10 @@ class CalendarController extends StateNotifier<CalendarState> {
   @visibleForTesting
   int loadCount = 0;
 
-  static int _dayKey(DateTime d) => d.year * 10000 + d.month * 100 + d.day;
+  static int _dayKey(DateTime d) {
+    final a = AppClock.asApp(d);
+    return a.year * 10000 + a.month * 100 + a.day;
+  }
 
   static Map<int, List<CalendarItem>> _byDayFor(List<CalendarItem> items) {
     final map = <int, List<CalendarItem>>{};
@@ -213,8 +216,8 @@ class CalendarController extends StateNotifier<CalendarState> {
   /// E9/E11：月视图翻页时更新显示月份
   void setDisplayedMonth(DateTime month) {
     state = state.copyWith(
-      displayedMonth: DateTime(month.year, month.month, 1),
-      selectedDay: DateTime(
+      displayedMonth: AppClock.at(month.year, month.month, 1),
+      selectedDay: AppClock.at(
         month.year,
         month.month,
         state.selectedDay.day.clamp(1, DateUtilsEx.daysInMonth(month)),
@@ -226,7 +229,7 @@ class CalendarController extends StateNotifier<CalendarState> {
   void setSelectedDay(DateTime day) {
     state = state.copyWith(
       selectedDay: day,
-      displayedMonth: DateTime(day.year, day.month, 1),
+      displayedMonth: AppClock.at(day.year, day.month, 1),
     );
     load();
   }
@@ -236,7 +239,7 @@ class CalendarController extends StateNotifier<CalendarState> {
   void setSelectedDayWithView(DateTime day, String view) {
     state = state.copyWith(
       selectedDay: day,
-      displayedMonth: DateTime(day.year, day.month, 1),
+      displayedMonth: AppClock.at(day.year, day.month, 1),
       view: view,
     );
     load();
@@ -245,7 +248,7 @@ class CalendarController extends StateNotifier<CalendarState> {
   void goToToday() {
     final now = AppClock.now();
     state = state.copyWith(
-      displayedMonth: DateTime(now.year, now.month, 1),
+      displayedMonth: AppClock.at(now.year, now.month, 1),
       selectedDay: now,
     );
     load();

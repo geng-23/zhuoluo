@@ -15,14 +15,31 @@ import 'package:zhuoluo/features/calendar/calendar_axis.dart';
 import 'package:zhuoluo/features/calendar/calendar_sheets.dart';
 import 'package:zhuoluo/features/calendar/quick_add_sheets.dart';
 
+/// 任务拖动边缘翻页的"移动判定"抖动阈值（px）——低于此值视为静止/微漂移，
+/// 高于视为正在水平移动（需重置边缘停留计时）
+const double edgeTurnJitter = 4.0;
+
 class EdgeTurnController {
   Timer? timer;
   int dir = 0;
   double lastGlobalX = 0;
+  double lastGlobalY = 0;
 
   /// 连续翻页链已启动（首次翻页 fire 后置位）：保持区内触摸点微漂移
   /// 不断链（"不间断翻页"）；移出保持区停链；松手/取消复位
   bool armed = false;
+
+  /// 移动基线是否已建立（拖动清理后置 false，首条事件重新建立——避免
+  /// 从 (0,0) 计算 dx/dy 把周日列的纯上下拖动误判为水平移动）
+  bool lastPosValid = false;
+
+  /// 复位计时与方向（取消/纵向抑制/离开边缘区共用）
+  void reset() {
+    timer?.cancel();
+    timer = null;
+    dir = 0;
+    armed = false;
+  }
 }
 
 /// 拖动虚影渲染所需的任务信息（拖动开始时上报——
@@ -357,7 +374,8 @@ class DayColumnState extends ConsumerState<DayColumn> {
   void _handleDragGlobal(Offset global) {
     // 共享拖拽位置（翻页后新列据此恢复虚影/胶囊）
     widget.dragGlobalPos?.value = global;
-    _maybeEdgeTurn(global.dx);
+    // 边缘翻页由全局 route 单一驱动（_maybeEdgeTurnForTask）——双源驱动时
+    // 同一位置第二条事件看到 dx=dy=0，会把纵向拖动误判为水平而重新 arm
     _checkVerticalAutoScroll(global.dy);
   }
 
@@ -369,10 +387,11 @@ class DayColumnState extends ConsumerState<DayColumn> {
     widget.dragGhostInfo?.value = null;
     _stopAutoScroll();
     final ctrl = widget.edgeTurnCtrl;
-    ctrl?.timer?.cancel();
-    ctrl?.timer = null;
-    ctrl?.dir = 0;
-    ctrl?.armed = false;
+    ctrl
+      ?..reset()
+      ..lastGlobalX = 0
+      ..lastGlobalY = 0
+      ..lastPosValid = false;
     widget.edgeState?.value = 0;
   }
 

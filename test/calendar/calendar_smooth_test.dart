@@ -1403,5 +1403,88 @@ void main() {
           reason: '翻到无置顶任务的下一周后，全天任务应能落到目标列日');
       expect(t.isAllDay, isTrue, reason: '跨周落点保持全天');
     });
+
+    testWidgets('周日列任务纯上下拖动改时间：不触发翻周', (tester) async {
+      final monday = DateUtilsEx.mondayOf(now);
+      final sunday = monday.add(const Duration(days: 6));
+      final taskId = await insertTopArea(
+        DateTime(sunday.year, sunday.month, sunday.day, 10, 0),
+        DateTime(sunday.year, sunday.month, sunday.day, 11, 0),
+        title: '周日任务',
+      );
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final before = container.read(calendarControllerProvider).selectedDay;
+      final gesture = await longPressOn(tester, '周日任务');
+      // 纯上下拖动（x 保持在右缘区内）：分多段下移模拟真实拖动，
+      // 然后停留 >300ms——旧行为会在此误翻周
+      for (var i = 0; i < 4; i++) {
+        await gesture.moveBy(const Offset(0, 30));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await tester.pump(const Duration(milliseconds: 400));
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      final after = container.read(calendarControllerProvider).selectedDay;
+      expect(DateUtilsEx.sameDay(after, before), isTrue,
+          reason: '周日列纯上下拖动不应翻周');
+      final t = (await db.getTask(taskId))!;
+      expect(DateUtilsEx.sameDay(t.planStart!, sunday), isTrue,
+          reason: '任务仍在本周日（未跨周）');
+      expect(
+        t.planStart!.hour != 10 || t.planStart!.minute != 0,
+        isTrue,
+        reason: '上下拖动应改变计划时分',
+      );
+    });
+
+    testWidgets('拖任务到周日列落点：慢速移动不翻周、任务落到周日', (tester) async {
+      final monday = DateUtilsEx.mondayOf(now);
+      final sunday = monday.add(const Duration(days: 6));
+      final taskId = await insertTopArea(
+        DateTime(monday.year, monday.month, monday.day + 2, 10, 0),
+        DateTime(monday.year, monday.month, monday.day + 2, 11, 0),
+        title: '拖向周日',
+      );
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final before = container.read(calendarControllerProvider).selectedDay;
+      final blockCenter = tester.getCenter(find.text('拖向周日').first);
+      final gesture = await longPressOn(tester, '拖向周日');
+      final columnWidth = (800 - 44) / 7;
+      final sundayX = 44 + 6.5 * columnWidth;
+      // 慢速拖向周日：先进入右缘区（x=700），停留后继续移到周日落点——
+      // 过程中总时长 >300ms，旧行为会在落点确认前翻周
+      await gesture.moveTo(Offset(700, blockCenter.dy));
+      await tester.pump(const Duration(milliseconds: 150));
+      await gesture.moveTo(Offset(sundayX, blockCenter.dy));
+      await tester.pump(const Duration(milliseconds: 200));
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      final after = container.read(calendarControllerProvider).selectedDay;
+      expect(DateUtilsEx.sameDay(after, before), isTrue,
+          reason: '拖向周日的过程中不应翻周');
+      final t = (await db.getTask(taskId))!;
+      expect(DateUtilsEx.sameDay(t.planStart!, sunday), isTrue,
+          reason: '任务落到本周日');
+      expect(t.planStart!.hour, 10,
+          reason: '保留 10:00 时分（落点 y 未变）');
+    });
   });
 }

@@ -256,7 +256,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
       // 共享拖拽位置（虚影/胶囊跟随）+ 边缘翻页检测（反向/连续均可靠）
       // + 垂直自动滚动（翻页后 Draggable evict 仍可靠）
       dragGlobalPos.value = e.position;
-      _maybeEdgeTurn(e.position.dx);
+      _maybeEdgeTurnForTask(e.position);
       _checkVerticalAutoScrollGlobal(e.position.dy);
     } else if (e is PointerUpEvent || e is PointerCancelEvent) {
       _unregisterDragRoute();
@@ -277,10 +277,11 @@ class _WeekViewState extends ConsumerState<WeekView> {
     dragDropped.value = false;
     _dragTaskId = null;
     _dragInfo = null;
-    _edgeTurnCtrl.timer?.cancel();
-    _edgeTurnCtrl.timer = null;
-    _edgeTurnCtrl.dir = 0;
-    _edgeTurnCtrl.armed = false;
+    _edgeTurnCtrl
+      ..reset()
+      ..lastGlobalX = 0
+      ..lastGlobalY = 0
+      ..lastPosValid = false;
     _stopAutoScroll();
   }
 
@@ -326,46 +327,51 @@ class _WeekViewState extends ConsumerState<WeekView> {
     _autoScrollTimer = null;
   }
 
-  /// 边缘翻周/日：进入边缘区停留 300ms 触发首次翻页；
-  /// 翻页后若指针仍停边缘（保持区：右缘链 x>65%、左缘链 x<35%）→ 每
-  /// 500ms 自动续翻（连续拖到多个周以后），触摸点微漂移不断链；
-  /// 移出保持区（拖回中间定位）或松手即停止。
-  /// （与 DayColumn 内同名方法逻辑一致，共享 edgeTurnCtrl——本层为
-  /// 全局 route 驱动，列版为 Draggable onDragUpdate 驱动，双源幂等）
-  void _maybeEdgeTurn(double globalX) {
-    _edgeTurnCtrl.lastGlobalX = globalX;
+  /// 任务拖动的边缘翻页（同 DayColumn._maybeEdgeTurnForTask）：只在
+  /// 「水平意图且停下」时翻页；纵向拖动/持续移动不累计边缘停留
+  void _maybeEdgeTurnForTask(Offset pos) {
+    final ctrl = _edgeTurnCtrl;
     final w = MediaQuery.sizeOf(context).width;
-    // 保持区滞回：链已启动时，右缘链 x>65%、左缘链 x<35% 持续翻页
-    //（触摸点微漂移不出链）；移出保持区停链并继续按触发区判断（反向）
-    if (_edgeTurnCtrl.armed) {
-      final keep = _edgeTurnCtrl.dir > 0
-          ? globalX > w * 0.65
-          : globalX < w * 0.35;
+    // 首条事件（拖动开始/清理后）：仅建立移动基线；已在边缘区则先 arm
+    if (!ctrl.lastPosValid) {
+      ctrl.lastGlobalX = pos.dx;
+      ctrl.lastGlobalY = pos.dy;
+      ctrl.lastPosValid = true;
+      if (pos.dx > w * 0.85 || pos.dx < w * 0.12) {
+        _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
+      }
+      return;
+    }
+    if (ctrl.armed) {
+      final keep = ctrl.dir > 0 ? pos.dx > w * 0.65 : pos.dx < w * 0.35;
       if (keep) return;
-      _edgeTurnCtrl.timer?.cancel();
-      _edgeTurnCtrl.timer = null;
-      _edgeTurnCtrl.dir = 0;
-      _edgeTurnCtrl.armed = false;
+      ctrl.reset();
+      // 移出保持区：继续按当前 x 判断是否进入另一侧边缘区（右缘→左缘反向翻页）
     }
-    if (globalX > w * 0.85) {
-      _armEdgeTimer(1, w);
-    } else if (globalX < w * 0.12) {
-      _armEdgeTimer(-1, w);
-    } else {
-      _edgeTurnCtrl.timer?.cancel();
-      _edgeTurnCtrl.timer = null;
-      _edgeTurnCtrl.dir = 0;
-      _edgeTurnCtrl.armed = false;
+    final inZone = pos.dx > w * 0.85 || pos.dx < w * 0.12;
+    if (!inZone) {
+      ctrl.reset();
+      return;
     }
+    final dx = pos.dx - ctrl.lastGlobalX;
+    final dy = pos.dy - ctrl.lastGlobalY;
+    ctrl.lastGlobalX = pos.dx;
+    ctrl.lastGlobalY = pos.dy;
+    if (dy.abs() > dx.abs() && dy.abs() > edgeTurnJitter) {
+      ctrl.reset();
+      return;
+    }
+    _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
   }
 
-  void _armEdgeTimer(int dir, double w) {
-    if (_edgeTurnCtrl.timer != null && _edgeTurnCtrl.dir == dir) return;
-    _edgeTurnCtrl.timer?.cancel();
-    _edgeTurnCtrl.dir = dir;
-    _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 300), () {
-      _edgeTurnCtrl.timer = null;
-      _edgeTurnCtrl.armed = true;
+  /// 任务拖动边缘翻页计时：重置 300ms（每次移动重新计时，停住 300ms 才翻页）
+  void _armTaskEdgeTurn(int dir, double w) {
+    final ctrl = _edgeTurnCtrl;
+    ctrl.timer?.cancel();
+    ctrl.dir = dir;
+    ctrl.timer = Timer(const Duration(milliseconds: 300), () {
+      ctrl.timer = null;
+      ctrl.armed = true;
       _edgeTurn(dir.toDouble());
       _armContinuation(dir, w);
     });
@@ -751,7 +757,7 @@ class _DayViewState extends ConsumerState<DayView> {
   void _onDragPointerEvent(PointerEvent e) {
     if (e is PointerMoveEvent) {
       dragGlobalPos.value = e.position;
-      _maybeEdgeTurn(e.position.dx);
+      _maybeEdgeTurnForTask(e.position);
       _checkVerticalAutoScrollGlobal(e.position.dy);
     } else if (e is PointerUpEvent || e is PointerCancelEvent) {
       _unregisterDragRoute();
@@ -771,10 +777,11 @@ class _DayViewState extends ConsumerState<DayView> {
     dragDropped.value = false;
     _dragTaskId = null;
     _dragInfo = null;
-    _edgeTurnCtrl.timer?.cancel();
-    _edgeTurnCtrl.timer = null;
-    _edgeTurnCtrl.dir = 0;
-    _edgeTurnCtrl.armed = false;
+    _edgeTurnCtrl
+      ..reset()
+      ..lastGlobalX = 0
+      ..lastGlobalY = 0
+      ..lastPosValid = false;
     _stopAutoScroll();
   }
 
@@ -820,39 +827,51 @@ class _DayViewState extends ConsumerState<DayView> {
     _autoScrollTimer = null;
   }
 
-  void _maybeEdgeTurn(double globalX) {
-    _edgeTurnCtrl.lastGlobalX = globalX;
+  /// 任务拖动的边缘翻页（同 DayColumn._maybeEdgeTurnForTask）：只在
+  /// 「水平意图且停下」时翻页；纵向拖动/持续移动不累计边缘停留
+  void _maybeEdgeTurnForTask(Offset pos) {
+    final ctrl = _edgeTurnCtrl;
     final w = MediaQuery.sizeOf(context).width;
-    // 保持区滞回：链已启动时，右缘链 x>65%、左缘链 x<35% 持续翻页
-    if (_edgeTurnCtrl.armed) {
-      final keep = _edgeTurnCtrl.dir > 0
-          ? globalX > w * 0.65
-          : globalX < w * 0.35;
+    // 首条事件（拖动开始/清理后）：仅建立移动基线；已在边缘区则先 arm
+    if (!ctrl.lastPosValid) {
+      ctrl.lastGlobalX = pos.dx;
+      ctrl.lastGlobalY = pos.dy;
+      ctrl.lastPosValid = true;
+      if (pos.dx > w * 0.85 || pos.dx < w * 0.12) {
+        _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
+      }
+      return;
+    }
+    if (ctrl.armed) {
+      final keep = ctrl.dir > 0 ? pos.dx > w * 0.65 : pos.dx < w * 0.35;
       if (keep) return;
-      _edgeTurnCtrl.timer?.cancel();
-      _edgeTurnCtrl.timer = null;
-      _edgeTurnCtrl.dir = 0;
-      _edgeTurnCtrl.armed = false;
+      ctrl.reset();
+      // 移出保持区：继续按当前 x 判断是否进入另一侧边缘区（右缘→左缘反向翻页）
     }
-    if (globalX > w * 0.85) {
-      _armEdgeTimer(1, w);
-    } else if (globalX < w * 0.12) {
-      _armEdgeTimer(-1, w);
-    } else {
-      _edgeTurnCtrl.timer?.cancel();
-      _edgeTurnCtrl.timer = null;
-      _edgeTurnCtrl.dir = 0;
-      _edgeTurnCtrl.armed = false;
+    final inZone = pos.dx > w * 0.85 || pos.dx < w * 0.12;
+    if (!inZone) {
+      ctrl.reset();
+      return;
     }
+    final dx = pos.dx - ctrl.lastGlobalX;
+    final dy = pos.dy - ctrl.lastGlobalY;
+    ctrl.lastGlobalX = pos.dx;
+    ctrl.lastGlobalY = pos.dy;
+    if (dy.abs() > dx.abs() && dy.abs() > edgeTurnJitter) {
+      ctrl.reset();
+      return;
+    }
+    _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
   }
 
-  void _armEdgeTimer(int dir, double w) {
-    if (_edgeTurnCtrl.timer != null && _edgeTurnCtrl.dir == dir) return;
-    _edgeTurnCtrl.timer?.cancel();
-    _edgeTurnCtrl.dir = dir;
-    _edgeTurnCtrl.timer = Timer(const Duration(milliseconds: 300), () {
-      _edgeTurnCtrl.timer = null;
-      _edgeTurnCtrl.armed = true;
+  /// 任务拖动边缘翻页计时：重置 300ms（每次移动重新计时，停住 300ms 才翻页）
+  void _armTaskEdgeTurn(int dir, double w) {
+    final ctrl = _edgeTurnCtrl;
+    ctrl.timer?.cancel();
+    ctrl.dir = dir;
+    ctrl.timer = Timer(const Duration(milliseconds: 300), () {
+      ctrl.timer = null;
+      ctrl.armed = true;
       _edgeTurn(dir.toDouble());
       _armContinuation(dir, w);
     });

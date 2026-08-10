@@ -193,4 +193,52 @@ void main() {
       );
     });
   });
+
+  group('全天重复任务日历条目（跨天覆盖语义）', () {
+    late AppDatabase db;
+    late int id;
+
+    setUp(() async {
+      db = AppDatabase.forTesting(NativeDatabase.memory());
+      await db.ensureDefaultList();
+      final list = await db.getDefaultList();
+      // 每日重复的全天任务：planStart=8/1 00:00, planEnd=8/2 00:00（全天占位）
+      final dayStart = AppClock.at(2026, 8, 1);
+      id = await db.insertTask(TasksCompanion.insert(
+        listId: list.id,
+        title: '每日全天',
+        planStart: Value(dayStart),
+        planEnd: Value(dayStart.add(const Duration(days: 1))),
+        isAllDay: const Value(true),
+        rrule: const Value('FREQ=DAILY'),
+        createdAt: dayStart,
+      ));
+    });
+
+    tearDown(() async {
+      await db.close();
+    });
+
+    test('窗口内每天恰好一个条目（不误把实例铺到次日）', () async {
+      final items = await db.getCalendarItems(
+        AppClock.at(2026, 8, 1),
+        AppClock.at(2026, 8, 10),
+      );
+      final taskItems = items.where((i) => i.task.id == id).toList();
+      expect(taskItems.length, 10,
+          reason: '10 天每天 1 条，不得产生次日覆盖冗余');
+      final perDay = <int, int>{};
+      for (final it in taskItems) {
+        final key = it.instanceDate.year * 10000 +
+            it.instanceDate.month * 100 +
+            it.instanceDate.day;
+        perDay[key] = (perDay[key] ?? 0) + 1;
+      }
+      expect(
+        perDay.values.every((c) => c == 1),
+        isTrue,
+        reason: '同一天不得出现同一任务的重复实例块',
+      );
+    });
+  });
 }

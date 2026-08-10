@@ -1117,9 +1117,11 @@ class AppDatabase extends _$AppDatabase {
           ),
         );
         // 跨天覆盖：实例延续到 planEnd 所在日，该日也生成条目
-        //（与非重复任务的跨天覆盖一致；命中日被跳过则整实例不显示）
+        //（与非重复任务的跨天覆盖一致；命中日被跳过则整实例不显示）。
+        // 全天任务不参与：planEnd=次日 00:00 是"全天占位"标记，若按跨天
+        // 覆盖会把每个实例再铺到次日，置顶区同一实例显示两天/一天两个块
         final ps = t.planStart;
-        if (ps != null) {
+        if (ps != null && !t.isAllDay) {
           final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
           final psA = AppClock.asApp(ps);
           final peA = AppClock.asApp(pe);

@@ -279,6 +279,51 @@ void main() {
       expect(after.isAfter(before), isTrue, reason: '拖到右缘停留应翻到下一周');
     });
 
+    testWidgets('边缘停留期间触摸微抖动仍能翻周（倒计时不被微移动重置）', (tester) async {
+      await db.ensureDefaultList();
+      final list = await db.getDefaultList();
+      final start = DateTime(now.year, now.month, now.day, 10, 0);
+      await db.insertTask(
+        TasksCompanion.insert(
+          listId: list.id,
+          title: '抖动任务',
+          planStart: Value(start),
+          planEnd: Value(start.add(const Duration(hours: 1))),
+          createdAt: now,
+        ),
+      );
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final before = container.read(calendarControllerProvider).selectedDay;
+      final block = find.text('抖动任务');
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      // 拖到右缘（85% 区外）
+      await gesture.moveTo(const Offset(760, 400));
+      await tester.pump();
+      // 等待翻页的 300ms 内持续注入 1-3px 微抖动（模拟真机触摸抖动）——
+      // 修复前每次微移动都无条件重置 300ms 倒计时，边缘翻页永不触发
+      for (var i = 0; i < 20; i++) {
+        await gesture.moveBy(Offset(i.isEven ? 1 : -1, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      final after = container.read(calendarControllerProvider).selectedDay;
+      expect(after.isAfter(before), isTrue,
+          reason: '边缘停留期间的微抖动不应阻止翻周（倒计时不能被每次微移动重置）');
+    });
+
     testWidgets('拖动任务到屏幕左缘停留 300ms → 翻到上一周', (tester) async {
       await db.ensureDefaultList();
       final list = await db.getDefaultList();

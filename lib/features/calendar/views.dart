@@ -361,7 +361,13 @@ class _WeekViewState extends ConsumerState<WeekView> {
       ctrl.reset();
       return;
     }
-    _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
+    // 只在"真实移动"或"无 pending 计时"时重置 300ms 倒计时；静止/微抖动
+    //（dx ≤ 抖动阈值）保留已有计时——否则真机手指停在边缘时的触摸抖动会
+    // 持续重置倒计时，边缘翻页永远不触发（完全不能滑动翻页）
+    final moving = dx.abs() > edgeTurnJitter;
+    if (moving || ctrl.timer == null) {
+      _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
+    }
   }
 
   /// 任务拖动边缘翻页计时：重置 300ms（每次移动重新计时，停住 300ms 才翻页）
@@ -861,7 +867,13 @@ class _DayViewState extends ConsumerState<DayView> {
       ctrl.reset();
       return;
     }
-    _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
+    // 只在"真实移动"或"无 pending 计时"时重置 300ms 倒计时；静止/微抖动
+    //（dx ≤ 抖动阈值）保留已有计时——否则真机手指停在边缘时的触摸抖动会
+    // 持续重置倒计时，边缘翻页永远不触发（完全不能滑动翻页）
+    final moving = dx.abs() > edgeTurnJitter;
+    if (moving || ctrl.timer == null) {
+      _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
+    }
   }
 
   /// 任务拖动边缘翻页计时：重置 300ms（每次移动重新计时，停住 300ms 才翻页）

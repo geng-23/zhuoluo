@@ -387,6 +387,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
             label: '截止时间',
             value: t.dueTime == null ? '未设置' : _dateTimeText(t.dueTime!),
             onTap: () => _pickDueTime(t),
+            onClear: t.dueTime == null ? null : () => _clearDueTime(t),
           ),
           // 区块3：提醒
           const Padding(
@@ -962,7 +963,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     // A13：打开选项面板前收起键盘，避免选完回来仍是编辑态
     FocusScope.of(context).unfocus();
     // 底部表单：日期/时间/开始/结束分开，开始时间可留空（=全天任务）
-    final result = await _showSheet<(DateTime, DateTime?, bool)>(
+    final result = await _showSheet<(DateTime?, DateTime?, bool)>(
       isScrollControlled: true,
       builder: (c) => PlanTimeSheet(
         initialStart: t.planStart,
@@ -972,6 +973,11 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     );
     if (result == null || !mounted) return;
     final (start, end, isAllDay) = result;
+    // 清除计划时间（PlanTimeSheet 底部"清除计划时间"）
+    if (start == null) {
+      await _clearPlanTime(t);
+      return;
+    }
     final planEnd = isAllDay
         ? start.add(const Duration(days: 1))
         : (end ?? start.add(const Duration(hours: 1)));
@@ -1011,6 +1017,89 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         planEnd: Value(planEnd),
       );
     });
+  }
+
+  /// 清除计划时间（planStart/planEnd → null、isAllDay → false）。
+  /// 重复任务清除计划时间会丢失规则锚点 → 一并停止重复（复用"停止重复"
+  /// 收口：清理不再匹配的历史完成/例外），需用户确认
+  Future<void> _clearPlanTime(Task t) async {
+    final db = ref.read(dbProvider);
+    if (t.rrule.isNotEmpty) {
+      final histCount = (await (db.select(
+        db.taskCompletions,
+      )..where((c) => c.taskId.equals(t.id)))
+              .get())
+          .length;
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('清除计划时间？'),
+          content: Text(
+            '重复任务清除计划时间将同时停止重复'
+            '${histCount > 0 ? '并删除 $histCount 条历史完成/改期记录' : ''}。继续？',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('清除'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+      // 清理历史完成/例外，再清计划与重复规则（与"停止重复"同一收口）
+      await db.applyRecurringChange(t.id, oldRrule: t.rrule, newRrule: '');
+      await _notifier.updateTaskFields(
+        t.id,
+        TasksCompanion(
+          planStart: const Value(null),
+          planEnd: const Value(null),
+          isAllDay: const Value(false),
+          rrule: const Value(''),
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _task = t.copyWith(
+          planStart: const Value(null),
+          planEnd: const Value(null),
+          isAllDay: false,
+          rrule: '',
+        );
+      });
+      return;
+    }
+    await _notifier.updateTaskFields(
+      t.id,
+      TasksCompanion(
+        planStart: const Value(null),
+        planEnd: const Value(null),
+        isAllDay: const Value(false),
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      _task = t.copyWith(
+        planStart: const Value(null),
+        planEnd: const Value(null),
+        isAllDay: false,
+      );
+    });
+  }
+
+  /// 清除截止时间（dueTime → null）
+  Future<void> _clearDueTime(Task t) async {
+    await _notifier.updateTaskFields(
+      t.id,
+      TasksCompanion(dueTime: Value(null)),
+    );
+    if (!mounted) return;
+    setState(() => _task = t.copyWith(dueTime: Value(null)));
   }
 
   Future<void> _pickDueTime(Task t) async {
@@ -1747,12 +1836,16 @@ class _ListTileRow extends StatelessWidget {
     required this.label,
     required this.value,
     required this.onTap,
+    this.onClear,
   });
 
   final IconData icon;
   final String label;
   final String value;
   final VoidCallback onTap;
+
+  /// 可选清除动作：非空时在行尾渲染"×"清除按钮（如截止时间清除）
+  final VoidCallback? onClear;
 
   @override
   Widget build(BuildContext context) {
@@ -1763,6 +1856,13 @@ class _ListTileRow extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (onClear != null)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.close, size: 16),
+              tooltip: '清除',
+              onPressed: onClear,
+            ),
           Text(
             value,
             style: TextStyle(fontSize: 14, color: Colors.grey.shade700),

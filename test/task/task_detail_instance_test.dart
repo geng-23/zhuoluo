@@ -236,4 +236,76 @@ void main() {
     expect(await db.isInstanceCompleted(id, day), isTrue,
         reason: '完成的是未来计划日实例');
   });
+
+  testWidgets('清除计划时间（非重复任务）：planStart/planEnd 清空、isAllDay false', (tester) async {
+    await db.ensureDefaultList();
+    final list = await db.getDefaultList();
+    final id = await db.insertTask(TasksCompanion.insert(
+      listId: list.id,
+      title: '清除计划',
+      planStart: Value(AppClock.at(today.year, today.month, today.day, 10, 0)),
+      planEnd: Value(AppClock.at(today.year, today.month, today.day, 11, 0)),
+      createdAt: AppClock.now(),
+    ));
+    await pumpDetail(tester, id);
+    await tester.dragUntilVisible(find.text('计划时间'),
+        find.byType(ListView).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('计划时间'));
+    await tester.pumpAndSettle();
+    expect(find.text('清除计划时间'), findsOneWidget,
+        reason: '计划时间面板底部应有清除按钮');
+    await tester.tap(find.text('清除计划时间'));
+    await tester.pumpAndSettle();
+
+    final t = (await db.getTask(id))!;
+    expect(t.planStart, isNull, reason: '清除计划时间后 planStart 为 null');
+    expect(t.planEnd, isNull, reason: '清除计划时间后 planEnd 为 null');
+    expect(t.isAllDay, isFalse, reason: '清除后非全天');
+  });
+
+  testWidgets('清除截止时间：dueTime 置空', (tester) async {
+    await db.ensureDefaultList();
+    final list = await db.getDefaultList();
+    final id = await db.insertTask(TasksCompanion.insert(
+      listId: list.id,
+      title: '清除截止',
+      dueTime: Value(AppClock.at(today.year, today.month, today.day, 18, 0)),
+      createdAt: AppClock.now(),
+    ));
+    await pumpDetail(tester, id);
+    await tester.dragUntilVisible(find.text('截止时间'),
+        find.byType(ListView).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
+    // 行尾清除按钮（截止时间已设置时显示 Icons.close）
+    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.pumpAndSettle();
+    final t = (await db.getTask(id))!;
+    expect(t.dueTime, isNull, reason: '清除截止时间后 dueTime 为 null');
+    expect(find.text('未设置'), findsWidgets, reason: '详情页截止时间显示未设置');
+  });
+
+  testWidgets('重复任务清除计划时间：确认后 rrule 清空且完成记录清理', (tester) async {
+    final id = await insertDailyTask();
+    await db.completeInstance(id, today);
+    await pumpDetail(tester, id);
+    await tester.dragUntilVisible(find.text('计划时间'),
+        find.byType(ListView).first, const Offset(0, -100));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('计划时间'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清除计划时间'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('清除计划时间？'), findsOneWidget,
+        reason: '重复任务清除计划需确认（同时停止重复）');
+    await tester.tap(find.text('清除'));
+    await tester.pumpAndSettle();
+
+    final t = (await db.getTask(id))!;
+    expect(t.planStart, isNull, reason: '清除计划时间后 planStart 为 null');
+    expect(t.rrule, isEmpty, reason: '重复任务清除计划同时停止重复');
+    expect(await db.isInstanceCompleted(id, today), isFalse,
+        reason: '停止重复时历史完成记录被清理');
+  });
 }

@@ -4,7 +4,8 @@ import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 
 
-/// 计划时间表单（开始日期必填；开始时间可留空=全天；结束时间可留空=开始+1h）
+/// 计划时间表单（开始时间可留空=全天；结束时间可留空=开始+1h；
+/// 底部"清除计划时间"返回 start=null 表示清除整个计划）
 class PlanTimeSheet extends StatefulWidget {
   const PlanTimeSheet({
     super.key,
@@ -230,8 +231,17 @@ class _PlanTimeSheetState extends State<PlanTimeSheet> {
             ],
             const SizedBox(height: 8),
             Row(
-              mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                // 清除整个计划时间（start=null）；开始日期必填的旧语义无法清除
+                TextButton(
+                  onPressed: () =>
+                      Navigator.pop(context, (null, null, false)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  ),
+                  child: const Text('清除计划时间'),
+                ),
+                const Spacer(),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
                   child: const Text('取消'),

@@ -279,10 +279,13 @@ class TasksController extends StateNotifier<TasksState> {
       }
     }
     candidates.sort();
+    // 同步内存判断（此前逐候选 await expandTaskForDateWith——无限期任务
+    // 370 天窗口候选多时有数百次异步切换 + 重复 JSON 解码）
+    final skippedDays = _db.decodeSkippedDays(t);
     for (final c in candidates) {
       if (c.isBefore(today)) continue;
       // 目标日被跳过 / 被其他例外移走 → 当天无实例，跳过该候选
-      if ((await _db.expandTaskForDateWith(t, c, exceptions)).isEmpty) {
+      if (!_db.hasInstanceOnDaySync(t, c, exceptions, skippedDays)) {
         continue;
       }
       if (doneSet.contains(_doneKey(t.id, c))) continue;

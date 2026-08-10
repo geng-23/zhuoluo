@@ -456,18 +456,40 @@ class AppDatabase extends _$AppDatabase {
       if (t.parentId != null) continue; // 子任务不进智能清单
       if (t.completedAt != null) continue;
       if (t.rrule.isNotEmpty) {
-        var day = start;
-        while (day.isBefore(end)) {
-          final hit = await expandTaskForDateWith(
-            t,
-            day,
-            exMap[t.id] ?? const [],
-          );
-          if (hit.isNotEmpty && !doneSet.contains(_doneKey(t.id, day))) {
+        // 批量展开窗口内实例 + 内存过滤（与日历 getCalendarItems 同模式），
+        // 替代逐日 while 循环逐日 expandTaskForDateWith。
+        // 候选日 = 规则实例 + 例外改期目标日（目标日可能不是规则命中日）
+        final exList = exMap[t.id] ?? const [];
+        final skippedDays = decodeSkippedDays(t);
+        final dayCandidates = <DateTime>[
+          for (final inst in RruleService.instance.expand(
+            t.planStart ?? t.createdAt,
+            t.rrule,
+            from: start,
+            to: end,
+            limit: 2000,
+          ))
+            AppClock.at(inst.year, inst.month, inst.day),
+        ];
+        for (final ex in exList) {
+          final od = ex.overrideScheduledDate;
+          if (ex.action != 'edit' || od == null) continue;
+          final a = AppClock.asApp(od);
+          final odDay = AppClock.at(a.year, a.month, a.day);
+          if (odDay.isBefore(start) || !odDay.isBefore(end)) continue;
+          if (!dayCandidates.any((d) => du.DateUtilsEx.sameDay(d, odDay))) {
+            dayCandidates.add(odDay);
+          }
+        }
+        dayCandidates.sort();
+        for (final instDay in dayCandidates) {
+          // expand 的 to 含当天，与原 while (day.isBefore(end)) 排他口径对齐
+          if (instDay.isBefore(start) || !instDay.isBefore(end)) continue;
+          if (!hasInstanceOnDaySync(t, instDay, exList, skippedDays)) continue;
+          if (!doneSet.contains(_doneKey(t.id, instDay))) {
             result.add(t);
             break;
           }
-          day = day.add(const Duration(days: 1));
         }
         continue;
       }
@@ -1040,68 +1062,85 @@ class AppDatabase extends _$AppDatabase {
         }
         continue;
       }
-      // 重复任务：逐日判断规则命中（含跳过/例外），完成状态查预取集合
-      var day = start;
-      while (day.isBefore(end)) {
-        final dayStart = AppClock.at(day.year, day.month, day.day);
-        final hit = await expandTaskForDateWith(
-          t,
-          dayStart,
-          exceptionsByTask[t.id] ?? const [],
-        );
-        if (hit.isNotEmpty) {
-          // 例外改期到当天的实例 → 携带目标时刻（带时分），
-          // 时间轴据此渲染位置（此前所有实例统一 00:00，改期时分不生效）
-          DateTime? displayTime;
-          for (final ex in exceptionsByTask[t.id] ?? const []) {
-            final od = ex.overrideScheduledDate;
-            if (ex.action == 'edit' &&
-                od != null &&
-                od.year == dayStart.year &&
-                od.month == dayStart.month &&
-                od.day == dayStart.day) {
-              displayTime = od;
-              break;
-            }
-          }
-          final doneKey =
-              '${t.id}_${dayStart.year}_${dayStart.month}_${dayStart.day}';
-          items.add(
-            CalendarItem(
-              task: t,
-              instanceDate: dayStart,
-              completed: doneSet.contains(doneKey),
-              listColor: listColor,
-              displayTime: displayTime,
-            ),
-          );
-          // 跨天覆盖：实例延续到 planEnd 所在日，该日也生成条目
-          //（与非重复任务的跨天覆盖一致；命中日被跳过则整实例不显示）
-          final ps = t.planStart;
-          if (ps != null) {
-            final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
-            final psA = AppClock.asApp(ps);
-            final peA = AppClock.asApp(pe);
-            final spanDays = AppClock.at(peA.year, peA.month, peA.day)
-                .difference(AppClock.at(psA.year, psA.month, psA.day))
-                .inDays;
-            for (var i = 1; i <= spanDays; i++) {
-              final coverDay = dayStart.add(Duration(days: i));
-              if (coverDay.isBefore(start) || !coverDay.isBefore(end)) {
-                continue;
-              }
-              items.add(
-                CalendarItem(
-                  task: t,
-                  instanceDate: coverDay,
-                  completed: doneSet.contains(doneKey),
-                  listColor: listColor,
-                ),
-              );
-            }
+      // 重复任务：按规则批量展开窗口内实例，再内存过滤跳过/例外/完成状态。
+      // 此前逐日 while 循环逐日调 expandTaskForDateWith，每次重新
+      // jsonDecode(skippedDates) + 线性扫描，无限期任务历史实例极多时卡顿
+      final exList = exceptionsByTask[t.id] ?? const [];
+      final skippedDays = decodeSkippedDays(t);
+      // 候选日 = 规则实例 + 例外改期目标日（目标日可能不是规则命中日，
+      // 逐日扫描口径下同样显示；批量展开需手动并入）
+      final dayCandidates = <DateTime>[
+        for (final inst in RruleService.instance.expand(
+          t.planStart ?? t.createdAt,
+          t.rrule,
+          from: start,
+          to: end,
+          limit: 2000,
+        ))
+          AppClock.at(inst.year, inst.month, inst.day),
+      ];
+      for (final ex in exList) {
+        final od = ex.overrideScheduledDate;
+        if (ex.action != 'edit' || od == null) continue;
+        final a = AppClock.asApp(od);
+        final odDay = AppClock.at(a.year, a.month, a.day);
+        if (odDay.isBefore(start) || !odDay.isBefore(end)) continue;
+        if (!dayCandidates.any((d) => du.DateUtilsEx.sameDay(d, odDay))) {
+          dayCandidates.add(odDay);
+        }
+      }
+      dayCandidates.sort();
+      for (final dayStart in dayCandidates) {
+        // expand 的 to 含当天，需与原 while (day.isBefore(end)) 排他口径对齐
+        if (dayStart.isBefore(start) || !dayStart.isBefore(end)) continue;
+        if (!hasInstanceOnDaySync(t, dayStart, exList, skippedDays)) continue;
+        // 例外改期到当天的实例 → 携带目标时刻（带时分），
+        // 时间轴据此渲染位置（此前所有实例统一 00:00，改期时分不生效）
+        DateTime? displayTime;
+        for (final ex in exList) {
+          final od = ex.overrideScheduledDate;
+          if (ex.action == 'edit' &&
+              od != null &&
+              du.DateUtilsEx.sameDay(od, dayStart)) {
+            displayTime = od;
+            break;
           }
         }
-        day = day.add(const Duration(days: 1));
+        final doneKey = _doneKey(t.id, dayStart);
+        items.add(
+          CalendarItem(
+            task: t,
+            instanceDate: dayStart,
+            completed: doneSet.contains(doneKey),
+            listColor: listColor,
+            displayTime: displayTime,
+          ),
+        );
+        // 跨天覆盖：实例延续到 planEnd 所在日，该日也生成条目
+        //（与非重复任务的跨天覆盖一致；命中日被跳过则整实例不显示）
+        final ps = t.planStart;
+        if (ps != null) {
+          final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
+          final psA = AppClock.asApp(ps);
+          final peA = AppClock.asApp(pe);
+          final spanDays = AppClock.at(peA.year, peA.month, peA.day)
+              .difference(AppClock.at(psA.year, psA.month, psA.day))
+              .inDays;
+          for (var i = 1; i <= spanDays; i++) {
+            final coverDay = dayStart.add(Duration(days: i));
+            if (coverDay.isBefore(start) || !coverDay.isBefore(end)) {
+              continue;
+            }
+            items.add(
+              CalendarItem(
+                task: t,
+                instanceDate: coverDay,
+                completed: doneSet.contains(doneKey),
+                listColor: listColor,
+              ),
+            );
+          }
+        }
       }
     }
     return items;
@@ -1174,30 +1213,63 @@ class AppDatabase extends _$AppDatabase {
     DateTime date,
     List<TaskException> exceptions,
   ) async {
+    return hasInstanceOnDaySync(t, date, exceptions, null) ? [t] : const [];
+  }
+
+  /// 预解码 skippedDates JSON 为"日期 key 集合"（key = 应用时区 y-m-d）。
+  /// 批量循环（日历逐日/排期窗口/下次实例）在任务级解码一次，避免
+  /// expandTaskForDateWith 每次 jsonDecode + 线性扫描——无限期任务跳过
+  /// 实例极多时是主要 CPU 开销。损坏 JSON 返回 null（按无跳过处理，
+  /// 与原有静默容错行为一致）。
+  Set<String>? decodeSkippedDays(Task t) {
+    if (t.skippedDates.isEmpty) return const <String>{};
+    try {
+      final list = jsonDecode(t.skippedDates) as List;
+      final result = <String>{};
+      for (final e in list) {
+        // 与 DateUtilsEx.sameDay 同口径：先按应用时区解释再取日期字段
+        final a = AppClock.asApp(DateTime.parse(e as String));
+        result.add('${a.year}-${a.month}-${a.day}');
+      }
+      return result;
+    } catch (_) {
+      // 非法 JSON（损坏备份导入）静默视为无跳过
+      return null;
+    }
+  }
+
+  static String _dayKeyStr(DateTime day) {
+    final a = AppClock.asApp(day);
+    return '${a.year}-${a.month}-${a.day}';
+  }
+
+  /// 判断任务在某日是否有实例的同步纯内存版本（无 DB 查询）。
+  /// [skippedDays] 为 decodeSkippedDays 的预解码结果；传 null 时按需解码。
+  /// 非重复任务按计划区间覆盖判断；重复任务依次检查跳过/例外/规则命中，
+  /// 语义与 expandTaskForDateWith 完全一致。供日历/智能清单/排期窗口等
+  /// 批量循环替代逐日 async 查询，消除异步切换与重复 JSON 解码开销。
+  bool hasInstanceOnDaySync(
+    Task t,
+    DateTime date,
+    List<TaskException> exceptions,
+    Set<String>? skippedDays,
+  ) {
     // ：date 可能是循环 day（应用时区）或外部传入值，统一按应用时区
     // 解释后再取字段（asApp 对已是应用时区的 TZDateTime 幂等）
     final da = AppClock.asApp(date);
     if (t.rrule.isEmpty) {
       // 非重复任务：判断该天是否被计划区间覆盖（含跨天）
       final ps = t.planStart;
-      if (ps == null) return [];
+      if (ps == null) return false;
       final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
       final dayStart = AppClock.at(da.year, da.month, da.day);
       final dayEnd = dayStart.add(const Duration(days: 1));
-      if (ps.isBefore(dayEnd) && pe.isAfter(dayStart)) return [t];
-      return [];
+      return ps.isBefore(dayEnd) && pe.isAfter(dayStart);
     }
-    // skippedDates 非法 JSON（损坏备份导入）静默视为无跳过，
-    // 避免打开日历/判断实例时抛 FormatException 导致整个视图异常
-    List<DateTime> skipped = const [];
-    try {
-      skipped = (jsonDecode(t.skippedDates) as List)
-          .map((e) => DateTime.parse(e as String))
-          .toList();
-    } catch (_) {}
     final dateKey = AppClock.at(da.year, da.month, da.day);
-    if (skipped.any((s) => du.DateUtilsEx.sameDay(s, dateKey))) {
-      return [];
+    final days = skippedDays ?? decodeSkippedDays(t);
+    if (days != null && days.contains(_dayKeyStr(dateKey))) {
+      return false;
     }
     for (final ex in exceptions) {
       final od = ex.overrideScheduledDate;
@@ -1206,25 +1278,29 @@ class AppDatabase extends _$AppDatabase {
       if (ex.action == 'edit' &&
           od != null &&
           du.DateUtilsEx.sameDay(od, dateKey)) {
-        return [t];
+        return true;
       }
       final ed = ex.instanceDate;
       if (du.DateUtilsEx.sameDay(ed, dateKey)) {
         // 例外：若 overrideScheduledDate 指向其他日期，则本日期无实例
         if (ex.action == 'edit' && od != null) {
           if (!du.DateUtilsEx.sameDay(od, dateKey)) {
-            return [];
+            return false;
           }
         }
-        if (ex.action == 'delete') return [];
-        return [t];
+        if (ex.action == 'delete') return false;
+        return true;
       }
     }
     // 需要判断 rrule 是否命中（调用 rrule_expander）
     final base = t.planStart ?? t.createdAt;
-    final hit = RruleService.instance.hitsOn(t.rrule, base, dateKey);
-    return hit ? [t] : [];
+    return RruleService.instance.hitsOn(t.rrule, base, dateKey);
   }
+
+  /// 完成记录集合的 key（与 getCompletedSetForTasks 返回集合同格式）。
+  /// 供提醒调度等批量路径按同一口径判断实例是否已完成。
+  String completionKey(int taskId, DateTime day) =>
+      _doneKey(taskId, day);
 
   Future<List<int>> getVisibleCalendarListIds() async {
     final rows = await (select(

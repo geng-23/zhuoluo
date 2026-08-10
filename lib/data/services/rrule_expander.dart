@@ -13,8 +13,27 @@ class RruleService {
 
   static final RruleService instance = RruleService._();
 
+  /// parse 结果 LRU 缓存：Rrule 不可变，相同 rrule 字符串复用解析结果，
+  /// 避免日历逐日/排期窗口等高频路径反复正则解析（无限期规则多时性能瓶颈）。
+  final Map<String, Rrule> _parseCache = {};
+  static const int _parseCacheLimit = 128;
+
   /// 解析 RRULE 字符串为规则对象
   Rrule parse(String rrule) {
+    final cached = _parseCache.remove(rrule);
+    if (cached != null) {
+      _parseCache[rrule] = cached; // 命中置顶（LRU）
+      return cached;
+    }
+    final rule = _parseUncached(rrule);
+    _parseCache[rrule] = rule;
+    while (_parseCache.length > _parseCacheLimit) {
+      _parseCache.remove(_parseCache.keys.first);
+    }
+    return rule;
+  }
+
+  Rrule _parseUncached(String rrule) {
     final parts = <String, String>{};
     for (final seg in rrule.split(';')) {
       final idx = seg.indexOf('=');
@@ -122,22 +141,31 @@ class RruleService {
     }
 
     // 遍历上限：覆盖窗口跨度 + 目标数量，并防 INTERVAL=0 等非法规则死循环
+    final interval = rule.interval > 0 ? rule.interval : 1;
     final spanDays = (t ?? f ?? s).difference(s).inDays.clamp(0, 1 << 31);
     final step = switch (rule.freq) {
-      'WEEKLY' => (rule.interval > 0 ? rule.interval : 1) * 7,
-      'MONTHLY' => (rule.interval > 0 ? rule.interval : 1) * 31,
-      'YEARLY' => (rule.interval > 0 ? rule.interval : 1) * 366,
-      _ => (rule.interval > 0 ? rule.interval : 1),
+      'WEEKLY' => interval * 7,
+      'MONTHLY' => interval * 31,
+      'YEARLY' => interval * 366,
+      _ => interval,
     };
     final maxIter = 10 + (spanDays > 0 ? spanDays ~/ step : 0) + limit;
 
+    // 无 COUNT 规则且给定 from 时，起始迭代索引直接跳到 from 附近的周期。
+    // COUNT 规则需精确计数 emitted 不可跳。长期无限期任务（历史实例极多）
+    // 此前从创建日逐期迭代到窗口，随使用时长线性变慢；跳跃后迭代次数
+    // 收敛为"窗口内周期数"。各 FREQ 用保守的向下取整（不晚于 from），
+    // 早于 from 的实例由 emit 的 f 过滤兜底，保证不丢窗口内实例。
+    final skipTo = (rule.count == null && f != null) ? f : null;
+
     if (rule.freq == 'DAILY') {
-      for (var i = 0; i < maxIter; i++) {
-        if (!emit(
-          s.add(Duration(days: i * (rule.interval > 0 ? rule.interval : 1))),
-        )) {
-          break;
-        }
+      var startIdx = 0;
+      if (skipTo != null) {
+        final diff = skipTo.difference(s).inDays;
+        if (diff > 0) startIdx = (diff / interval).ceil();
+      }
+      for (var i = startIdx; i < maxIter; i++) {
+        if (!emit(s.add(Duration(days: i * interval)))) break;
       }
     } else if (rule.freq == 'WEEKLY') {
       // 无 BYDAY 时默认锚点星期（此前固定周一，旧"每N周"任务错落周一；
@@ -149,10 +177,13 @@ class RruleService {
         s.month,
         s.day,
       ).subtract(Duration(days: s.weekday - 1));
-      for (var i = 0; i < maxIter; i++) {
-        final base = monday.add(
-          Duration(days: i * 7 * (rule.interval > 0 ? rule.interval : 1)),
-        );
+      var startIdx = 0;
+      if (skipTo != null) {
+        final diff = skipTo.difference(monday).inDays;
+        if (diff > 0) startIdx = diff ~/ (interval * 7);
+      }
+      for (var i = startIdx; i < maxIter; i++) {
+        final base = monday.add(Duration(days: i * 7 * interval));
         for (final d in days) {
           final day = base.add(Duration(days: _weekdayIndex(d)));
           if (!emit(day)) return result;
@@ -162,8 +193,13 @@ class RruleService {
       final mds = (rule.byMonthDay?.isNotEmpty ?? false)
           ? (List<int>.from(rule.byMonthDay!)..sort())
           : [s.day];
-      final interval = rule.interval > 0 ? rule.interval : 1;
-      for (var i = 0; i < maxIter; i++) {
+      var startIdx = 0;
+      if (skipTo != null) {
+        final diffMonths =
+            (skipTo.year - s.year) * 12 + (skipTo.month - s.month);
+        if (diffMonths > 0) startIdx = diffMonths ~/ interval;
+      }
+      for (var i = startIdx; i < maxIter; i++) {
         final targetMonth = s.month + i * interval;
         final targetYear = s.year + (targetMonth - 1) ~/ 12;
         final targetMonthOfYear = (targetMonth - 1) % 12 + 1;
@@ -175,9 +211,14 @@ class RruleService {
         }
       }
     } else if (rule.freq == 'YEARLY') {
-      for (var i = 0; i < maxIter; i++) {
+      var startIdx = 0;
+      if (skipTo != null) {
+        final diffYears = skipTo.year - s.year;
+        if (diffYears > 0) startIdx = diffYears ~/ interval;
+      }
+      for (var i = startIdx; i < maxIter; i++) {
         final d = AppClock.at(
-          s.year + i * (rule.interval > 0 ? rule.interval : 1),
+          s.year + i * interval,
           s.month,
           s.day,
         );

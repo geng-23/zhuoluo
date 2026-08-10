@@ -104,48 +104,51 @@ class ReminderScheduler {
       // 重复任务：调度未来 3 个月内的实例
       final today = AppClock.now();
       final start = task.planStart ?? today;
+      final windowStart = today.subtract(const Duration(days: 1));
+      final windowEnd = today.add(const Duration(days: 93));
+      // 批量预取例外/完成记录/跳过日期——此前逐实例查库（每实例 2 次查询，
+      // 93 天窗口单任务约 186 次），无限期任务实例多时调度慢
+      final exceptions = await _db.getExceptions(task.id);
+      final doneSet = await _db.getCompletedSetForTasks(
+        [task.id],
+        windowStart,
+        windowEnd,
+      );
+      final skippedDays = _db.decodeSkippedDays(task);
       // 从 start 展开并截取未来窗口（老任务不再因前 100 个实例全在过去而漏排）
       final instances = RruleService.instance.expand(
         start,
         task.rrule,
-        from: today.subtract(const Duration(days: 1)),
-        to: today.add(const Duration(days: 93)),
+        from: windowStart,
+        to: windowEnd,
         limit: 500,
       );
       for (final inst in instances) {
         // 实例日期归一化到当天 00:00，与完成记录存储基准一致，
         // 避免 RRULE 展开保留的时分（如 09:00）与完成记录（00:00）互相不识别
         final day = DateUtilsEx.normalizeInstanceDate(inst);
-        final skipped = await _isSkipped(task, day);
-        if (skipped) continue;
-        final done = await _db.isInstanceCompleted(task.id, day);
-        if (done) continue;
+        // 内存判断跳过/例外移走（此前 _isSkipped 每实例查库）
+        if (!_db.hasInstanceOnDaySync(task, day, exceptions, skippedDays)) {
+          continue;
+        }
+        if (doneSet.contains(_db.completionKey(task.id, day))) continue;
         ok = await _scheduleDay(task, day, reminders) && ok;
       }
-      // 例外改期：原日期已被 expandTaskForDate 判为移走（_isSkipped 短路），
-      // 改期到的新日期不在规则展开里，需单独在窗口内排提醒
-      final windowStart = today.subtract(const Duration(days: 1));
-      final windowEnd = today.add(const Duration(days: 93));
-      final exceptions = await _db.getExceptions(task.id);
+      // 例外改期：原日期已被 hasInstanceOnDaySync 判为移走，改期到的新日期
+      // 不在规则展开里，需单独在窗口内排提醒
       for (final ex in exceptions) {
         final od = ex.overrideScheduledDate;
         if (ex.action != 'edit' || od == null) continue;
-        if (od.isBefore(windowStart) || od.isAfter(windowEnd)) continue;
-        final done = await _db.isInstanceCompleted(task.id, od);
-        if (done) continue;
-        ok = await _scheduleDay(task, od, reminders) && ok;
+        final a = AppClock.asApp(od);
+        final day = AppClock.at(a.year, a.month, a.day);
+        if (day.isBefore(windowStart) || day.isAfter(windowEnd)) continue;
+        if (doneSet.contains(_db.completionKey(task.id, day))) continue;
+        ok = await _scheduleDay(task, day, reminders) && ok;
       }
     }
     return ok;
   }
 
-  Future<bool> _isSkipped(Task task, DateTime day) async {
-    final skipped = _db.expandTaskForDate(task, day);
-    // expandTaskForDate 返回空列表说明被跳过或规则不命中
-    return (await skipped).isEmpty;
-  }
-
-  /// 返回 false 表示该天存在未成功排入系统的提醒
   Future<bool> _scheduleDay(
     Task task,
     DateTime day,

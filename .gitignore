@@ -67,3 +67,7 @@ android/.gradle/
 # Flutter 本机生成文件（不入库）
 .metadata
 devtools_options.yaml
+
+# 隐私文件
+opencode.jsonc
+*.md

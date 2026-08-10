@@ -1,0 +1,88 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [".opencode/instructions/zhuoluo.md"],
+  "mcp": {
+    "zotero": {
+      "type": "local",
+      "command": [
+        "zotero-mcp"
+      ],
+      "enabled": false,
+      "environment": {
+        "ZOTERO_LOCAL": "true",
+        "ZOTERO_API_KEY": "7aLOzh83LvXkGVrA6uFI57Ot",
+        "ZOTERO_LIBRARY_ID": "11301180"
+      }
+    },
+    "mcp-obsidian": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "--with",
+        "mcp<2.0.0",
+        "mcp-obsidian"
+      ],
+      "enabled": false,
+      "environment": {
+        "OBSIDIAN_API_KEY": "1a0dc38916e527ab9b2a501f0058d30bf2d101a692e295df71390b252dfc6c41",
+        "OBSIDIAN_HOST": "127.0.0.1",
+        "OBSIDIAN_PORT": "27124"
+      }
+    },
+    "brave-search": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@brave/brave-search-mcp-server"
+      ],
+      "enabled": false,
+      "environment": {
+        "BRAVE_API_KEY": "BSAdz3FQ6lCfKPIJa3lUTN8ddKGVPsB"
+      }
+    },
+    "paper-search-mcp": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "paper-search-mcp"
+      ],
+      "enabled": false,
+      "environment": {}
+    },
+    "tavily-remote-mcp": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "mcp-remote",
+        "https://mcp.tavily.com/mcp/?tavilyApiKey=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"
+      ],
+      "enabled": false,
+      "environment": {}
+    },
+    "excalidraw": {
+      "type": "remote",
+      "url": "https://mcp.excalidraw.com",
+      "enabled": false
+    },
+    "chrome-devtools": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--ignoreDefaultChromeArg=--enable-automation",
+        "--ignoreDefaultChromeArg=--disable-infobars",
+        "--chromeArg=--disable-blink-features=AutomationControlled"
+      ],
+      "enabled": false,
+      "environment": {}
+    }
+  },
+  "permission": {
+    "edit": "ask",
+    "bash": "ask",
+    "read": "allow"
+  }
+}

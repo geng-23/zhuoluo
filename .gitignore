@@ -47,6 +47,10 @@ app.*.map.json
 # 发布签名密钥与凭据（不入库）
 /android/key.properties
 /android/app/*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
 
 # 本机环境路径（SDK/Flutter 位置，不入库）
 local.properties
@@ -56,3 +60,10 @@ docs/
 
 # Kotlin 编译缓存
 android/.kotlin/
+
+# Gradle 构建缓存
+android/.gradle/
+
+# Flutter 本机生成文件（不入库）
+.metadata
+devtools_options.yaml

@@ -300,9 +300,13 @@ class CalendarController extends StateNotifier<CalendarState> {
     await _scheduler.cancelTask(taskId);
     final ps = t.planStart;
     final pe = t.planEnd;
-    final dur = (pe != null && ps != null)
-        ? pe.difference(ps)
-        : const Duration(hours: 1);
+    // 全天任务拖入时间轴转定时：时长按 1 小时（C5-3 先例，task_page 改期
+    // 同口径）——否则沿用 24h（pe-ps=次日 00:00）会变跨天又跳回置顶区
+    final dur = t.isAllDay
+        ? const Duration(hours: 1)
+        : ((pe != null && ps != null)
+            ? pe.difference(ps)
+            : const Duration(hours: 1));
     // C5-1：落点吸附"时长不跨天"约束——拖到 23:00 且时长跨过午夜时
     // 回退起点（此前 1 小时任务拖到 23:00 变跨天、跳进置顶区且无法拖回）
     // 与拖拽预览端（虚影/时间胶囊）统一用 clampStartWithinDay
@@ -350,9 +354,13 @@ class CalendarController extends StateNotifier<CalendarState> {
     await _scheduler.cancelTask(taskId);
     final oldStart = t.planStart;
     final oldEnd = t.planEnd;
-    final dur = (oldEnd != null && oldStart != null)
-        ? oldEnd.difference(oldStart)
-        : const Duration(hours: 1);
+    // 全天系列拖入时间轴转定时：时长按 1 小时（同单次 C5-3 先例），
+    // 避免 24h 变跨天又跳回置顶区
+    final dur = t.isAllDay
+        ? const Duration(hours: 1)
+        : ((oldEnd != null && oldStart != null)
+            ? oldEnd.difference(oldStart)
+            : const Duration(hours: 1));
     // C5-1：系列改期同样应用"时长不跨天"约束（与预览端统一）
     final clamped = DateUtilsEx.clampStartWithinDay(target, dur);
     // ：拖动目标日不命中规则时吸附到最近命中日——与任务创建/详情
@@ -454,6 +462,102 @@ class CalendarController extends StateNotifier<CalendarState> {
       );
     }
     final updated = await _db.getTask(s.taskId);
+    if (updated != null) {
+      await _scheduler.scheduleTask(updated);
+    }
+    _bump();
+    load();
+  }
+
+  // ---------- 全天任务：拖动改期到目标日（保持全天） ----------
+
+  /// 全天任务拖动改期：保持全天移到目标日（planStart=day 00:00、
+  /// planEnd=次日 00:00）。单次任务用；重复系列见 moveAllDaySeriesToDate
+  Future<void> moveAllDayToDate(int taskId, DateTime day) async {
+    try {
+      await _moveAllDayToDateInner(taskId, day);
+    } catch (e) {
+      debugPrint('日历全天改期失败 taskId=$taskId: $e');
+    }
+  }
+
+  Future<void> _moveAllDayToDateInner(int taskId, DateTime day) async {
+    final t = await _db.getTask(taskId);
+    if (t == null) return;
+    SoundService.instance.play(SoundKind.drop);
+    Haptics.light();
+    // 改期前先取消旧任务全部通知
+    await _scheduler.cancelTask(taskId);
+    final start = AppClock.at(day.year, day.month, day.day);
+    await _db.updateTask(
+      taskId,
+      TasksCompanion(
+        planStart: Value(start),
+        planEnd: Value(start.add(const Duration(days: 1))),
+        isAllDay: const Value(true),
+      ),
+    );
+    final updated = await _db.getTask(taskId);
+    if (updated != null) {
+      await _scheduler.scheduleTask(updated);
+    }
+    _bump();
+    load();
+  }
+
+  /// 全天重复任务拖动改期：整个系列平移到目标日（日期吸附最近命中日、
+  /// 清理不再匹配的完成记录与例外，可撤销），保持全天语义
+  Future<void> moveAllDaySeriesToDate(int taskId, DateTime day) async {
+    try {
+      await _moveAllDaySeriesToDateInner(taskId, day);
+    } catch (e) {
+      debugPrint('日历全天系列改期失败 taskId=$taskId: $e');
+    }
+  }
+
+  Future<void> _moveAllDaySeriesToDateInner(
+    int taskId,
+    DateTime day,
+  ) async {
+    final t = await _db.getTask(taskId);
+    if (t == null || t.rrule.isEmpty) return;
+    SoundService.instance.play(SoundKind.drop);
+    Haptics.light();
+    // 系列改期前先取消旧规则全部通知
+    await _scheduler.cancelTask(taskId);
+    final oldStart = t.planStart;
+    final oldEnd = t.planEnd;
+    // 全天系列改期到目标日：日期吸附最近命中日（保留 00:00 全天语义），
+    // 与定时系列吸附口径一致——否则锚点落在非命中日，系列在当前窗口"消失"
+    final anchorDay = AppClock.at(day.year, day.month, day.day);
+    final hit = RruleService.instance.nearestHitOnOrNear(anchorDay, t.rrule);
+    final start = hit == null
+        ? anchorDay
+        : AppClock.at(hit.year, hit.month, hit.day);
+    await _db.updateTask(
+      taskId,
+      TasksCompanion(
+        planStart: Value(start),
+        planEnd: Value(start.add(const Duration(days: 1))),
+        isAllDay: const Value(true),
+      ),
+    );
+    // 与定时系列同收口：清理不再匹配新系列的完成记录与例外（可撤销）
+    final removed = await _db.applyRecurringChange(
+      taskId,
+      oldRrule: t.rrule,
+      newRrule: t.rrule,
+      newStart: start,
+    );
+    _seriesUndo = _SeriesReschedule(
+      taskId: taskId,
+      oldStart: oldStart,
+      oldEnd: oldEnd,
+      oldIsAllDay: t.isAllDay,
+      removedCompletions: removed.removedCompletions,
+      removedExceptions: removed.removedExceptions,
+    );
+    final updated = await _db.getTask(taskId);
     if (updated != null) {
       await _scheduler.scheduleTask(updated);
     }

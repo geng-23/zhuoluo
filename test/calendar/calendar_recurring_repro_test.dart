@@ -392,12 +392,12 @@ void main() {
     ));
 
     // 系列拖动改期到 8/12 09:00（周三，非规则命中日→吸附回最近
-    // 周一 8/10；全天任务时长 1 天，回退：09:00+1天 > 23:00 → 8/10 23:00）
+    // 周一 8/10；全天转定时时长按 1 小时，09:00 不跨天无需回退）
     await notifier.moveTaskToDateTimeSeries(id, DateTime(2026, 8, 12, 9, 0));
     var t = (await db.getTask(id))!;
     expect(t.isAllDay, isFalse, reason: '拖动改期后为时段任务');
-    expect(t.planStart, DateTime(2026, 8, 10, 23, 0),
-        reason: '非命中日拖动吸附回最近周一 + 时长不跨天回退到 23:00 前');
+    expect(t.planStart, DateTime(2026, 8, 10, 9, 0),
+        reason: '非命中日拖动吸附回最近周一 8/10，保留时分 09:00');
 
     // 撤销 → 恢复原计划时间与全天状态
     await notifier.undoMoveTaskSeries();
@@ -460,6 +460,74 @@ void main() {
         reason: '撤销后例外内容完整恢复');
 
     // drain：等待 dataVersion 监听触发的异步刷新完成（避免 db 关闭后仍在用）
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+  });
+
+  test('全天任务拖动改期到目标日：保持全天（00:00-次日 00:00）', () async {
+    SoundService.enabled = false;
+    final container = ProviderContainer(
+      overrides: [dbProvider.overrideWithValue(db)],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(calendarControllerProvider.notifier);
+    await db.ensureDefaultList();
+    final list = await db.getDefaultList();
+    final id = await db.insertTask(TasksCompanion.insert(
+      listId: list.id,
+      title: '全天搬运',
+      isAllDay: const Value(true),
+      planStart: Value(DateTime(2026, 8, 10)),
+      planEnd: Value(DateTime(2026, 8, 11)),
+      createdAt: now,
+    ));
+
+    await notifier.moveAllDayToDate(id, DateTime(2026, 8, 13));
+    final t = (await db.getTask(id))!;
+    expect(t.isAllDay, isTrue, reason: '置顶区落点保持全天');
+    expect(t.planStart, DateTime(2026, 8, 13),
+        reason: '改期到目标日 00:00');
+    expect(t.planEnd, DateTime(2026, 8, 14),
+        reason: '全天结束为次日 00:00');
+
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+  });
+
+  test('全天系列拖动改期：吸附最近命中日、保持全天、可撤销', () async {
+    SoundService.enabled = false;
+    final container = ProviderContainer(
+      overrides: [dbProvider.overrideWithValue(db)],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(calendarControllerProvider.notifier);
+    await db.ensureDefaultList();
+    final list = await db.getDefaultList();
+    // 每周一全天系列，锚点 8/10（周一）
+    final id = await db.insertTask(TasksCompanion.insert(
+      listId: list.id,
+      title: '全天周会',
+      isAllDay: const Value(true),
+      planStart: Value(DateTime(2026, 8, 10)),
+      planEnd: Value(DateTime(2026, 8, 11)),
+      rrule: const Value('FREQ=WEEKLY;BYDAY=MO'),
+      createdAt: now,
+    ));
+
+    // 拖到 8/16（周日，非命中日）→ 吸附回最近周一 8/17
+    await notifier.moveAllDaySeriesToDate(id, DateTime(2026, 8, 16));
+    var t = (await db.getTask(id))!;
+    expect(t.isAllDay, isTrue, reason: '全天系列拖动保持全天');
+    expect(t.planStart, DateTime(2026, 8, 17),
+        reason: '非命中日吸附到最近周一 8/17，保留 00:00');
+    expect(t.planEnd, DateTime(2026, 8, 18),
+        reason: '全天结束为次日 00:00');
+
+    // 撤销 → 恢复原锚点与全天状态
+    await notifier.undoMoveTaskSeries();
+    t = (await db.getTask(id))!;
+    expect(t.planStart, DateTime(2026, 8, 10),
+        reason: '撤销恢复原锚点');
+    expect(t.isAllDay, isTrue, reason: '撤销恢复全天状态');
+
     await Future<void>.delayed(const Duration(milliseconds: 200));
   });
 }

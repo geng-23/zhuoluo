@@ -446,7 +446,8 @@ class _WeekViewState extends ConsumerState<WeekView> {
           content: Text(
             '「${task.title}」是重复任务。\n'
             '将把整个系列改为从 ${DateUtilsEx.timeCn(start)} 开始'
-            '（时长保持不变），旧日期上的完成记录将被清理。\n\n'
+            '${task.isAllDay ? '（转为 1 小时时段任务）' : '（时长保持不变）'}'
+            '，旧日期上的完成记录将被清理。\n\n'
             '只想改这一天，请用「跳过本次 / 改期」菜单。',
           ),
           actions: [
@@ -922,7 +923,8 @@ class _DayViewState extends ConsumerState<DayView> {
           content: Text(
             '「${task.title}」是重复任务。\n'
             '将把整个系列改为从 ${DateUtilsEx.timeCn(start)} 开始'
-            '（时长保持不变），旧日期上的完成记录将被清理。\n\n'
+            '${task.isAllDay ? '（转为 1 小时时段任务）' : '（时长保持不变）'}'
+            '，旧日期上的完成记录将被清理。\n\n'
             '只想改这一天，请用「跳过本次 / 改期」菜单。',
           ),
           actions: [

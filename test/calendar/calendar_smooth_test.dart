@@ -1174,4 +1174,128 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
+
+  group('全天任务长按拖动改期（置顶区改日 / 时间轴转定时）', () {
+    Future<TestGesture> longPressOn(WidgetTester tester, String title) async {
+      final block = find.text(title);
+      expect(block, findsWidgets, reason: '全天任务块应渲染在置顶区');
+      final gesture = await tester.startGesture(tester.getCenter(block.first));
+      // 600ms > 长按阈值
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      return gesture;
+    }
+
+    Future<int> insertAllDay(DateTime day, {String rrule = '', String title = ''}) async {
+      await db.ensureDefaultList();
+      final list = await db.getDefaultList();
+      return db.insertTask(TasksCompanion.insert(
+        listId: list.id,
+        title: title,
+        isAllDay: const Value(true),
+        planStart: Value(day),
+        planEnd: Value(day.add(const Duration(days: 1))),
+        rrule: Value(rrule),
+        createdAt: now,
+      ));
+    }
+
+    Future<void> pumpCalendar(WidgetTester tester) async {
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('全天任务长按拖到另一天置顶区：保持全天改期到该日', (tester) async {
+      final monday = DateUtilsEx.mondayOf(now);
+      final taskDay = monday.add(const Duration(days: 3)); // 周中，两侧均有邻列
+      final taskId = await insertAllDay(taskDay, title: '全天A');
+      await pumpCalendar(tester);
+
+      final blockCenter = tester.getCenter(find.text('全天A').first);
+      final gesture = await tester.startGesture(blockCenter);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      // 水平拖到相邻日（保持 y 在置顶区内，不触发边缘翻周）
+      await gesture.moveTo(blockCenter + Offset((800 - 44) / 7, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      final t = (await db.getTask(taskId))!;
+      expect(t.isAllDay, isTrue, reason: '置顶区落点保持全天');
+      expect(t.planStart, taskDay.add(const Duration(days: 1)),
+          reason: '全天任务改期到相邻日');
+      expect(t.planEnd, taskDay.add(const Duration(days: 2)),
+          reason: '全天结束为改期次日 00:00');
+    });
+
+    testWidgets('全天重复任务长按拖到另一天：弹确认后保持全天改期到该日', (tester) async {
+      final monday = DateUtilsEx.mondayOf(now);
+      final taskDay = monday.add(const Duration(days: 3));
+      final taskId = await insertAllDay(
+        taskDay,
+        rrule: 'FREQ=DAILY',
+        title: '全天系列',
+      );
+      await pumpCalendar(tester);
+
+      final blockCenter = tester.getCenter(find.text('全天系列').first);
+      final gesture = await tester.startGesture(blockCenter);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await gesture.moveTo(blockCenter + Offset((800 - 44) / 7, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      // 系列确认弹窗
+      expect(find.text('更改整个系列？'), findsOneWidget,
+          reason: '重复任务拖动应弹系列确认');
+      await tester.tap(find.text('更改整个系列'));
+      await tester.pumpAndSettle();
+
+      final t = (await db.getTask(taskId))!;
+      expect(t.isAllDay, isTrue, reason: '全天系列置顶区落点保持全天');
+      expect(t.planStart, taskDay.add(const Duration(days: 1)),
+          reason: '全天系列改期到相邻日');
+    });
+
+    testWidgets('全天任务长按拖进时间轴：转为 1 小时时段任务', (tester) async {
+      final monday = DateUtilsEx.mondayOf(now);
+      final taskDay = monday.add(const Duration(days: 3));
+      final taskId = await insertAllDay(taskDay, title: '全天B');
+      await pumpCalendar(tester);
+
+      final blockCenter = tester.getCenter(find.text('全天B').first);
+      final gesture = await tester.startGesture(blockCenter);
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      // 垂直拖进时间轴（y=400 在时间轴范围内），x 保持原列
+      await gesture.moveTo(Offset(blockCenter.dx, 400));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      final t = (await db.getTask(taskId))!;
+      expect(t.isAllDay, isFalse, reason: '拖进时间轴转定时');
+      final dur = t.planEnd!.difference(t.planStart!);
+      expect(dur, const Duration(hours: 1),
+          reason: '全天转定时时长按 1 小时（C5-3 先例，不跨天）');
+      expect(
+        DateUtilsEx.sameDay(t.planStart!, taskDay),
+        isTrue,
+        reason: '转定时后仍落在原日期',
+      );
+    });
+  });
 }

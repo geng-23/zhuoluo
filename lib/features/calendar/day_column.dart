@@ -483,14 +483,16 @@ class DayColumnState extends ConsumerState<DayColumn> {
         }
         if (dragged != null && dragged.task.rrule.isNotEmpty) {
           if (!mounted) return;
+          final d = dragged;
           final ok = await showDialog<bool>(
             context: context,
             builder: (c) => AlertDialog(
               title: const Text('更改整个系列？'),
               content: Text(
-                '「${dragged!.task.title}」是重复任务。\n'
+                '「${d.task.title}」是重复任务。\n'
                 '将把整个系列改为从 ${DateUtilsEx.timeCn(target)} 开始'
-                '（时长保持不变），旧日期上的完成记录将被清理。\n\n'
+                '${d.task.isAllDay ? '（转为 1 小时时段任务）' : '（时长保持不变）'}'
+                '，旧日期上的完成记录将被清理。\n\n'
                 '只想改这一天，请用「跳过本次 / 改期」菜单。',
               ),
               actions: [
@@ -1431,8 +1433,8 @@ class TaskBlock extends ConsumerWidget {
         colorFromHex(item.listColor);
     final color = done ? Colors.grey : baseColor;
     final block = _blockBody(context, color, done, notifier, ref);
-    // 全天任务：禁止拖入时间轴（保持全天语义），仅保留点击操作
-    if (allDay) return block;
+    // 全天任务同样可长按拖动：拖到置顶区另一天=改期保持全天（AllDayBar
+    // DragTarget 处理），拖进时间轴=转 1 小时时段任务（本列 onAccept 处理）
     // 共享状态驱动的"拖动中"半透明：跨页翻走再返回原页时 Draggable
     // 已死（childWhenDragging 失效），原任务块据此保持与同页拖动一致的
     // 不明显状态；同页拖动时 childWhenDragging 已生效，双源一致

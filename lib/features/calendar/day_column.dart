@@ -456,6 +456,13 @@ class DayColumnState extends ConsumerState<DayColumn> {
       onAcceptWithDetails: (details) async {
         // 正常落点已处理：全局 route 的 up 兜底据此跳过（避免重复改期）
         widget.dragDropped?.value = true;
+        // 置顶区任务（全天/跨天定时）：时间轴落点不生效——只能拖到
+        // 另一天槽（AllDayBar DragTarget 处理），拖进时间轴保持原位。
+        // 用拖动开始时报的类型判定（跨页翻走后当前视图 items 不含被拖任务）
+        if (widget.dragGhostInfo?.value?.isTopArea == true) {
+          _clearDragState();
+          return;
+        }
         final allItems = ref.read(calendarControllerProvider).items;
         CalendarItem? dragged;
         for (final it in allItems) {
@@ -463,13 +470,6 @@ class DayColumnState extends ConsumerState<DayColumn> {
             dragged = it;
             break;
           }
-        }
-        // 置顶区任务（全天/跨天定时）：时间轴落点不生效——只能拖到
-        // 另一天槽（AllDayBar DragTarget 处理），拖进时间轴保持原位
-        if (dragged != null &&
-            (dragged.task.isAllDay || _taskIsCrossDay(dragged.task))) {
-          _clearDragState();
-          return;
         }
         // 落点局部坐标 → 吸附 10 分钟 → 改期（含时分，支持跨天）。
         // 注意：details.offset 是相对拖拽锚点的偏移（SDK 内部

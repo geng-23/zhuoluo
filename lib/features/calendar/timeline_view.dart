@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/task_ext.dart';
@@ -429,26 +430,20 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
             Expanded(
               child: Column(
                 children: [
-                  // 全天区固定在顶部（不随滚动，保证左右时间栏与网格线严格对齐）
-                  if (days.any((d) => _allDayItems(d).isNotEmpty)) ...[
-                    AllDayBar(
-                      days: days,
-                      byDay: widget.byDay,
-                      axisWidth: axisWidth,
-                      dragGlobalPos: widget.dragGlobalPos,
-                      dragTaskId: widget.dragTaskId,
-                      dragActiveDay: widget.dragActiveDay,
-                      dragGhostInfo: widget.dragGhostInfo,
-                      dragDropped: widget.dragDropped,
-                      onDragStartTracking: widget.onDragStartTracking,
-                    ),
-                    Divider(
-                      height: 1,
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.outlineVariant.withValues(alpha: 0.5),
-                    ),
-                  ],
+                  // 全天区固定在顶部（不随滚动，保证左右时间栏与网格线严格对齐）。
+                  // 常驻组件树：空页在"置顶任务拖动中"也渲染最小高度落点条，
+                  // 否则翻到无全天/跨天任务的周/日时无落点目标、拖动失效
+                  AllDayBar(
+                    days: days,
+                    byDay: widget.byDay,
+                    axisWidth: axisWidth,
+                    dragGlobalPos: widget.dragGlobalPos,
+                    dragTaskId: widget.dragTaskId,
+                    dragActiveDay: widget.dragActiveDay,
+                    dragGhostInfo: widget.dragGhostInfo,
+                    dragDropped: widget.dragDropped,
+                    onDragStartTracking: widget.onDragStartTracking,
+                  ),
                   Expanded(
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -616,11 +611,6 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
   /// 与默认 6 取小——只扩展不收缩（多数情况保持 06:00 起点）。
   int _effectiveStartHour(List<DateTime> days) =>
       effectiveStartHourFor(byDay: widget.byDay, days: days);
-
-  List<CalendarItem> _allDayItems(DateTime day) =>
-      (widget.byDay[dayKey(day)] ?? const <CalendarItem>[])
-          .where(_isTopArea)
-          .toList();
 
   List<CalendarItem> _timedItems(DateTime day) =>
       (widget.byDay[dayKey(day)] ?? const <CalendarItem>[])
@@ -805,6 +795,13 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
 
   static final ValueNotifier<Offset?> _noopPos = ValueNotifier<Offset?>(null);
 
+  static final ValueNotifier<DragGhostInfo?> _noopGhost =
+      ValueNotifier<DragGhostInfo?>(null);
+
+  /// 空目标页（无置顶任务）拖动中的落点条最小高度——保证 DragTarget
+  /// 有可命中的尺寸（高度 0 无法接收拖放）
+  static const double _dropStripHeight = 32;
+
   /// 按下指针 id（onPointerDown 捕获 → 拖动开始时注册全局 route）
   int? _pointer;
 
@@ -820,6 +817,19 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
     return null;
   }
 
+  /// 任务查询（跨页拖拽用）：当前视图 items 只含当前范围，翻页后被拖
+  /// 任务不在其中——items 命中优先，未命中回退 DB 权威查询
+  Future<Task?> _taskByIdAsync(int id) async {
+    final inMemory = _taskById(id);
+    if (inMemory != null) return inMemory;
+    final db = ref.read(dbProvider);
+    try {
+      return await db.getTask(id);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 是否跨天定时任务（起止不同日，出现在置顶区，拖动整体平移天数）
   bool _taskIsCrossDay(Task t) {
     final ps = t.planStart;
@@ -828,12 +838,14 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
     return !DateUtilsEx.sameDay(ps, pe);
   }
 
-  /// 拖动指针全局 x → 置顶区列索引（被拖任务为全天/跨天时才显示高亮）
+  /// 拖动指针全局 x → 置顶区列索引（被拖任务为全天/跨天时才显示高亮）。
+  /// 翻页动画中本列局部→全局换算可能为 NaN（页面滑动瞬态），跳过高亮
   int? _colFor(Offset? gpos) {
     if (gpos == null) return null;
     final box = _contentKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return null;
     final left = box.localToGlobal(Offset.zero).dx;
+    if (!left.isFinite || !gpos.dx.isFinite) return null;
     final columnWidth = (widget.axisWidth - 44) / widget.days.length;
     return ((gpos.dx - left) / columnWidth)
         .floor()
@@ -858,7 +870,8 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
     widget.dragDropped?.value = true;
     final gpos = widget.dragGlobalPos?.value;
     final col = _colFor(gpos);
-    final t = _taskById(taskId);
+    final t = await _taskByIdAsync(taskId);
+    if (!mounted) return;
     if (gpos == null || col == null || t == null) {
       _clearDragState();
       return;
@@ -928,126 +941,169 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
     final contentWidth = widget.axisWidth - 44;
     final columnWidth = contentWidth / widget.days.length;
     final scheme = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        const SizedBox(width: 44),
-        SizedBox(
-          key: _contentKey,
-          width: contentWidth,
-          child: DragTarget<int>(
-            // 仅全天任务可落在置顶区（跨天定时任务拖回时间轴，语义不变）
-            onWillAcceptWithDetails: (d) {
-              final t = _taskById(d.data);
-              return t != null && (t.isAllDay || _taskIsCrossDay(t));
-            },
-            onAcceptWithDetails: (d) => _dropOnBar(d.data),
-            builder: (context, _, _) {
-              return ValueListenableBuilder<Offset?>(
-                valueListenable: widget.dragGlobalPos ?? _noopPos,
-                builder: (context, gpos, _) {
-                  final draggingId = widget.dragTaskId?.value;
-                  final dragged =
-                      draggingId == null ? null : _taskById(draggingId);
-                  final hl = (dragged != null &&
-                          (dragged.isAllDay || _taskIsCrossDay(dragged)))
-                      ? _colFor(gpos)
-                      : null;
-                  return Stack(
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (var i = 0; i < widget.days.length; i++)
-                            SizedBox(
-                              width: columnWidth,
-                              child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.stretch,
-                                children: [
-                                  for (final item
-                                      in _allDayItems(widget.days[i]))
-                                    Padding(
-                                      padding:
-                                          const EdgeInsets.only(bottom: 2),
-                                      // C5-1/C3-4：仅真正的全天任务
-                                      // allDay=true；跨天定时任务显示起止
-                                      // 时刻（拖动仅置顶区改日整体平移）
-                                      child: TaskBlock(
-                                        item: item,
-                                        allDay: item.task.isAllDay,
-                                        showTime: !item.task.isAllDay,
-                                        // 按下指针上报（注册全局 route 用）
-                                        onPointerDown: (p) => _pointer = p,
-                                        onDragStartedTask: (id) {
-                                          widget.dragTaskId?.value = id;
-                                          // 虚影信息：置顶区任务拖进时间轴
-                                          // 无效（仅置顶区可落点），不上报
-                                          // 转换时长，只标记类型供虚影隐藏
-                                          final it = _taskById(id);
-                                          if (it != null) {
-                                            widget.dragGhostInfo?.value =
-                                                DragGhostInfo(
-                                                  title: it.title,
-                                                  durationMinutes:
-                                                      it.durationMinutes,
-                                                  color: it.color,
-                                                  listColor: item.listColor,
-                                                  isAllDay: it.isAllDay,
-                                                  isCrossDay:
-                                                      _taskIsCrossDay(it),
-                                                );
-                                          }
-                                          final p = _pointer;
-                                          if (p != null) {
-                                            widget.onDragStartTracking?.call(
-                                              id,
-                                              p,
-                                            );
-                                          }
-                                        },
-                                        onDragPosition: (g) => widget
-                                            .dragGlobalPos
-                                            ?.value = g,
-                                        onDragEnd: () => _clearDragState(),
-                                        // 拖拽取消/列 evict：共享状态由
-                                        // 全局 route 统一清理
-                                        onDragCanceled: () {},
+    final hasItems = widget.days.any((d) => _allDayItems(d).isNotEmpty);
+    return ValueListenableBuilder<DragGhostInfo?>(
+      valueListenable: widget.dragGhostInfo ?? _noopGhost,
+      builder: (context, ghost, _) {
+        // 置顶区任务（全天/跨天）拖动中：即使本页无置顶任务也渲染落点条——
+        // 否则翻到无任务的周/日时全天拖动没有可命中的 DragTarget
+        final draggingTopArea = ghost?.isTopArea == true;
+        if (!hasItems && !draggingTopArea) return const SizedBox.shrink();
+        return Column(
+          children: [
+            Row(
+              children: [
+                const SizedBox(width: 44),
+                SizedBox(
+                  key: _contentKey,
+                  width: contentWidth,
+                  child: DragTarget<int>(
+                    // 仅全天/跨天定时任务可落在置顶区
+                    onWillAcceptWithDetails: (d) {
+                      // 拖动开始瞬间 onWillAccept 先于 onDragStartedTask 触发
+                      //（此时 dragGhostInfo 尚未写入）——优先按当前视图 items
+                      // 查类型；跨页翻走后 items 不含被拖任务，再用拖动开始
+                      // 时报的 dragGhostInfo 兜底
+                      final t = _taskById(d.data);
+                      if (t != null) {
+                        return t.isAllDay || _taskIsCrossDay(t);
+                      }
+                      return widget.dragGhostInfo?.value?.isTopArea == true;
+                    },
+                    onAcceptWithDetails: (d) => _dropOnBar(d.data),
+                    builder: (context, _, _) {
+                      return ValueListenableBuilder<Offset?>(
+                        valueListenable: widget.dragGlobalPos ?? _noopPos,
+                        builder: (context, gpos, _) {
+                          final hl = draggingTopArea ? _colFor(gpos) : null;
+                          // 空目标页拖动中：给落点条最小高度，保证可命中
+                          return Container(
+                            constraints: BoxConstraints(
+                              minHeight: draggingTopArea && !hasItems
+                                  ? _dropStripHeight
+                                  : 0,
+                            ),
+                            child: Stack(
+                              children: [
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    for (var i = 0;
+                                        i < widget.days.length;
+                                        i++)
+                                      SizedBox(
+                                        width: columnWidth,
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          children: [
+                                            for (final item
+                                                in _allDayItems(widget.days[i]))
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 2,
+                                                ),
+                                                // C5-1/C3-4：仅真正的全天
+                                                // 任务 allDay=true；跨天定时
+                                                // 任务显示起止时刻（拖动仅
+                                                // 置顶区改日整体平移）
+                                                child: TaskBlock(
+                                                  item: item,
+                                                  allDay: item.task.isAllDay,
+                                                  showTime:
+                                                      !item.task.isAllDay,
+                                                  // 按下指针上报（注册全局
+                                                  // route 用）
+                                                  onPointerDown: (p) =>
+                                                      _pointer = p,
+                                                  onDragStartedTask: (id) {
+                                                    widget.dragTaskId?.value =
+                                                        id;
+                                                    // 虚影信息：置顶区任务
+                                                    // 拖进时间轴无效，只标记
+                                                    // 类型供虚影隐藏
+                                                    final it = _taskById(id);
+                                                    if (it != null) {
+                                                      widget.dragGhostInfo
+                                                          ?.value =
+                                                          DragGhostInfo(
+                                                        title: it.title,
+                                                        durationMinutes: it
+                                                            .durationMinutes,
+                                                        color: it.color,
+                                                        listColor: item
+                                                            .listColor,
+                                                        isAllDay:
+                                                            it.isAllDay,
+                                                        isCrossDay:
+                                                            _taskIsCrossDay(
+                                                              it,
+                                                            ),
+                                                      );
+                                                    }
+                                                    final p = _pointer;
+                                                    if (p != null) {
+                                                      widget
+                                                          .onDragStartTracking
+                                                          ?.call(id, p);
+                                                    }
+                                                  },
+                                                  onDragPosition: (g) =>
+                                                      widget.dragGlobalPos
+                                                          ?.value = g,
+                                                  onDragEnd: () =>
+                                                      _clearDragState(),
+                                                  // 拖拽取消/列 evict：共享
+                                                  // 状态由全局 route 统一清理
+                                                  onDragCanceled: () {},
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                // 置顶区任务（全天/跨天）拖动中：高亮目标
+                                // 日槽位（横向改日/整体平移提示）
+                                if (hl != null)
+                                  Positioned(
+                                    left: hl * columnWidth,
+                                    width: columnWidth,
+                                    top: 0,
+                                    bottom: 0,
+                                    child: IgnorePointer(
+                                      child: DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: scheme.primary
+                                              .withValues(alpha: 0.12),
+                                          borderRadius:
+                                              BorderRadius.circular(4),
+                                          border: Border.all(
+                                            color: scheme.primary,
+                                            width: 2,
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                ],
-                              ),
+                                  ),
+                              ],
                             ),
-                        ],
-                      ),
-                      // 置顶区任务（全天/跨天）拖动中：高亮目标日槽位
-                      //（横向改日/整体平移提示）
-                      if (hl != null)
-                        Positioned(
-                          left: hl * columnWidth,
-                          width: columnWidth,
-                          top: 0,
-                          bottom: 0,
-                          child: IgnorePointer(
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: scheme.primary.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                  color: scheme.primary,
-                                  width: 2,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  );
-                },
-              );
-            },
-          ),
-        ),
-      ],
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+            if (hasItems || draggingTopArea)
+              Divider(
+                height: 1,
+                color: scheme.outlineVariant.withValues(alpha: 0.5),
+              ),
+          ],
+        );
+      },
     );
   }
 }

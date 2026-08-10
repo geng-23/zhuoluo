@@ -1362,5 +1362,46 @@ void main() {
         reason: '跨天任务计划结束不变',
       );
     });
+
+    testWidgets('全天任务拖到右缘翻到下一周：目标周无置顶任务也能落点', (tester) async {
+      final monday = DateUtilsEx.mondayOf(now);
+      final taskDay = monday.add(const Duration(days: 2)); // 周三
+      final taskId = await insertTopArea(
+        taskDay,
+        taskDay.add(const Duration(days: 1)),
+        isAllDay: true,
+        title: '跨周全天',
+      );
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final blockCenter = tester.getCenter(find.text('跨周全天').first);
+      final gesture = await longPressOn(tester, '跨周全天');
+      // 拖到右缘（85% 区外）停留 300ms → 翻到下一周
+      await gesture.moveTo(Offset(760, blockCenter.dy));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      // 等翻页动画完成（按住期间不 pumpAndSettle——测试环境会派发
+      // PointerCancel 中断拖拽），再移到目标列
+      await tester.pump(const Duration(milliseconds: 300));
+      await gesture.moveTo(Offset(400, blockCenter.dy));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      final t = (await db.getTask(taskId))!;
+      // x=400 → 第 4 列（周四），落点为下一周的周四
+      final nextThu = monday.add(const Duration(days: 7 + 3));
+      expect(t.planStart, nextThu,
+          reason: '翻到无置顶任务的下一周后，全天任务应能落到目标列日');
+      expect(t.isAllDay, isTrue, reason: '跨周落点保持全天');
+    });
   });
 }

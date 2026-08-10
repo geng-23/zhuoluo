@@ -479,7 +479,6 @@ class TasksController extends StateNotifier<TasksState> {
         await _db.updateTaskHasReminder(id, true);
       }
     }
-    await _reloadTasks();
     final t = await _db.getTask(id);
     if (t != null && (t.planStart != null || t.rrule.isNotEmpty)) {
       await _scheduler.scheduleTask(t);
@@ -565,7 +564,6 @@ class TasksController extends StateNotifier<TasksState> {
     // 最后按新任务重排（避免改期/改规则后旧日期的提醒残留）
     await _scheduler.cancelTask(id);
     await _db.updateTask(id, changes);
-    await _reloadTasks();
     final t = await _db.getTask(id);
     var ok = true;
     if (t != null) {
@@ -601,7 +599,6 @@ class TasksController extends StateNotifier<TasksState> {
       if (fresh != null) {
         await _scheduler.scheduleTask(fresh);
       }
-      await _reloadTasks();
       // C2：子任务全完成时自动完成父任务（含重复子任务的今日实例对齐）
       final parentId = t.parentId;
       if (parentId != null) {
@@ -615,14 +612,12 @@ class TasksController extends StateNotifier<TasksState> {
           // 已完成仍弹提醒）
           await _scheduler.scheduleTask(parent);
         }
-        await _reloadTasks();
       }
       _bump();
       return inst;
     }
     await _db.completeTask(id);
     await _scheduler.cancelTask(id);
-    await _reloadTasks();
     _bump();
     return null;
   }
@@ -652,7 +647,6 @@ class TasksController extends StateNotifier<TasksState> {
       final inst = _currentInstanceDate(t);
       await _db.uncompleteInstance(id, inst);
     }
-    await _reloadTasks();
     // 反向联动：子任务恢复未完成时，父任务同步恢复未完成（含重复子任务）
     final parentId = t.parentId;
     if (parentId != null) {
@@ -664,7 +658,6 @@ class TasksController extends StateNotifier<TasksState> {
         // 父任务仍完成（其他子任务未完成）时 scheduleTask 内部会取消提醒
         await _scheduler.scheduleTask(parent);
       }
-      await _reloadTasks();
     }
     // 重新取任务：旧快照 completedAt 非空会让重排直接跳过
     final fresh = await _db.getTask(id);
@@ -815,7 +808,6 @@ class TasksController extends StateNotifier<TasksState> {
     });
     // 事务成功后才消费快照（失败保留，等待重试）
     _deletedCache.remove(id);
-    await _reloadTasks();
     // 整棵树恢复后重排全部提醒（含子任务）
     for (final tid in [snap.task.id, ...snap.subTasks.map((s) => s.id)]) {
       final restored = await _db.getTask(tid);
@@ -868,7 +860,6 @@ class TasksController extends StateNotifier<TasksState> {
     if (acted.isEmpty) return acted;
     SoundService.instance.play(SoundKind.complete);
     Haptics.medium();
-    await _reloadTasks();
     return acted;
   }
 
@@ -880,7 +871,6 @@ class TasksController extends StateNotifier<TasksState> {
     }
     SoundService.instance.play(SoundKind.reopen);
     Haptics.light();
-    await _reloadTasks();
   }
 
   /// 批量删除（逐条存撤销快照，支持批量撤销）
@@ -888,7 +878,6 @@ class TasksController extends StateNotifier<TasksState> {
     for (final id in ids) {
       await deleteTaskWithUndo(id);
     }
-    await _reloadTasks();
   }
 
   /// 批量撤销删除（恢复快照中的任务/子任务/提醒/完成记录）
@@ -919,12 +908,10 @@ class TasksController extends StateNotifier<TasksState> {
     }
     SoundService.instance.play(SoundKind.reopen);
     Haptics.light();
-    await _reloadTasks();
   }
 
   Future<void> batchMove(List<int> ids, int targetListId) async {
     await _db.batchMove(ids, targetListId);
-    await _reloadTasks();
     _bump();
   }
 
@@ -935,7 +922,6 @@ class TasksController extends StateNotifier<TasksState> {
     if (!ok) return;
     SoundService.instance.play(SoundKind.skip);
     Haptics.light();
-    await _reloadTasks();
     _bump();
   }
 
@@ -945,7 +931,6 @@ class TasksController extends StateNotifier<TasksState> {
     if (!ok) return;
     SoundService.instance.play(SoundKind.reopen);
     Haptics.light();
-    await _reloadTasks();
     _bump();
   }
 
@@ -971,7 +956,6 @@ class TasksController extends StateNotifier<TasksState> {
         await _db.updateException(ex.id, toDate);
         // 更新既有例外同样迁移完成记录
         await _migrateCompletionOnReschedule(id, fromDate, toDate);
-        await _reloadTasks();
         // 更新既有例外同样需重排：新日期（及原日期取消）的提醒
         final fresh = await _db.getTask(id);
         if (fresh != null) {
@@ -992,7 +976,6 @@ class TasksController extends StateNotifier<TasksState> {
     // 实例已完成再"改期本次"→ 完成记录跟随到新日期
     //（此前留在原日期成为孤儿，统计/已完成视图出现永不匹配的脏数据）
     await _migrateCompletionOnReschedule(id, fromDate, toDate);
-    await _reloadTasks();
     await _scheduler.scheduleTask(t);
     _bump();
     return exId;
@@ -1035,7 +1018,6 @@ class TasksController extends StateNotifier<TasksState> {
         }
       }
     });
-    await _reloadTasks();
     final t = await _db.getTask(id);
     if (t != null) {
       await _scheduler.scheduleTask(t);
@@ -1082,14 +1064,12 @@ class TasksController extends StateNotifier<TasksState> {
       );
     }
     await _reloadLists();
-    await _reloadTasks();
     _bump();
   }
 
   /// C8-7：清空全部已完成任务（含重复任务实例完成记录），确认后调用
   Future<void> clearCompleted() async {
     await _db.clearCompletedTasks();
-    await _reloadTasks();
     _bump();
   }
 }

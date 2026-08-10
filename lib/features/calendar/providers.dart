@@ -324,7 +324,6 @@ class CalendarController extends StateNotifier<CalendarState> {
       await _scheduler.scheduleTask(updated);
     }
     _bump();
-    load();
   }
 
   // ---------- 重复任务：整个系列改期（拖动） ----------
@@ -408,7 +407,6 @@ class CalendarController extends StateNotifier<CalendarState> {
       await _scheduler.scheduleTask(updated);
     }
     _bump();
-    load();
   }
 
   /// 撤销系列改期（恢复原计划时间 + 被清理的完成记录与例外）
@@ -466,7 +464,6 @@ class CalendarController extends StateNotifier<CalendarState> {
       await _scheduler.scheduleTask(updated);
     }
     _bump();
-    load();
   }
 
   // ---------- 全天任务：拖动改期到目标日（保持全天） ----------
@@ -502,7 +499,6 @@ class CalendarController extends StateNotifier<CalendarState> {
       await _scheduler.scheduleTask(updated);
     }
     _bump();
-    load();
   }
 
   /// 全天重复任务拖动改期：整个系列平移到目标日（日期吸附最近命中日、
@@ -562,7 +558,6 @@ class CalendarController extends StateNotifier<CalendarState> {
       await _scheduler.scheduleTask(updated);
     }
     _bump();
-    load();
   }
 
   // ---------- 跨天定时任务：拖动改期整体平移天数（保持起止时分与时长） ----------
@@ -610,7 +605,6 @@ class CalendarController extends StateNotifier<CalendarState> {
       await _scheduler.scheduleTask(updated);
     }
     _bump();
-    load();
   }
 
   /// 跨天重复任务拖动改期：整个系列整体平移到目标日（日期吸附最近命中日、
@@ -682,7 +676,6 @@ class CalendarController extends StateNotifier<CalendarState> {
       await _scheduler.scheduleTask(updated);
     }
     _bump();
-    load();
   }
 
   /// 任务完成/恢复（日历直接勾选）
@@ -726,7 +719,6 @@ class CalendarController extends StateNotifier<CalendarState> {
       Haptics.medium();
     }
     _bump();
-    load();
   }
 
   /// 跳过重复实例
@@ -739,7 +731,6 @@ class CalendarController extends StateNotifier<CalendarState> {
       SoundService.instance.play(SoundKind.skip);
       Haptics.light();
       _bump();
-      load();
     } catch (e) {
       debugPrint('跳过实例失败 taskId=$taskId: $e');
     }
@@ -753,7 +744,6 @@ class CalendarController extends StateNotifier<CalendarState> {
       SoundService.instance.play(SoundKind.reopen);
       Haptics.light();
       _bump();
-      load();
     } catch (e) {
       debugPrint('撤销跳过失败 taskId=$taskId: $e');
     }

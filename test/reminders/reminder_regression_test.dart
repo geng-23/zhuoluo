@@ -29,6 +29,7 @@ void main() {
 
   tearDown(() async {
     NotificationService.instance.debugOverrideScheduler = null;
+    NotificationService.instance.debugOverridePermission = null;
     await db.close();
   });
 
@@ -326,5 +327,22 @@ void main() {
         reason: '<24h 门控应短路，不得二次全量重排');
     expect(fake.scheduled.length, afterFull,
         reason: '短路后不得新增调度');
+  });
+
+  test('权限未授予时 rescheduleAll 不先 cancelAll（避免清掉已排提醒）', () async {
+    final fake = NotificationService.instance.debugOverrideScheduler!
+        as FakeNotificationScheduler;
+    // 强制权限被拒（覆盖 setUp 注入的调度替身"视为已授权"路径）
+    NotificationService.instance.debugOverridePermission = false;
+    addTearDown(() => NotificationService.instance.debugOverridePermission = null);
+    // 让缓存确认到"被拒"状态
+    await NotificationService.instance.refreshPermissionCache();
+
+    final scheduler = ReminderScheduler(db);
+    await scheduler.rescheduleAll();
+    expect(fake.cancelAllCount, 0,
+        reason: '权限未授予时全量重排应整体跳过，不得先清空已排提醒');
+    expect(fake.scheduled, isEmpty,
+        reason: '权限被拒不排新提醒（schedule 短路一致）');
   });
 }

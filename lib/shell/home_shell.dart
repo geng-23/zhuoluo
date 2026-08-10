@@ -98,12 +98,26 @@ class _HomeShellState extends ConsumerState<HomeShell>
     super.dispose();
   }
 
-  /// 回到前台时检查 93 天排期窗口是否过期（>24h）——进程常驻
-  /// 期间窗口不自动前进，用户每天回前台即触发滚动重排
+  /// 回到前台：先刷新通知权限缓存，再按状态重排。
+  /// HCI-1：用户在系统设置开启通知后返回 App（不重启/不进权限中心）时，
+  /// 旧缓存 false 会让提醒全部静默跳过——先刷新缓存；若从"被拒"变"已授权"，
+  /// 强制全量重排补齐之前被短路/清掉的提醒；否则走 24h 窗口滚动。
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(ref.read(reminderSchedulerProvider).rescheduleIfStale());
+      unawaited(_onResume());
+    }
+  }
+
+  Future<void> _onResume() async {
+    final svc = ref.read(notificationServiceProvider);
+    final wasDenied = svc.permissionCache == false;
+    final granted = await svc.refreshPermissionCache();
+    final scheduler = ref.read(reminderSchedulerProvider);
+    if (wasDenied && granted) {
+      await scheduler.rescheduleAll();
+    } else {
+      await scheduler.rescheduleIfStale();
     }
   }
 

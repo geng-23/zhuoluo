@@ -36,6 +36,21 @@ class NotificationService {
   /// 生产代码永不设置；测试 setUp 注入记录型替身并断言结果。
   NotificationScheduler? debugOverrideScheduler;
 
+  /// 测试替身：强制通知权限结果（null=未设置，走真实平台）。
+  /// 与 debugOverrideScheduler 同属测试通道，生产代码永不设置。
+  bool? debugOverridePermission;
+
+  /// 当前缓存的权限结果（供 resume 流程判断"此前被拒 → 现已授权"）
+  bool? get permissionCache => _permissionGranted;
+
+  /// 确认通知权限已授予（缓存为 true 直接返回；否则刷新缓存再判断）。
+  /// 供 rescheduleAll 等"先取消再重排"的流程在取消前确认——
+  /// 否则权限被拒时会把已排提醒清掉且排不回来。
+  Future<bool> ensureNotificationsGranted() async {
+    if (_permissionGranted == true) return true;
+    return refreshPermissionCache();
+  }
+
   /// 系统级能力通道（MainActivity 原生实现）：
   /// 通知设置跳转 / 电池优化豁免查询与请求
   static const _systemChannel = MethodChannel('zhuoluo/notifications');
@@ -202,7 +217,12 @@ class NotificationService {
   /// N-权限缓存失效通道——用户在系统设置授予/拒绝通知权限后调用，
   /// 否则调度器会一直按旧的 `_permissionGranted` 短路（提醒全部静默跳过）。
   Future<bool> refreshPermissionCache() async {
-    // 测试替身接管：不触平台插件，直接视为已授权
+    // 测试替身：权限结果被强制指定时按指定值（测"被拒"路径）
+    if (debugOverridePermission != null) {
+      _permissionGranted = debugOverridePermission;
+      return debugOverridePermission!;
+    }
+    // 测试替身调度内核接管：不触平台插件，直接视为已授权
     if (debugOverrideScheduler != null) {
       _permissionGranted = true;
       return true;
@@ -220,6 +240,7 @@ class NotificationService {
   }
 
   Future<bool> _fetchPermission() async {
+    if (debugOverridePermission != null) return debugOverridePermission!;
     final android = _plugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin

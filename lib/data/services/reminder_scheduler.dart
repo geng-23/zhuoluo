@@ -266,6 +266,13 @@ class ReminderScheduler {
   /// 单条失败不影响整体（通知平台异常被吞掉，保证启动不崩溃）
   Future<void> rescheduleAll() async {
     try {
+      // B：权限未授予时不得先 cancelAll——否则会把已排提醒清掉且排不回来
+      //（schedule 在权限被拒时短路，取消后只剩空）。先刷新缓存确认，
+      // 仍未授予则整体跳过（排了也会被 schedule 短路）
+      if (!await NotificationService.instance.ensureNotificationsGranted()) {
+        debugPrint('全量重排跳过：通知权限未授予');
+        return;
+      }
       await NotificationService.instance.cancelAll();
       final allTasks = await _db.getAllUncompleted();
       for (final t in allTasks) {

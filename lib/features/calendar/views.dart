@@ -281,6 +281,10 @@ class _WeekViewState extends ConsumerState<WeekView> {
       ..reset()
       ..lastGlobalX = 0
       ..lastGlobalY = 0
+      ..startGlobalX = 0
+      ..startGlobalY = 0
+      ..settleX = 0
+      ..settleY = 0
       ..lastPosValid = false;
     _stopAutoScroll();
   }
@@ -328,12 +332,19 @@ class _WeekViewState extends ConsumerState<WeekView> {
   }
 
   /// 任务拖动的边缘翻页（同 DayColumn._maybeEdgeTurnForTask）：只在
-  /// 「水平意图且停下」时翻页；纵向拖动/持续移动不累计边缘停留
+  /// 「水平意图且停下」时翻页。
+  /// - 整段拖动纵向主导（累计 dy > 累计 dx，如周日列改时间）→ 抑制，无论快慢
+  /// - 距驻留点位移超过阈值（真实移动，含慢速拖动/瞄准微调）→ 重置 300ms
+  /// - 静止/微抖动/缓慢停顿（未超阈值）→ 保留计时，停住 300ms 才翻页
   void _maybeEdgeTurnForTask(Offset pos) {
     final ctrl = _edgeTurnCtrl;
     final w = MediaQuery.sizeOf(context).width;
-    // 首条事件（拖动开始/清理后）：仅建立移动基线；已在边缘区则先 arm
+    // 首条事件（拖动开始/清理后）：建立起始基线 + 驻留点；已在边缘区则先 arm
     if (!ctrl.lastPosValid) {
+      ctrl.startGlobalX = pos.dx;
+      ctrl.startGlobalY = pos.dy;
+      ctrl.settleX = pos.dx;
+      ctrl.settleY = pos.dy;
       ctrl.lastGlobalX = pos.dx;
       ctrl.lastGlobalY = pos.dy;
       ctrl.lastPosValid = true;
@@ -353,19 +364,25 @@ class _WeekViewState extends ConsumerState<WeekView> {
       ctrl.reset();
       return;
     }
-    final dx = pos.dx - ctrl.lastGlobalX;
-    final dy = pos.dy - ctrl.lastGlobalY;
-    ctrl.lastGlobalX = pos.dx;
-    ctrl.lastGlobalY = pos.dy;
-    if (dy.abs() > dx.abs() && dy.abs() > edgeTurnJitter) {
+    // 累计方向：整段拖动纵向主导（周日列纯上下拖动改时间）→ 抑制翻页
+    final cdx = pos.dx - ctrl.startGlobalX;
+    final cdy = pos.dy - ctrl.startGlobalY;
+    if (cdy.abs() > cdx.abs() && cdy.abs() > edgeTurnJitter) {
       ctrl.reset();
       return;
     }
-    // 只在"真实移动"或"无 pending 计时"时重置 300ms 倒计时；静止/微抖动
-    //（dx ≤ 抖动阈值）保留已有计时——否则真机手指停在边缘时的触摸抖动会
-    // 持续重置倒计时，边缘翻页永远不触发（完全不能滑动翻页）
-    final moving = dx.abs() > edgeTurnJitter;
-    if (moving || ctrl.timer == null) {
+    // 驻留点判定真实移动：距驻留点位移超过阈值 → 更新驻留点 + 重置 300ms
+    // 倒计时；未超阈值（微抖动/缓慢停顿）→ 保留已有计时（无则新建）
+    ctrl.lastGlobalX = pos.dx;
+    ctrl.lastGlobalY = pos.dy;
+    final fromSettle = Offset(pos.dx - ctrl.settleX, pos.dy - ctrl.settleY);
+    if (fromSettle.distance > edgeSettleThreshold) {
+      ctrl.settleX = pos.dx;
+      ctrl.settleY = pos.dy;
+      _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
+      return;
+    }
+    if (ctrl.timer == null) {
       _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
     }
   }
@@ -787,6 +804,10 @@ class _DayViewState extends ConsumerState<DayView> {
       ..reset()
       ..lastGlobalX = 0
       ..lastGlobalY = 0
+      ..startGlobalX = 0
+      ..startGlobalY = 0
+      ..settleX = 0
+      ..settleY = 0
       ..lastPosValid = false;
     _stopAutoScroll();
   }
@@ -834,12 +855,19 @@ class _DayViewState extends ConsumerState<DayView> {
   }
 
   /// 任务拖动的边缘翻页（同 DayColumn._maybeEdgeTurnForTask）：只在
-  /// 「水平意图且停下」时翻页；纵向拖动/持续移动不累计边缘停留
+  /// 「水平意图且停下」时翻页。
+  /// - 整段拖动纵向主导（累计 dy > 累计 dx，如周日列改时间）→ 抑制，无论快慢
+  /// - 距驻留点位移超过阈值（真实移动，含慢速拖动/瞄准微调）→ 重置 300ms
+  /// - 静止/微抖动/缓慢停顿（未超阈值）→ 保留计时，停住 300ms 才翻页
   void _maybeEdgeTurnForTask(Offset pos) {
     final ctrl = _edgeTurnCtrl;
     final w = MediaQuery.sizeOf(context).width;
-    // 首条事件（拖动开始/清理后）：仅建立移动基线；已在边缘区则先 arm
+    // 首条事件（拖动开始/清理后）：建立起始基线 + 驻留点；已在边缘区则先 arm
     if (!ctrl.lastPosValid) {
+      ctrl.startGlobalX = pos.dx;
+      ctrl.startGlobalY = pos.dy;
+      ctrl.settleX = pos.dx;
+      ctrl.settleY = pos.dy;
       ctrl.lastGlobalX = pos.dx;
       ctrl.lastGlobalY = pos.dy;
       ctrl.lastPosValid = true;
@@ -859,19 +887,25 @@ class _DayViewState extends ConsumerState<DayView> {
       ctrl.reset();
       return;
     }
-    final dx = pos.dx - ctrl.lastGlobalX;
-    final dy = pos.dy - ctrl.lastGlobalY;
-    ctrl.lastGlobalX = pos.dx;
-    ctrl.lastGlobalY = pos.dy;
-    if (dy.abs() > dx.abs() && dy.abs() > edgeTurnJitter) {
+    // 累计方向：整段拖动纵向主导（周日列纯上下拖动改时间）→ 抑制翻页
+    final cdx = pos.dx - ctrl.startGlobalX;
+    final cdy = pos.dy - ctrl.startGlobalY;
+    if (cdy.abs() > cdx.abs() && cdy.abs() > edgeTurnJitter) {
       ctrl.reset();
       return;
     }
-    // 只在"真实移动"或"无 pending 计时"时重置 300ms 倒计时；静止/微抖动
-    //（dx ≤ 抖动阈值）保留已有计时——否则真机手指停在边缘时的触摸抖动会
-    // 持续重置倒计时，边缘翻页永远不触发（完全不能滑动翻页）
-    final moving = dx.abs() > edgeTurnJitter;
-    if (moving || ctrl.timer == null) {
+    // 驻留点判定真实移动：距驻留点位移超过阈值 → 更新驻留点 + 重置 300ms
+    // 倒计时；未超阈值（微抖动/缓慢停顿）→ 保留已有计时（无则新建）
+    ctrl.lastGlobalX = pos.dx;
+    ctrl.lastGlobalY = pos.dy;
+    final fromSettle = Offset(pos.dx - ctrl.settleX, pos.dy - ctrl.settleY);
+    if (fromSettle.distance > edgeSettleThreshold) {
+      ctrl.settleX = pos.dx;
+      ctrl.settleY = pos.dy;
+      _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
+      return;
+    }
+    if (ctrl.timer == null) {
       _armTaskEdgeTurn(pos.dx > w * 0.85 ? 1 : -1, w);
     }
   }

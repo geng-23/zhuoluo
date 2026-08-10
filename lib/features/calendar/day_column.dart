@@ -15,9 +15,14 @@ import 'package:zhuoluo/features/calendar/calendar_axis.dart';
 import 'package:zhuoluo/features/calendar/calendar_sheets.dart';
 import 'package:zhuoluo/features/calendar/quick_add_sheets.dart';
 
-/// 任务拖动边缘翻页的"移动判定"抖动阈值（px）——低于此值视为静止/微漂移，
-/// 高于视为正在水平移动（需重置边缘停留计时）
+/// 任务拖动边缘翻页的"移动判定"抖动阈值（px）——累计方向判定用，
+/// 低于此值视为无实质位移（不触发纵向抑制/不重置计时）
 const double edgeTurnJitter = 4.0;
+
+/// 边缘翻页"真实移动"判定阈值（px）：距驻留点位移超过此值才算真实移动
+///（需重置 300ms 倒计时）；微抖动/缓慢停顿不超过则保留计时让其走完。
+/// 逐事件位移不可靠（慢速拖动单事件 <4px），用驻留点累计更稳。
+const double edgeSettleThreshold = 12.0;
 
 class EdgeTurnController {
   Timer? timer;
@@ -25,12 +30,22 @@ class EdgeTurnController {
   double lastGlobalX = 0;
   double lastGlobalY = 0;
 
+  /// 拖动起始基线（首条事件建立）——累计方向判定（整段纵向主导则抑制，
+  /// 修复周日列纯上下拖动改时间被误翻周）
+  double startGlobalX = 0;
+  double startGlobalY = 0;
+
+  /// 驻留点（上次"真实移动"后的位置）——距其位移超过 [edgeSettleThreshold]
+  /// 视为真实移动，重置 300ms 倒计时；慢速拖向落点/瞄准微调都会超阈值
+  /// 而持续重置，停住/微抖动（未超阈值）则保留计时让其走完
+  double settleX = 0;
+  double settleY = 0;
+
   /// 连续翻页链已启动（首次翻页 fire 后置位）：保持区内触摸点微漂移
   /// 不断链（"不间断翻页"）；移出保持区停链；松手/取消复位
   bool armed = false;
 
-  /// 移动基线是否已建立（拖动清理后置 false，首条事件重新建立——避免
-  /// 从 (0,0) 计算 dx/dy 把周日列的纯上下拖动误判为水平移动）
+  /// 移动基线是否已建立（拖动清理后置 false，首条事件重新建立）
   bool lastPosValid = false;
 
   /// 复位计时与方向（取消/纵向抑制/离开边缘区共用）
@@ -391,6 +406,10 @@ class DayColumnState extends ConsumerState<DayColumn> {
       ?..reset()
       ..lastGlobalX = 0
       ..lastGlobalY = 0
+      ..startGlobalX = 0
+      ..startGlobalY = 0
+      ..settleX = 0
+      ..settleY = 0
       ..lastPosValid = false;
     widget.edgeState?.value = 0;
   }

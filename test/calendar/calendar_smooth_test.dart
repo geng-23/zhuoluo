@@ -1531,5 +1531,78 @@ void main() {
       expect(t.planStart!.hour, 10,
           reason: '保留 10:00 时分（落点 y 未变）');
     });
+
+    testWidgets('周日列任务慢速上下拖动（单事件2px<抖动阈值）：不触发翻周', (tester) async {
+      final monday = DateUtilsEx.mondayOf(now);
+      final sunday = monday.add(const Duration(days: 6));
+      final taskId = await insertTopArea(
+        DateTime(sunday.year, sunday.month, sunday.day, 10, 0),
+        DateTime(sunday.year, sunday.month, sunday.day, 11, 0),
+        title: '慢速周日',
+      );
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final before = container.read(calendarControllerProvider).selectedDay;
+      final gesture = await longPressOn(tester, '慢速周日');
+      // 慢速纯上下拖动：单事件 2px（< 抖动阈值 4），累计纵向主导——
+      // 修复前逐事件垂直判定不触发，边缘翻页在停留 >300ms 后被误触发
+      for (var i = 0; i < 30; i++) {
+        await gesture.moveBy(const Offset(0, 2));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await tester.pump(const Duration(milliseconds: 400));
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      final after = container.read(calendarControllerProvider).selectedDay;
+      expect(DateUtilsEx.sameDay(after, before), isTrue,
+          reason: '慢速垂直拖动（单事件 2px）不应翻周');
+      final t = (await db.getTask(taskId))!;
+      expect(DateUtilsEx.sameDay(t.planStart!, sunday), isTrue,
+          reason: '任务仍在本周日');
+    });
+
+    testWidgets('慢速拖向周日列落点（单事件3px<抖动阈值）：不翻周、任务落到周日', (tester) async {
+      final monday = DateUtilsEx.mondayOf(now);
+      final sunday = monday.add(const Duration(days: 6));
+      final taskId = await insertTopArea(
+        DateTime(monday.year, monday.month, monday.day + 5, 10, 0),
+        DateTime(monday.year, monday.month, monday.day + 5, 11, 0),
+        title: '慢速拖向周日',
+      );
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final before = container.read(calendarControllerProvider).selectedDay;
+      final gesture = await longPressOn(tester, '慢速拖向周日');
+      // 慢速拖向周日：单事件 3px（< 抖动阈值 4），总时长 >300ms——
+      // 修复前逐事件重置不触发，边缘倒计时存活在落点确认前误翻周
+      for (var i = 0; i < 40; i++) {
+        await gesture.moveBy(const Offset(3, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      final after = container.read(calendarControllerProvider).selectedDay;
+      expect(DateUtilsEx.sameDay(after, before), isTrue,
+          reason: '慢速拖向周日的途中不应翻周');
+      final t = (await db.getTask(taskId))!;
+      expect(DateUtilsEx.sameDay(t.planStart!, sunday), isTrue,
+          reason: '任务落到本周日');
+    });
   });
 }

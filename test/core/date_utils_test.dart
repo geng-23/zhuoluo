@@ -175,4 +175,61 @@ void main() {
       );
     });
   });
+
+  group('planRangeText / timeRangeText（跨天消除歧义）', () {
+    final now = DateTime.now();
+
+    test('未设置 → 未设置', () {
+      expect(DateUtilsEx.planRangeText(null, null), '未设置');
+    });
+
+    test('全天 → 仅日期', () {
+      final d = DateTime(now.year, now.month, now.day);
+      expect(
+        DateUtilsEx.planRangeText(
+          d,
+          d.add(const Duration(days: 1)),
+          isAllDay: true,
+        ),
+        DateUtilsEx.dateCn(d),
+      );
+    });
+
+    test('同日 → 日期 时分-时分', () {
+      final start = DateTime(now.year, now.month, now.day, 14, 0);
+      expect(
+        DateUtilsEx.planRangeText(start, start.add(const Duration(hours: 1))),
+        '${DateUtilsEx.dateCn(start)} 14:00-15:00',
+      );
+    });
+
+    test('跨天（今天→明天）→ 两端带日期', () {
+      final start = DateTime(now.year, now.month, now.day, 22, 0);
+      expect(
+        DateUtilsEx.planRangeText(start, start.add(const Duration(hours: 8))),
+        '今天 22:00 到 明天 06:00',
+      );
+    });
+
+    test('跨天（远期跨年）→ 两端带完整日期', () {
+      expect(
+        DateUtilsEx.planRangeText(
+          DateTime(2030, 12, 31, 23, 0),
+          DateTime(2031, 1, 1, 1, 0),
+        ),
+        '2030年12月31日 23:00 到 2031年1月1日 01:00',
+      );
+    });
+
+    test('timeRangeText：同日无日期前缀', () {
+      final start = DateTime(now.year, now.month, now.day, 9, 0);
+      expect(
+        DateUtilsEx.timeRangeText(
+          start,
+          start.add(const Duration(minutes: 30)),
+        ),
+        '09:00-09:30',
+      );
+    });
+  });
 }

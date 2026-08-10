@@ -855,20 +855,8 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     }
   }
 
-  String _planText(Task t) {
-    final ps = t.planStart;
-    if (ps == null) return '未设置';
-    final pe = t.planEnd;
-    if (t.isAllDay) {
-      return DateUtilsEx.dateCn(ps);
-    }
-    final peText = pe == null
-        ? ''
-        : '-${DateUtilsEx.timeCn(pe)}'
-              '${DateUtilsEx.sameDay(ps, pe) ? '' : ' (${DateUtilsEx.dateCn(pe)})'}';
-    return '${DateUtilsEx.dateCn(ps)} '
-        '${DateUtilsEx.timeCn(ps)}$peText';
-  }
+  String _planText(Task t) =>
+      DateUtilsEx.planRangeText(t.planStart, t.planEnd, isAllDay: t.isAllDay);
 
   String _dateTimeText(DateTime dt) =>
       '${DateUtilsEx.dateCn(dt)} ${DateUtilsEx.timeCn(dt)}';

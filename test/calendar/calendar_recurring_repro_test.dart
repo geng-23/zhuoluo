@@ -530,4 +530,72 @@ void main() {
 
     await Future<void>.delayed(const Duration(milliseconds: 200));
   });
+
+  test('跨天任务拖动整体平移：落点日=新开始日，保留起止时分与时长', () async {
+    SoundService.enabled = false;
+    final container = ProviderContainer(
+      overrides: [dbProvider.overrideWithValue(db)],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(calendarControllerProvider.notifier);
+    await db.ensureDefaultList();
+    final list = await db.getDefaultList();
+    // 周一 22:00 → 周二 06:00 的跨天任务
+    final id = await db.insertTask(TasksCompanion.insert(
+      listId: list.id,
+      title: '夜班',
+      planStart: Value(DateTime(2026, 8, 10, 22, 0)),
+      planEnd: Value(DateTime(2026, 8, 11, 6, 0)),
+      createdAt: now,
+    ));
+
+    await notifier.moveCrossDayToDate(id, DateTime(2026, 8, 13));
+    final t = (await db.getTask(id))!;
+    expect(t.isAllDay, isFalse, reason: '跨天任务保持定时');
+    expect(t.planStart, DateTime(2026, 8, 13, 22, 0),
+        reason: '整体平移：新开始日=落点日，保留 22:00');
+    expect(t.planEnd, DateTime(2026, 8, 14, 6, 0),
+        reason: '整体平移：结束日同步 +1 天，保留 06:00');
+    expect(t.planEnd!.difference(t.planStart!), const Duration(hours: 8),
+        reason: '时长 8 小时保持不变（不加不减时分）');
+
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+  });
+
+  test('跨天系列拖动整体平移：吸附最近命中日、保留时分时长、可撤销', () async {
+    SoundService.enabled = false;
+    final container = ProviderContainer(
+      overrides: [dbProvider.overrideWithValue(db)],
+    );
+    addTearDown(container.dispose);
+    final notifier = container.read(calendarControllerProvider.notifier);
+    await db.ensureDefaultList();
+    final list = await db.getDefaultList();
+    // 每周一 22:00 → 周二 06:00 的跨天系列，锚点 8/10（周一）
+    final id = await db.insertTask(TasksCompanion.insert(
+      listId: list.id,
+      title: '周一夜班',
+      planStart: Value(DateTime(2026, 8, 10, 22, 0)),
+      planEnd: Value(DateTime(2026, 8, 11, 6, 0)),
+      rrule: const Value('FREQ=WEEKLY;BYDAY=MO'),
+      createdAt: now,
+    ));
+
+    // 拖到 8/16（周日，非命中日）→ 吸附回最近周一 8/17
+    await notifier.moveCrossDaySeriesToDate(id, DateTime(2026, 8, 16));
+    var t = (await db.getTask(id))!;
+    expect(t.planStart, DateTime(2026, 8, 17, 22, 0),
+        reason: '系列整体平移：吸附到最近周一 8/17，保留 22:00');
+    expect(t.planEnd, DateTime(2026, 8, 18, 6, 0),
+        reason: '系列整体平移：结束为次日 06:00，保留时长');
+    expect(t.isAllDay, isFalse, reason: '跨天系列保持定时');
+
+    // 撤销 → 恢复原锚点
+    await notifier.undoMoveTaskSeries();
+    t = (await db.getTask(id))!;
+    expect(t.planStart, DateTime(2026, 8, 10, 22, 0),
+        reason: '撤销恢复原锚点与时分');
+
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+  });
 }

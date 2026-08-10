@@ -565,6 +565,126 @@ class CalendarController extends StateNotifier<CalendarState> {
     load();
   }
 
+  // ---------- 跨天定时任务：拖动改期整体平移天数（保持起止时分与时长） ----------
+
+  /// 跨天定时任务拖动改期：整体平移到目标日（落点日 = 新的开始日，
+  /// 保留原开始时分与原时长）。单次任务用；重复系列见 moveCrossDaySeriesToDate
+  Future<void> moveCrossDayToDate(int taskId, DateTime day) async {
+    try {
+      await _moveCrossDayToDateInner(taskId, day);
+    } catch (e) {
+      debugPrint('日历跨天改期失败 taskId=$taskId: $e');
+    }
+  }
+
+  Future<void> _moveCrossDayToDateInner(int taskId, DateTime day) async {
+    final t = await _db.getTask(taskId);
+    if (t == null) return;
+    final ps = t.planStart;
+    final pe = t.planEnd;
+    if (ps == null || pe == null) return;
+    SoundService.instance.play(SoundKind.drop);
+    Haptics.light();
+    // 改期前先取消旧任务全部通知
+    await _scheduler.cancelTask(taskId);
+    // 整体平移：只换开始日期，保留原开始时分与原时长（统一加减 N 天）
+    final dur = pe.difference(ps);
+    final psA = AppClock.asApp(ps);
+    final start = AppClock.at(
+      day.year,
+      day.month,
+      day.day,
+      psA.hour,
+      psA.minute,
+    );
+    await _db.updateTask(
+      taskId,
+      TasksCompanion(
+        planStart: Value(start),
+        planEnd: Value(start.add(dur)),
+        isAllDay: const Value(false),
+      ),
+    );
+    final updated = await _db.getTask(taskId);
+    if (updated != null) {
+      await _scheduler.scheduleTask(updated);
+    }
+    _bump();
+    load();
+  }
+
+  /// 跨天重复任务拖动改期：整个系列整体平移到目标日（日期吸附最近命中日、
+  /// 保留原开始时分与原时长，可撤销）
+  Future<void> moveCrossDaySeriesToDate(int taskId, DateTime day) async {
+    try {
+      await _moveCrossDaySeriesToDateInner(taskId, day);
+    } catch (e) {
+      debugPrint('日历跨天系列改期失败 taskId=$taskId: $e');
+    }
+  }
+
+  Future<void> _moveCrossDaySeriesToDateInner(
+    int taskId,
+    DateTime day,
+  ) async {
+    final t = await _db.getTask(taskId);
+    if (t == null || t.rrule.isEmpty) return;
+    final ps = t.planStart;
+    final pe = t.planEnd;
+    if (ps == null || pe == null) return;
+    SoundService.instance.play(SoundKind.drop);
+    Haptics.light();
+    // 系列改期前先取消旧规则全部通知
+    await _scheduler.cancelTask(taskId);
+    final oldStart = t.planStart;
+    final oldEnd = t.planEnd;
+    final dur = pe.difference(ps);
+    final psA = AppClock.asApp(ps);
+    // 跨天系列整体平移：日期吸附最近命中日（保留原时分与时长），
+    // 与定时系列吸附口径一致——否则锚点落在非命中日，系列在当前窗口"消失"
+    final anchorDay = AppClock.at(day.year, day.month, day.day);
+    final hit = RruleService.instance.nearestHitOnOrNear(anchorDay, t.rrule);
+    final base = hit == null
+        ? anchorDay
+        : AppClock.at(hit.year, hit.month, hit.day);
+    final start = AppClock.at(
+      base.year,
+      base.month,
+      base.day,
+      psA.hour,
+      psA.minute,
+    );
+    await _db.updateTask(
+      taskId,
+      TasksCompanion(
+        planStart: Value(start),
+        planEnd: Value(start.add(dur)),
+        isAllDay: const Value(false),
+      ),
+    );
+    // 与定时系列同收口：清理不再匹配新系列的完成记录与例外（可撤销）
+    final removed = await _db.applyRecurringChange(
+      taskId,
+      oldRrule: t.rrule,
+      newRrule: t.rrule,
+      newStart: start,
+    );
+    _seriesUndo = _SeriesReschedule(
+      taskId: taskId,
+      oldStart: oldStart,
+      oldEnd: oldEnd,
+      oldIsAllDay: t.isAllDay,
+      removedCompletions: removed.removedCompletions,
+      removedExceptions: removed.removedExceptions,
+    );
+    final updated = await _db.getTask(taskId);
+    if (updated != null) {
+      await _scheduler.scheduleTask(updated);
+    }
+    _bump();
+    load();
+  }
+
   /// 任务完成/恢复（日历直接勾选）
   Future<void> toggleComplete(CalendarItem item) async {
     try {

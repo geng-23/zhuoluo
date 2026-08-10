@@ -59,6 +59,36 @@ class DateUtilsEx {
     return '$hh:$mm';
   }
 
+  /// 仅时间段文案（不含日期前缀）：同日 "22:00-23:00"；
+  /// 跨天 "8月10日 22:00 到 8月11日 06:00"（两端均带日期，消除"06:00"歧义）。
+  /// 供任务列表带"今天/下次"前缀时拼装。
+  static String timeRangeText(DateTime start, DateTime end) {
+    if (sameDay(start, end)) {
+      return '${timeCn(start)}-${timeCn(end)}';
+    }
+    return '${dateCn(start)} ${timeCn(start)} 到 ${dateCn(end)} ${timeCn(end)}';
+  }
+
+  /// 计划时间段文案（跨天消除歧义）：
+  /// - 未设置 → "未设置"
+  /// - 全天 → 仅日期
+  /// - 同日 → "8月10日 22:00-23:00"
+  /// - 跨天 → "8月10日 22:00 到 8月11日 06:00"
+  static String planRangeText(
+    DateTime? start,
+    DateTime? end, {
+    bool isAllDay = false,
+  }) {
+    if (start == null) return '未设置';
+    if (isAllDay) return dateCn(start);
+    final e = end ?? start.add(const Duration(hours: 1));
+    if (sameDay(start, e)) {
+      return '${dateCn(start)} ${timeCn(start)}-${timeCn(e)}';
+    }
+    // 跨天：timeRangeText 已含两端日期，直接复用
+    return timeRangeText(start, e);
+  }
+
   /// C5-1/落点"时长不跨天"约束——起点 + 时长越过当天 23:00 时
   /// 回退起点（23:00 - 时长），保证任务不跨午夜（跨天任务会跳进置顶区
   /// 且无法拖回）。写入端与拖拽预览端（虚影/时间胶囊）必须统一使用，

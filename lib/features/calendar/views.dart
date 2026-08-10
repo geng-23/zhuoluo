@@ -12,6 +12,14 @@ import 'package:zhuoluo/features/calendar/calendar_axis.dart';
 import 'package:zhuoluo/features/calendar/day_column.dart';
 import 'package:zhuoluo/features/calendar/timeline_view.dart';
 
+/// 是否跨天定时任务（起止不同日，出现在置顶区，拖动仅置顶区整体平移）
+bool taskIsCrossDay(Task t) {
+  final ps = t.planStart;
+  final pe = t.planEnd;
+  if (ps == null || pe == null) return false;
+  return !DateUtilsEx.sameDay(ps, pe);
+}
+
 class WeekView extends ConsumerStatefulWidget {
   const WeekView({
     super.key,
@@ -436,6 +444,8 @@ class _WeekViewState extends ConsumerState<WeekView> {
     final db = ref.read(dbProvider);
     final task = await db.getTask(taskId);
     if (task == null) return;
+    // 置顶区任务（全天/跨天）：时间轴落点不生效（兜底路径同样 no-op）
+    if (task.isAllDay || taskIsCrossDay(task)) return;
     final notifier = ref.read(calendarControllerProvider.notifier);
     if (task.rrule.isNotEmpty) {
       if (!mounted) return;
@@ -446,8 +456,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
           content: Text(
             '「${task.title}」是重复任务。\n'
             '将把整个系列改为从 ${DateUtilsEx.timeCn(start)} 开始'
-            '${task.isAllDay ? '（转为 1 小时时段任务）' : '（时长保持不变）'}'
-            '，旧日期上的完成记录将被清理。\n\n'
+            '（时长保持不变），旧日期上的完成记录将被清理。\n\n'
             '只想改这一天，请用「跳过本次 / 改期」菜单。',
           ),
           actions: [
@@ -913,6 +922,8 @@ class _DayViewState extends ConsumerState<DayView> {
     final db = ref.read(dbProvider);
     final task = await db.getTask(taskId);
     if (task == null) return;
+    // 置顶区任务（全天/跨天）：时间轴落点不生效（兜底路径同样 no-op）
+    if (task.isAllDay || taskIsCrossDay(task)) return;
     final notifier = ref.read(calendarControllerProvider.notifier);
     if (task.rrule.isNotEmpty) {
       if (!mounted) return;
@@ -923,8 +934,7 @@ class _DayViewState extends ConsumerState<DayView> {
           content: Text(
             '「${task.title}」是重复任务。\n'
             '将把整个系列改为从 ${DateUtilsEx.timeCn(start)} 开始'
-            '${task.isAllDay ? '（转为 1 小时时段任务）' : '（时长保持不变）'}'
-            '，旧日期上的完成记录将被清理。\n\n'
+            '（时长保持不变），旧日期上的完成记录将被清理。\n\n'
             '只想改这一天，请用「跳过本次 / 改期」菜单。',
           ),
           actions: [

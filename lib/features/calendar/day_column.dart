@@ -35,12 +35,30 @@ class DragGhostInfo {
   final String color;
   final String listColor;
 
+  /// 是否全天任务 / 跨天定时任务（置顶区任务）：时间轴落点无效（no-op），
+  /// 拖动中不显示时间轴虚影/胶囊，仅在置顶区高亮目标日
+  final bool isAllDay;
+  final bool isCrossDay;
+
   const DragGhostInfo({
     required this.title,
     required this.durationMinutes,
     required this.color,
     required this.listColor,
+    required this.isAllDay,
+    required this.isCrossDay,
   });
+
+  /// 置顶区任务（全天或跨天定时）——拖进时间轴不生效
+  bool get isTopArea => isAllDay || isCrossDay;
+}
+
+/// 是否跨天定时任务（起止不同日，出现在置顶区，拖动整体平移天数）
+bool _taskIsCrossDay(Task t) {
+  final ps = t.planStart;
+  final pe = t.planEnd;
+  if (ps == null || pe == null) return false;
+  return !DateUtilsEx.sameDay(ps, pe);
 }
 
 /// 单日列（E7：长按拖动选择时间区间创建任务）
@@ -438,6 +456,21 @@ class DayColumnState extends ConsumerState<DayColumn> {
       onAcceptWithDetails: (details) async {
         // 正常落点已处理：全局 route 的 up 兜底据此跳过（避免重复改期）
         widget.dragDropped?.value = true;
+        final allItems = ref.read(calendarControllerProvider).items;
+        CalendarItem? dragged;
+        for (final it in allItems) {
+          if (it.task.id == details.data) {
+            dragged = it;
+            break;
+          }
+        }
+        // 置顶区任务（全天/跨天定时）：时间轴落点不生效——只能拖到
+        // 另一天槽（AllDayBar DragTarget 处理），拖进时间轴保持原位
+        if (dragged != null &&
+            (dragged.task.isAllDay || _taskIsCrossDay(dragged.task))) {
+          _clearDragState();
+          return;
+        }
         // 落点局部坐标 → 吸附 10 分钟 → 改期（含时分，支持跨天）。
         // 注意：details.offset 是相对拖拽锚点的偏移（SDK 内部
         // _lastOffset = 指针 − dragStartPoint），不能当全局坐标用；
@@ -473,14 +506,6 @@ class DayColumnState extends ConsumerState<DayColumn> {
           snapped % 60,
         );
         // 重复任务：确认"整个系列"改期（避免误改）
-        final allItems = ref.read(calendarControllerProvider).items;
-        CalendarItem? dragged;
-        for (final it in allItems) {
-          if (it.task.id == details.data) {
-            dragged = it;
-            break;
-          }
-        }
         if (dragged != null && dragged.task.rrule.isNotEmpty) {
           if (!mounted) return;
           final d = dragged;
@@ -491,8 +516,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
               content: Text(
                 '「${d.task.title}」是重复任务。\n'
                 '将把整个系列改为从 ${DateUtilsEx.timeCn(target)} 开始'
-                '${d.task.isAllDay ? '（转为 1 小时时段任务）' : '（时长保持不变）'}'
-                '，旧日期上的完成记录将被清理。\n\n'
+                '（时长保持不变），旧日期上的完成记录将被清理。\n\n'
                 '只想改这一天，请用「跳过本次 / 改期」菜单。',
               ),
               actions: [
@@ -692,6 +716,8 @@ class DayColumnState extends ConsumerState<DayColumn> {
                                   durationMinutes: it.task.durationMinutes,
                                   color: it.task.color,
                                   listColor: it.listColor,
+                                  isAllDay: it.task.isAllDay,
+                                  isCrossDay: _taskIsCrossDay(it.task),
                                 );
                                 break;
                               }
@@ -750,6 +776,11 @@ class DayColumnState extends ConsumerState<DayColumn> {
                         !_isActiveColumn()) {
                       return const SizedBox.shrink();
                     }
+                    // 置顶区任务（全天/跨天）：时间轴落点无效，不显示虚影
+                    final gInfo = widget.dragGhostInfo?.value;
+                    if (gInfo != null && gInfo.isTopArea) {
+                      return const SizedBox.shrink();
+                    }
                     final dy = _stableContentDy(gpos);
                     if (dy == null) {
                       _retryLocalAfterLayout(); // 基准未就绪：下一帧重算
@@ -774,6 +805,11 @@ class DayColumnState extends ConsumerState<DayColumn> {
                     if (gpos == null ||
                         widget.dragTaskId?.value == null ||
                         !_isActiveColumn()) {
+                      return const SizedBox.shrink();
+                    }
+                    // 置顶区任务（全天/跨天）：时间轴落点无效，不显示胶囊
+                    final gInfo = widget.dragGhostInfo?.value;
+                    if (gInfo != null && gInfo.isTopArea) {
                       return const SizedBox.shrink();
                     }
                     final local = _localFromGlobal(gpos);
@@ -1546,10 +1582,14 @@ class TaskBlock extends ConsumerWidget {
                             color: textColor,
                           ),
                         ),
-                        if (showTime)
+                        if (showTime && t.planStart != null)
                           Text(
-                            '${DateUtilsEx.timeCn(t.planStart!)}-'
-                            '${DateUtilsEx.timeCn(t.planEnd ?? t.planStart!.add(const Duration(hours: 1)))}',
+                            // 跨天任务：起止两端都带日期（"8月10日 22:00 到
+                            // 8月11日 06:00"），避免只显示时分产生跨天歧义
+                            DateUtilsEx.timeRangeText(
+                              t.planStart!,
+                              t.planEnd ?? t.planStart!.add(const Duration(hours: 1)),
+                            ),
                             style: TextStyle(
                               fontSize: 8,
                               color: textColor.withValues(alpha: 0.85),

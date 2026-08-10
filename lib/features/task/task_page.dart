@@ -1443,24 +1443,23 @@ class _TaskTile extends StatelessWidget {
         // 时间优先取 next（含例外改期目标日/时刻）——改期本次后任务页
         // 能看到改到的新时刻，而非始终显示 planStart 的旧时分
         final base = next ?? ps ?? AppClock.now();
-        final pe = task.planEnd;
+        final dur = (ps != null && task.planEnd != null)
+            ? task.planEnd!.difference(ps)
+            : const Duration(hours: 1);
+        final end = base.add(dur);
+        // 跨天实例：结束日带日期（"今天 22:00 到 明天 06:00"），
+        // 避免只显示"06:00"产生跨天歧义；开始日期由 dayText 前缀承载
         parts.add(
-          '$dayText '
-          '${DateUtilsEx.timeCn(base)}-'
-          '${DateUtilsEx.timeCn(pe ?? base.add(const Duration(hours: 1)))}',
+          DateUtilsEx.sameDay(base, end)
+              ? '$dayText ${DateUtilsEx.timeCn(base)}-${DateUtilsEx.timeCn(end)}'
+              : '$dayText ${DateUtilsEx.timeCn(base)} 到 '
+                    '${DateUtilsEx.dateCn(end)} ${DateUtilsEx.timeCn(end)}',
         );
       }
     } else if (ps != null) {
-      final pe = task.planEnd;
-      if (task.isAllDay) {
-        parts.add(DateUtilsEx.dateCn(ps));
-      } else {
-        parts.add(
-          '${DateUtilsEx.dateCn(ps)} '
-          '${DateUtilsEx.timeCn(ps)}-'
-          '${DateUtilsEx.timeCn(pe ?? ps.add(const Duration(hours: 1)))}',
-        );
-      }
+      parts.add(
+        DateUtilsEx.planRangeText(ps, task.planEnd, isAllDay: task.isAllDay),
+      );
     }
     if (done && task.rrule.isEmpty) {
       parts.add('✓ ${DateUtilsEx.dateCn(task.completedAt!)}');

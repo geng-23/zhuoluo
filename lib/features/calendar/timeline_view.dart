@@ -820,7 +820,15 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
     return null;
   }
 
-  /// 拖动指针全局 x → 置顶区列索引（被拖任务为全天时才显示高亮）
+  /// 是否跨天定时任务（起止不同日，出现在置顶区，拖动整体平移天数）
+  bool _taskIsCrossDay(Task t) {
+    final ps = t.planStart;
+    final pe = t.planEnd;
+    if (ps == null || pe == null) return false;
+    return !DateUtilsEx.sameDay(ps, pe);
+  }
+
+  /// 拖动指针全局 x → 置顶区列索引（被拖任务为全天/跨天时才显示高亮）
   int? _colFor(Offset? gpos) {
     if (gpos == null) return null;
     final box = _contentKey.currentContext?.findRenderObject() as RenderBox?;
@@ -840,8 +848,11 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
     widget.dragGhostInfo?.value = null;
   }
 
-  /// 置顶区落点：全天任务改期到落点所在日（保持全天）；
-  /// 重复全天任务弹"更改整个系列？"确认后平移系列（可撤销）
+  /// 置顶区落点：
+  /// - 全天任务：改期到落点所在日（保持全天）；
+  /// - 跨天定时任务：整体平移 N 天到落点日（落点日 = 新开始日，
+  ///   保留原起止时分与时长）；
+  /// 重复任务弹"更改整个系列？"确认后平移系列（可撤销）
   Future<void> _dropOnBar(int taskId) async {
     // 与 DayColumn 一致：先置位"已处理"标志——全局 route 的 up 兜底据此跳过
     widget.dragDropped?.value = true;
@@ -853,18 +864,23 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
       return;
     }
     final day = widget.days[col];
+    final crossDay = !t.isAllDay && _taskIsCrossDay(t);
     final notifier = ref.read(calendarControllerProvider.notifier);
     if (t.rrule.isNotEmpty) {
+      final content = crossDay
+          ? '「${t.title}」是重复任务。\n'
+              '将把整个系列整体平移（保持起止时间与时长）到 '
+              '${DateUtilsEx.dateCn(day)} 开始，旧日期上的完成记录将被清理。\n\n'
+              '只想改这一天，请用「跳过本次 / 改期」菜单。'
+          : '「${t.title}」是重复任务。\n'
+              '将把整个系列改为从 ${DateUtilsEx.dateCn(day)} 开始'
+              '（保持全天），旧日期上的完成记录将被清理。\n\n'
+              '只想改这一天，请用「跳过本次 / 改期」菜单。';
       final ok = await showDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
           title: const Text('更改整个系列？'),
-          content: Text(
-            '「${t.title}」是重复任务。\n'
-            '将把整个系列改为从 ${DateUtilsEx.dateCn(day)} 开始'
-            '（保持全天），旧日期上的完成记录将被清理。\n\n'
-            '只想改这一天，请用「跳过本次 / 改期」菜单。',
-          ),
+          content: Text(content),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(c, false),
@@ -881,7 +897,11 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
         _clearDragState();
         return;
       }
-      await notifier.moveAllDaySeriesToDate(taskId, day);
+      if (crossDay) {
+        await notifier.moveCrossDaySeriesToDate(taskId, day);
+      } else {
+        await notifier.moveAllDaySeriesToDate(taskId, day);
+      }
       _clearDragState();
       if (mounted) {
         showAppSnackBar(
@@ -894,7 +914,11 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
       }
       return;
     }
-    await notifier.moveAllDayToDate(taskId, day);
+    if (crossDay) {
+      await notifier.moveCrossDayToDate(taskId, day);
+    } else {
+      await notifier.moveAllDayToDate(taskId, day);
+    }
     _clearDragState();
   }
 
@@ -914,7 +938,7 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
             // 仅全天任务可落在置顶区（跨天定时任务拖回时间轴，语义不变）
             onWillAcceptWithDetails: (d) {
               final t = _taskById(d.data);
-              return t?.isAllDay == true;
+              return t != null && (t.isAllDay || _taskIsCrossDay(t));
             },
             onAcceptWithDetails: (d) => _dropOnBar(d.data),
             builder: (context, _, _) {
@@ -924,7 +948,8 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
                   final draggingId = widget.dragTaskId?.value;
                   final dragged =
                       draggingId == null ? null : _taskById(draggingId);
-                  final hl = (dragged != null && dragged.isAllDay)
+                  final hl = (dragged != null &&
+                          (dragged.isAllDay || _taskIsCrossDay(dragged)))
                       ? _colFor(gpos)
                       : null;
                   return Stack(
@@ -945,8 +970,8 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
                                       padding:
                                           const EdgeInsets.only(bottom: 2),
                                       // C5-1/C3-4：仅真正的全天任务
-                                      // allDay=true；跨天定时任务可拖回
-                                      // 时间轴并显示起止时刻
+                                      // allDay=true；跨天定时任务显示起止
+                                      // 时刻（拖动仅置顶区改日整体平移）
                                       child: TaskBlock(
                                         item: item,
                                         allDay: item.task.isAllDay,
@@ -955,19 +980,21 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
                                         onPointerDown: (p) => _pointer = p,
                                         onDragStartedTask: (id) {
                                           widget.dragTaskId?.value = id;
-                                          // 虚影信息：全天任务拖入时间轴
-                                          // 转 1 小时时段（duration=60）；
-                                          // 跨天定时任务用真实时长
+                                          // 虚影信息：置顶区任务拖进时间轴
+                                          // 无效（仅置顶区可落点），不上报
+                                          // 转换时长，只标记类型供虚影隐藏
                                           final it = _taskById(id);
                                           if (it != null) {
                                             widget.dragGhostInfo?.value =
                                                 DragGhostInfo(
                                                   title: it.title,
-                                                  durationMinutes: it.isAllDay
-                                                      ? 60
-                                                      : it.durationMinutes,
+                                                  durationMinutes:
+                                                      it.durationMinutes,
                                                   color: it.color,
                                                   listColor: item.listColor,
+                                                  isAllDay: it.isAllDay,
+                                                  isCrossDay:
+                                                      _taskIsCrossDay(it),
                                                 );
                                           }
                                           final p = _pointer;
@@ -992,7 +1019,8 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
                             ),
                         ],
                       ),
-                      // 全天任务拖动中：高亮目标日槽位（横向改日提示）
+                      // 置顶区任务（全天/跨天）拖动中：高亮目标日槽位
+                      //（横向改日/整体平移提示）
                       if (hl != null)
                         Positioned(
                           left: hl * columnWidth,

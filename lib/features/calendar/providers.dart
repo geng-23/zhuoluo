@@ -1,4 +1,4 @@
-﻿import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/foundation.dart'
     show ValueNotifier, visibleForTesting, debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +10,15 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
+import 'package:zhuoluo/features/calendar/calendar_axis.dart';
+
+/// 周/日视图时间轴缩放：每小时像素高（px/h）。
+/// 初始 64px/h；双指缩放动态调整，clamp 到 [动态下限, maxPixelPerHour]，
+/// 下限 = 时间轴可用高度 / 总小时数（缩到最小整屏显示全部时段）。
+final pixelPerHourProvider = StateProvider<double>((_) => defaultPixelPerHour);
+
+/// 时间轴缩放上限（px/h）
+const maxPixelPerHour = 128.0;
 
 class CalendarState {
   final DateTime displayedMonth; // 顶栏显示的年月
@@ -288,10 +297,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     }
   }
 
-  Future<void> _moveTaskToDateTimeInner(
-    int taskId,
-    DateTime target,
-  ) async {
+  Future<void> _moveTaskToDateTimeInner(int taskId, DateTime target) async {
     final t = await _db.getTask(taskId);
     if (t == null) return;
     SoundService.instance.play(SoundKind.drop);
@@ -305,8 +311,8 @@ class CalendarController extends StateNotifier<CalendarState> {
     final dur = t.isAllDay
         ? const Duration(hours: 1)
         : ((pe != null && ps != null)
-            ? pe.difference(ps)
-            : const Duration(hours: 1));
+              ? pe.difference(ps)
+              : const Duration(hours: 1));
     // C5-1：落点吸附"时长不跨天"约束——拖到 23:00 且时长跨过午夜时
     // 回退起点（此前 1 小时任务拖到 23:00 变跨天、跳进置顶区且无法拖回）
     // 与拖拽预览端（虚影/时间胶囊）统一用 clampStartWithinDay
@@ -358,8 +364,8 @@ class CalendarController extends StateNotifier<CalendarState> {
     final dur = t.isAllDay
         ? const Duration(hours: 1)
         : ((oldEnd != null && oldStart != null)
-            ? oldEnd.difference(oldStart)
-            : const Duration(hours: 1));
+              ? oldEnd.difference(oldStart)
+              : const Duration(hours: 1));
     // C5-1：系列改期同样应用"时长不跨天"约束（与预览端统一）
     final clamped = DateUtilsEx.clampStartWithinDay(target, dur);
     // ：拖动目标日不命中规则时吸附到最近命中日——与任务创建/详情
@@ -511,10 +517,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     }
   }
 
-  Future<void> _moveAllDaySeriesToDateInner(
-    int taskId,
-    DateTime day,
-  ) async {
+  Future<void> _moveAllDaySeriesToDateInner(int taskId, DateTime day) async {
     final t = await _db.getTask(taskId);
     if (t == null || t.rrule.isEmpty) return;
     SoundService.instance.play(SoundKind.drop);
@@ -617,10 +620,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     }
   }
 
-  Future<void> _moveCrossDaySeriesToDateInner(
-    int taskId,
-    DateTime day,
-  ) async {
+  Future<void> _moveCrossDaySeriesToDateInner(int taskId, DateTime day) async {
     final t = await _db.getTask(taskId);
     if (t == null || t.rrule.isEmpty) return;
     final ps = t.planStart;

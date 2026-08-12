@@ -60,7 +60,6 @@ class EdgeTurnController {
 /// 拖动虚影渲染所需的任务信息（拖动开始时上报——
 /// 跨周后任务不在当前视图 items 中，虚影据此渲染而非查视图数据）
 
-
 class DragGhostInfo {
   final String title;
   final int durationMinutes;
@@ -94,7 +93,6 @@ bool _taskIsCrossDay(Task t) {
 }
 
 /// 单日列（E7：长按拖动选择时间区间创建任务）
-
 
 class DayColumn extends ConsumerStatefulWidget {
   const DayColumn({
@@ -182,6 +180,10 @@ class DayColumn extends ConsumerStatefulWidget {
 class DayColumnState extends ConsumerState<DayColumn> {
   /// 单列宽度（周视图 7 列、日视图 1 列，扣除左侧时间栏 44px）
   double get columnWidth => (widget.axisWidth - 44) / (widget.isWeek ? 7 : 1);
+
+  /// 当前缩放级别（每小时像素高）：任务块位置/高度/落点换算统一走此值，
+  /// build 中 ref.watch 触发缩放重建
+  double get _pp => ref.read(pixelPerHourProvider);
 
   /// dragGlobalPos 为 null（无共享状态）时的兜底 notifier
   static final ValueNotifier<Offset?> _noopPos = ValueNotifier<Offset?>(null);
@@ -464,6 +466,8 @@ class DayColumnState extends ConsumerState<DayColumn> {
   /// 是否显示在顶部置顶区（全天 / 无计划时间 / 跨天任务）
   @override
   Widget build(BuildContext context) {
+    // 缩放级别变化 → 重建（任务块位置/高度/落点随 _pp 刷新）
+    ref.watch(pixelPerHourProvider);
     // 重叠分栏
     final blocks = _layoutOverlap(widget.items);
     final notifier = ref.read(calendarControllerProvider.notifier);
@@ -528,7 +532,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
           _clearDragState();
           return;
         }
-        final minutes = (widget.startHour * 60 + dy / pixelPerHour * 60)
+        final minutes = (widget.startHour * 60 + dy / _pp * 60)
             .roundToDouble()
             .clamp(widget.startHour * 60.0, endHour * 60.0);
         final snapped = ((minutes / 10).round() * 10).clamp(
@@ -600,7 +604,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
           onTap: () {
             if (candidate.isNotEmpty) return;
             // 点空白创建：按点击位置预填 1 小时时段（吸附 10 分钟）
-            final minutes = widget.startHour * 60 + _tapY / pixelPerHour * 60;
+            final minutes = widget.startHour * 60 + _tapY / _pp * 60;
             final tapped = ((minutes / 10).round() * 10)
                 .clamp(widget.startHour * 60, endHour * 60 - 60)
                 .toInt();
@@ -685,7 +689,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
             );
           },
           child: SizedBox(
-            height: (endHour - widget.startHour) * pixelPerHour,
+            height: (endHour - widget.startHour) * _pp,
             // 拖入不整列变蓝（用户反馈太丑），仅保留顶部时间浮标与指示线
             child: Stack(
               // A13：胶囊浮层允许跨列绘制（周视图列宽约 50px，胶囊 78px）
@@ -866,7 +870,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
                           ((gStart.hour * 60 + gStart.minute) -
                               widget.startHour * 60) /
                           60 *
-                          pixelPerHour,
+                          _pp,
                       text: DateUtilsEx.timeCn(gStart),
                     );
                   },
@@ -957,7 +961,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
 
   /// y 坐标吸附后的分钟数（10 分钟粒度）
   int _snapMinutesForY(double y) {
-    final minutes = (widget.startHour * 60 + y / pixelPerHour * 60)
+    final minutes = (widget.startHour * 60 + y / _pp * 60)
         .roundToDouble()
         .clamp(widget.startHour * 60.0, endHour * 60.0);
     return ((minutes / 10).round() * 10)
@@ -968,8 +972,8 @@ class DayColumnState extends ConsumerState<DayColumn> {
   /// 虚影高度（被拖任务时长对应；不足 30 分钟按 30 分钟，与实块一致）
   double _dragGhostHeight() {
     final info = widget.dragGhostInfo?.value;
-    if (info == null) return pixelPerHour;
-    final h = info.durationMinutes / 60 * pixelPerHour;
+    if (info == null) return _pp;
+    final h = info.durationMinutes / 60 * _pp;
     return h < 32 ? 32 : h;
   }
 
@@ -997,10 +1001,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
   /// 虚影在时间轴内的 top——基于实际写入（C5-1 回退后）的开始时间
   double _ghostTopFor(double gy) {
     final s = _draggedStartForMinutes(_snapMinutesForY(gy));
-    return ((s.hour * 60 + s.minute) - widget.startHour * 60) /
-            60 *
-            pixelPerHour -
-        1;
+    return ((s.hour * 60 + s.minute) - widget.startHour * 60) / 60 * _pp - 1;
   }
 
   /// E7：将拖动范围吸附到 10 分钟粒度
@@ -1008,10 +1009,8 @@ class DayColumnState extends ConsumerState<DayColumn> {
   /// 此前顶部/底部 padding 区拖动可得 5:30/23:30，预览与结果不一致
   /// C5-2：两端同 clamp 到 23:00 时保证至少 10 分钟跨度
   (DateTime, DateTime) _snapRange(double y1, double y2) {
-    final minutes1 =
-        widget.startHour * 60 + (y1 < y2 ? y1 : y2) / pixelPerHour * 60;
-    final minutes2 =
-        widget.startHour * 60 + (y1 < y2 ? y2 : y1) / pixelPerHour * 60;
+    final minutes1 = widget.startHour * 60 + (y1 < y2 ? y1 : y2) / _pp * 60;
+    final minutes2 = widget.startHour * 60 + (y1 < y2 ? y2 : y1) / _pp * 60;
     var snapped1 = ((minutes1 / 10).round() * 10)
         .clamp(widget.startHour * 60, endHour * 60)
         .toInt();
@@ -1032,12 +1031,12 @@ class DayColumnState extends ConsumerState<DayColumn> {
   /// 将 y 坐标区间吸附到 10 分钟粒度（预览高亮区用，与 _snapRange 一致）
   (double, double) _snappedYRange(double y1, double y2) {
     double snap(double y) {
-      final minutes = widget.startHour * 60 + y / pixelPerHour * 60;
+      final minutes = widget.startHour * 60 + y / _pp * 60;
       final snapped = ((minutes / 10).round() * 10).clamp(
         widget.startHour * 60,
         endHour * 60,
       );
-      return (snapped - widget.startHour * 60) / 60 * pixelPerHour;
+      return (snapped - widget.startHour * 60) / 60 * _pp;
     }
 
     final s1 = snap(y1 < y2 ? y1 : y2);
@@ -1076,7 +1075,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
     const capGap = 48.0;
     // 水平错开量：胶囊中心与手指水平间距（手指不挡胶囊，比继续加高更自然）
     const capOffsetX = 36.0;
-    final maxY = (endHour - widget.startHour) * pixelPerHour;
+    final maxY = (endHour - widget.startHour) * _pp;
     final safeBottom = MediaQuery.paddingOf(context).bottom + 4;
     var top = anchorY - capH - capGap;
     // 屏幕内定位：列 Stack 顶部全局 y + 列内锚点 → 锚点屏幕 y，
@@ -1233,12 +1232,12 @@ class DayColumnState extends ConsumerState<DayColumn> {
         : ps == null
         ? 0
         : AppClock.asApp(ps).hour * 60 + AppClock.asApp(ps).minute;
-    return (minutes - widget.startHour * 60) / 60 * pixelPerHour;
+    return (minutes - widget.startHour * 60) / 60 * _pp;
   }
 
   double _heightFor(CalendarItem item) {
     final dur = item.task.durationMinutes;
-    final h = dur / 60 * pixelPerHour;
+    final h = dur / 60 * _pp;
     // A13：不足 30 分钟的任务按 30 分钟（32px）显示，保证块内文字可读
     return h < 32 ? 32 : h;
   }
@@ -1246,7 +1245,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
   /// 组区间 y 坐标换算（+N 徽标定位用）
   double _topForSpan(DateTime s) {
     final minutes = s.hour * 60 + s.minute;
-    return (minutes - widget.startHour * 60) / 60 * pixelPerHour;
+    return (minutes - widget.startHour * 60) / 60 * _pp;
   }
 
   double _blockWidth(OverlapBlock b) {
@@ -1375,16 +1374,12 @@ class DayColumnState extends ConsumerState<DayColumn> {
       a1.isBefore(b2) && b1.isBefore(a2);
 }
 
-
-
 class Interval {
   final DateTime start;
   final DateTime end;
 
   Interval(this.start, this.end);
 }
-
-
 
 class OverlapBlock {
   final CalendarItem item;
@@ -1410,10 +1405,8 @@ class OverlapBlock {
 
 /// 「+N」小徽标：同一时间超过 2 个任务时的提示，点击弹当天任务列表
 
-
 class MoreBlock extends StatelessWidget {
-  const MoreBlock({
-    super.key,required this.count, required this.day});
+  const MoreBlock({super.key, required this.count, required this.day});
 
   final int count;
   final DateTime day;
@@ -1449,7 +1442,6 @@ class MoreBlock extends StatelessWidget {
 }
 
 /// 任务块（可拖动改期、长按菜单、点击详情、勾选完成）
-
 
 class TaskBlock extends ConsumerWidget {
   const TaskBlock({
@@ -1609,7 +1601,9 @@ class TaskBlock extends ConsumerWidget {
                       children: [
                         Text(
                           t.title,
-                          maxLines: allDay ? 2 : (_blockLineCount()),
+                          maxLines: allDay
+                              ? 2
+                              : _blockLineCount(ref.read(pixelPerHourProvider)),
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 10,
@@ -1626,7 +1620,8 @@ class TaskBlock extends ConsumerWidget {
                             // 8月11日 06:00"），避免只显示时分产生跨天歧义
                             DateUtilsEx.timeRangeText(
                               t.planStart!,
-                              t.planEnd ?? t.planStart!.add(const Duration(hours: 1)),
+                              t.planEnd ??
+                                  t.planStart!.add(const Duration(hours: 1)),
                             ),
                             style: TextStyle(
                               fontSize: 8,
@@ -1646,14 +1641,14 @@ class TaskBlock extends ConsumerWidget {
   }
 
   /// 按块高计算可显示的文字行数（10px 字约 14dp 行高）
-  int _blockLineCount() {
+  int _blockLineCount(double pp) {
     final ps = item.task.planStart;
     final pe = item.task.planEnd;
     if (ps == null) return 2;
     final durMinutes = pe == null
         ? 60
         : pe.difference(ps).inMinutes.clamp(1, 1440);
-    final heightDp = durMinutes / 60 * pixelPerHour;
+    final heightDp = durMinutes / 60 * pp;
     final lines = (heightDp / 14).floor();
     return lines.clamp(1, 3);
   }

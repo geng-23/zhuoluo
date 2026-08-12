@@ -438,7 +438,10 @@ class _WeekViewState extends ConsumerState<WeekView> {
     final day = _dragDay.value.add(Duration(days: col));
     // 稳定基准换算内容 y：视口顶部 + 轴顶部 padding + 共享滚动 offset。
     // 不依赖各页自身 scroll offset（跨页翻页恢复前的瞬态会让落点偏上）
-    final localDy = pos.dy - dragViewportTopY.value - axisTopPadding +
+    final localDy =
+        pos.dy -
+        dragViewportTopY.value -
+        axisTopPadding +
         _sharedScrollOffset.value;
     // 与时间轴渲染同口径（整周 7 天取最早任务）：单日口径在周内有
     // 更早任务时落点会偏移 1 小时（所见非所得）；渲染周起点与
@@ -450,9 +453,10 @@ class _WeekViewState extends ConsumerState<WeekView> {
       byDay: widget.byDay,
       days: List.generate(7, (i) => weekStart.add(Duration(days: i))),
     );
-    final minutes = (startHour * 60 + localDy / pixelPerHour * 60)
-        .roundToDouble()
-        .clamp(startHour * 60.0, endHour * 60.0);
+    final minutes =
+        (startHour * 60 + localDy / ref.read(pixelPerHourProvider) * 60)
+            .roundToDouble()
+            .clamp(startHour * 60.0, endHour * 60.0);
     final snapped = ((minutes / 10).round() * 10).clamp(
       startHour * 60,
       endHour * 60,
@@ -520,62 +524,62 @@ class _WeekViewState extends ConsumerState<WeekView> {
             ? const NeverScrollableScrollPhysics()
             : null,
         // itemCount 随固定基准同步扩大（自 _epochMonday 起每周一页，
-      // 与 DayView 的 40000 对称，自 2000-01-01 起共约 109 年）
-      itemCount: 40000,
-      // A13：allowImplicitScrolling 预构建页在 widget 测试 teardown 时
-      // 触发 deactivate 时序问题（NowLine Timer pending），暂不启用；
-      // 丝滑翻页主要靠窗口缓存（翻页零 DB）+ byDay 分组 build 减负
-      onPageChanged: (page) {
-        _activePage.value = page;
-        final offset = page - 500;
-        final weekMonday = _epochMonday.add(Duration(days: offset * 7));
-        // 外部跳页（今天按钮/日期选择）动画期间——onPageChanged
-        // 在动画中（round 变化）多次触发，一律只同步 _dragDay、不回写
-        // selectedDay（否则回写→didUpdateWidget→animateToPage 回跳打断
-        // 动画，最终停在中间页/月）；到达目标页时结束拦截
-        if (_pendingExternalPage != null) {
-          _dragDay.value = weekMonday;
-          if (page == _pendingExternalPage) {
-            _pendingExternalPage = null;
+        // 与 DayView 的 40000 对称，自 2000-01-01 起共约 109 年）
+        itemCount: 40000,
+        // A13：allowImplicitScrolling 预构建页在 widget 测试 teardown 时
+        // 触发 deactivate 时序问题（NowLine Timer pending），暂不启用；
+        // 丝滑翻页主要靠窗口缓存（翻页零 DB）+ byDay 分组 build 减负
+        onPageChanged: (page) {
+          _activePage.value = page;
+          final offset = page - 500;
+          final weekMonday = _epochMonday.add(Duration(days: offset * 7));
+          // 外部跳页（今天按钮/日期选择）动画期间——onPageChanged
+          // 在动画中（round 变化）多次触发，一律只同步 _dragDay、不回写
+          // selectedDay（否则回写→didUpdateWidget→animateToPage 回跳打断
+          // 动画，最终停在中间页/月）；到达目标页时结束拦截
+          if (_pendingExternalPage != null) {
+            _dragDay.value = weekMonday;
+            if (page == _pendingExternalPage) {
+              _pendingExternalPage = null;
+            }
+            return;
           }
-          return;
-        }
-        // 手动翻页时同步 _dragDay（与 DayView 一致），
-        // 修复翻周后长按选时创建到旧周的问题
-        _dragDay.value = weekMonday;
-        widget.onDayChanged(weekMonday);
-      },
-      itemBuilder: (context, page) {
-        final offset = page - 500;
-        final weekStart = _epochMonday.add(Duration(days: offset * 7));
-        return AxisKeepAlive(
-          child: TimeAxisView(
-            pageIndex: page,
-            activePage: _activePage,
-            items: widget.items,
-            byDay: widget.byDay,
-            start: weekStart,
-            isWeek: true,
-            selectedDay: widget.selectedDay,
-            dragDay: _dragDay,
-            edgeState: _edgeState,
-            scrollOffsetShare: _sharedScrollOffset,
-            onEdgeTurn: _edgeTurn,
-            dragGlobalPos: dragGlobalPos,
-            dragTaskId: dragTaskId,
-            dragActiveDay: dragActiveDay,
-            dragGhostInfo: dragGhostInfo,
-            dragDropped: dragDropped,
-            dragAxisTopY: dragAxisTopY,
-            dragScrollCtrl: dragScrollCtrl,
-            dragViewportTopY: dragViewportTopY,
-            dragViewportH: dragViewportH,
-            edgeTurnCtrl: _edgeTurnCtrl,
-            onDragStartTracking: (taskId, pointer) =>
-                _registerDragRoute(taskId, pointer),
-          ),
-        );
-      },
+          // 手动翻页时同步 _dragDay（与 DayView 一致），
+          // 修复翻周后长按选时创建到旧周的问题
+          _dragDay.value = weekMonday;
+          widget.onDayChanged(weekMonday);
+        },
+        itemBuilder: (context, page) {
+          final offset = page - 500;
+          final weekStart = _epochMonday.add(Duration(days: offset * 7));
+          return AxisKeepAlive(
+            child: TimeAxisView(
+              pageIndex: page,
+              activePage: _activePage,
+              items: widget.items,
+              byDay: widget.byDay,
+              start: weekStart,
+              isWeek: true,
+              selectedDay: widget.selectedDay,
+              dragDay: _dragDay,
+              edgeState: _edgeState,
+              scrollOffsetShare: _sharedScrollOffset,
+              onEdgeTurn: _edgeTurn,
+              dragGlobalPos: dragGlobalPos,
+              dragTaskId: dragTaskId,
+              dragActiveDay: dragActiveDay,
+              dragGhostInfo: dragGhostInfo,
+              dragDropped: dragDropped,
+              dragAxisTopY: dragAxisTopY,
+              dragScrollCtrl: dragScrollCtrl,
+              dragViewportTopY: dragViewportTopY,
+              dragViewportH: dragViewportH,
+              edgeTurnCtrl: _edgeTurnCtrl,
+              onDragStartTracking: (taskId, pointer) =>
+                  _registerDragRoute(taskId, pointer),
+            ),
+          );
+        },
       ),
     );
   }
@@ -954,20 +958,26 @@ class _DayViewState extends ConsumerState<DayView> {
     final day = _dragDay.value;
     // 稳定基准换算内容 y：视口顶部 + 轴顶部 padding + 共享滚动 offset。
     // 不依赖各页自身 scroll offset（跨页翻页恢复前的瞬态会让落点偏上）
-    final localDy = pos.dy - dragViewportTopY.value - axisTopPadding +
+    final localDy =
+        pos.dy -
+        dragViewportTopY.value -
+        axisTopPadding +
         _sharedScrollOffset.value;
     // 与时间轴渲染同口径（单日 = 渲染起点，与 build 中 day 同式）；
     // _dragDay 可能已翻页 ≠ 渲染日，直接用渲染日避免换算偏移
-    final renderDay = AppClock.at(2000, 1, 1).add(
-      Duration(days: _activePage.value),
-    );
+    final renderDay = AppClock.at(
+      2000,
+      1,
+      1,
+    ).add(Duration(days: _activePage.value));
     final startHour = effectiveStartHourFor(
       byDay: widget.byDay,
       days: [renderDay],
     );
-    final minutes = (startHour * 60 + localDy / pixelPerHour * 60)
-        .roundToDouble()
-        .clamp(startHour * 60.0, endHour * 60.0);
+    final minutes =
+        (startHour * 60 + localDy / ref.read(pixelPerHourProvider) * 60)
+            .roundToDouble()
+            .clamp(startHour * 60.0, endHour * 60.0);
     final snapped = ((minutes / 10).round() * 10).clamp(
       startHour * 60,
       endHour * 60,
@@ -1035,54 +1045,54 @@ class _DayViewState extends ConsumerState<DayView> {
             : null,
         itemCount: 40000,
         // A13：allowImplicitScrolling 预构建页在 widget 测试 teardown 时
-      // 触发 deactivate 时序问题（NowLine Timer pending），暂不启用；
-      // 丝滑翻页主要靠窗口缓存（翻页零 DB）+ byDay 分组 build 减负
-      onPageChanged: (page) {
-        _activePage.value = page;
-        final day = AppClock.at(2000, 1, 1).add(Duration(days: page));
-        // 外部跳日动画期间：onPageChanged 多次触发（round 变化），只同步
-        // _dragDay 不回写 selectedDay（防回跳打断动画停在中间日）；到达
-        // 目标页结束拦截（动画结束时 whenComplete 也会清理）
-        if (_pendingExternalPage != null) {
-          _dragDay.value = day;
-          if (page == _pendingExternalPage) {
-            _pendingExternalPage = null;
+        // 触发 deactivate 时序问题（NowLine Timer pending），暂不启用；
+        // 丝滑翻页主要靠窗口缓存（翻页零 DB）+ byDay 分组 build 减负
+        onPageChanged: (page) {
+          _activePage.value = page;
+          final day = AppClock.at(2000, 1, 1).add(Duration(days: page));
+          // 外部跳日动画期间：onPageChanged 多次触发（round 变化），只同步
+          // _dragDay 不回写 selectedDay（防回跳打断动画停在中间日）；到达
+          // 目标页结束拦截（动画结束时 whenComplete 也会清理）
+          if (_pendingExternalPage != null) {
+            _dragDay.value = day;
+            if (page == _pendingExternalPage) {
+              _pendingExternalPage = null;
+            }
+            return;
           }
-          return;
-        }
-        _dragDay.value = day;
-        widget.onDayChanged(day);
-      },
-      itemBuilder: (context, page) {
-        final day = AppClock.at(2000, 1, 1).add(Duration(days: page));
-        return AxisKeepAlive(
-          child: TimeAxisView(
-            pageIndex: page,
-            activePage: _activePage,
-            items: widget.items,
-            byDay: widget.byDay,
-            start: day,
-            isWeek: false,
-            selectedDay: widget.selectedDay,
-            dragDay: _dragDay,
-            edgeState: _edgeState,
-            scrollOffsetShare: _sharedScrollOffset,
-            onEdgeTurn: _edgeTurn,
-            dragGlobalPos: dragGlobalPos,
-            dragTaskId: dragTaskId,
-            dragActiveDay: dragActiveDay,
-            dragGhostInfo: dragGhostInfo,
-            dragDropped: dragDropped,
-            dragAxisTopY: dragAxisTopY,
-            dragScrollCtrl: dragScrollCtrl,
-            dragViewportTopY: dragViewportTopY,
-            dragViewportH: dragViewportH,
-            edgeTurnCtrl: _edgeTurnCtrl,
-            onDragStartTracking: (taskId, pointer) =>
-                _registerDragRoute(taskId, pointer),
-          ),
-        );
-      },
+          _dragDay.value = day;
+          widget.onDayChanged(day);
+        },
+        itemBuilder: (context, page) {
+          final day = AppClock.at(2000, 1, 1).add(Duration(days: page));
+          return AxisKeepAlive(
+            child: TimeAxisView(
+              pageIndex: page,
+              activePage: _activePage,
+              items: widget.items,
+              byDay: widget.byDay,
+              start: day,
+              isWeek: false,
+              selectedDay: widget.selectedDay,
+              dragDay: _dragDay,
+              edgeState: _edgeState,
+              scrollOffsetShare: _sharedScrollOffset,
+              onEdgeTurn: _edgeTurn,
+              dragGlobalPos: dragGlobalPos,
+              dragTaskId: dragTaskId,
+              dragActiveDay: dragActiveDay,
+              dragGhostInfo: dragGhostInfo,
+              dragDropped: dragDropped,
+              dragAxisTopY: dragAxisTopY,
+              dragScrollCtrl: dragScrollCtrl,
+              dragViewportTopY: dragViewportTopY,
+              dragViewportH: dragViewportH,
+              edgeTurnCtrl: _edgeTurnCtrl,
+              onDragStartTracking: (taskId, pointer) =>
+                  _registerDragRoute(taskId, pointer),
+            ),
+          );
+        },
       ),
     );
   }

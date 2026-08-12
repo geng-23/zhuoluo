@@ -127,11 +127,75 @@ void main() {
       const center = Offset(400, 400);
       await pinch(tester, center, fromSpread: 40, toSpread: 140);
       final after = container.read(calendarControllerProvider).selectedDay;
-      expect(
-        after,
-        before,
-        reason: '双指缩放由 ScaleGesture 获胜，PageView 不应翻周',
+      expect(after, before, reason: '双指缩放由 ScaleGesture 获胜，PageView 不应翻周');
+    });
+
+    testWidgets('连续两次捏合：第二次仍生效（状态残留回归）', (tester) async {
+      final container = makeContainer();
+      await pumpCalendar(tester, container);
+      const center = Offset(400, 400);
+      // 第一次捏合（放大到上限）
+      await pinch(tester, center, fromSpread: 40, toSpread: 120);
+      expect(container.read(pixelPerHourProvider), 128.0);
+      // 第二次捏合（缩小）——若上一次手势状态残留，第二次会失灵
+      await pinch(tester, center, fromSpread: 80, toSpread: 20);
+      final pp = container.read(pixelPerHourProvider);
+      expect(pp, lessThan(128.0), reason: '第二次捏合必须重新生效（上一手势状态不得残留）');
+    });
+
+    testWidgets('第一指先落停顿再落第二指 → 缩放仍生效（复现失灵时序）', (tester) async {
+      final container = makeContainer();
+      await pumpCalendar(tester, container);
+      const center = Offset(400, 400);
+      // 第一指先落并停顿——此前该时序让 ListView/PageView drag 抢先，
+      // ScaleGestureRecognizer 被判负、onScaleStart 不触发，缩放完全无反应
+      final g1 = await tester.startGesture(
+        center - const Offset(40, 0),
+        pointer: 1,
       );
+      await tester.pump(const Duration(milliseconds: 150));
+      final g2 = await tester.startGesture(
+        center + const Offset(40, 0),
+        pointer: 2,
+      );
+      await tester.pump();
+      // 两指一起张开
+      await g1.moveTo(center - const Offset(120, 0));
+      await g2.moveTo(center + const Offset(120, 0));
+      await tester.pump();
+      await g1.up();
+      await g2.up();
+      await tester.pumpAndSettle();
+      final pp = container.read(pixelPerHourProvider);
+      expect(pp, greaterThan(64.0), reason: '第二指落下后缩放必须生效（双指立即赢得竞技场）');
+    });
+
+    testWidgets('第一指落指微动后放第二指 → 缩放仍生效', (tester) async {
+      final container = makeContainer();
+      await pumpCalendar(tester, container);
+      const center = Offset(400, 400);
+      final g1 = await tester.startGesture(
+        center - const Offset(40, 0),
+        pointer: 1,
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      // 第一指落指微动（<touch slop 18px，模拟落指抖动/对准，未触发 drag）→
+      // 第二指落下后一起张开，缩放必须生效
+      await g1.moveBy(const Offset(6, 8));
+      await tester.pump();
+      final g2 = await tester.startGesture(
+        center + const Offset(40, 0),
+        pointer: 2,
+      );
+      await tester.pump();
+      await g1.moveTo(center - const Offset(120, 0));
+      await g2.moveTo(center + const Offset(120, 0));
+      await tester.pump();
+      await g1.up();
+      await g2.up();
+      await tester.pumpAndSettle();
+      final pp = container.read(pixelPerHourProvider);
+      expect(pp, greaterThan(64.0));
     });
   });
 }

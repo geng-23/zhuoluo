@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
@@ -454,10 +455,17 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                         final minPp =
                             (constraints.maxHeight - axisTopPadding * 2) /
                             totalHours;
-                        return GestureDetector(
-                          onScaleStart: (d) => _scaleStart(d),
-                          onScaleUpdate: (d) => _scaleUpdate(d, minPp),
-                          onScaleEnd: (_) => _scaleEnd(),
+                        return RawGestureDetector(
+                          gestures: <Type, GestureRecognizerFactory>{
+                            _ImmediateScaleRecognizer:
+                                GestureRecognizerFactoryWithHandlers<
+                                  _ImmediateScaleRecognizer
+                                >(() => _ImmediateScaleRecognizer(), (r) {
+                                  r.onStart = _scaleStart;
+                                  r.onUpdate = (d) => _scaleUpdate(d, minPp);
+                                  r.onEnd = (_) => _scaleEnd();
+                                }),
+                          },
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -626,19 +634,19 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
   }
 
   // ---------- 双指缩放（仅 2 指生效；单指滑动由 PageView/ListView 处理） ----------
-  /// 手势开始时的缩放级别（onScaleStart 记录，锚点换算用）
+  /// 手势开始时（onScaleStart）的缩放级别——d.scale 的乘数基准
   double? _scaleStartPp;
 
-  /// 手势焦点在时间轴区域内的局部 y
-  Offset? _scaleFocal;
+  /// 上一帧的缩放级别（增量锚点基准，避免累计误差）
+  double? _lastScalePp;
 
-  /// 手势开始时的垂直滚动位置（锚点换算用）
-  double _scaleStartScroll = 0;
+  /// 上一帧锚定后的垂直滚动位置（增量锚点基准）
+  double _lastScaleScroll = 0;
 
   void _scaleStart(ScaleStartDetails d) {
     _scaleStartPp = ref.read(pixelPerHourProvider);
-    _scaleFocal = d.localFocalPoint;
-    _scaleStartScroll = _scrollController.hasClients
+    _lastScalePp = _scaleStartPp;
+    _lastScaleScroll = _scrollController.hasClients
         ? _scrollController.offset
         : 0;
   }
@@ -646,29 +654,35 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
   void _scaleUpdate(ScaleUpdateDetails d, double minPp) {
     if (d.pointerCount < 2) return;
     final startPp = _scaleStartPp;
-    final focal = _scaleFocal;
-    if (startPp == null || focal == null) return;
+    if (startPp == null) return;
     final newPp = (startPp * d.scale).clamp(minPp, maxPixelPerHour);
-    final notifier = ref.read(pixelPerHourProvider.notifier);
-    if (notifier.state == newPp) return;
-    notifier.state = newPp;
-    // 锚点缩放：手指中心对应的时刻保持在原位不漂移。
+    final lastPp = _lastScalePp ?? startPp;
+    // 增量锚定：以上一帧为基准，用当前两指中心（每帧实时）换算，内容不漂移。
     // 内容坐标（相对轴顶 offset=0）= focal 局部 y + scrollOffset - 轴顶 padding；
-    // 缩放后按比例映射回新滚动位置（scroll 变化由 _onScroll 同步共享值）
-    final oldContentY = _scaleStartScroll + focal.dy - axisTopPadding;
-    final newContentY = oldContentY * newPp / startPp;
+    // 缩放后按比例映射回新滚动位置（scroll 变化由 _onScroll 同步共享值）。
+    // 不依赖 onScaleStart 时的 focal——onStart 可能在单指阶段触发
+    //（focal = 第一指位置），每帧用实时双指中心即自动校正。
+    final focal = d.localFocalPoint;
+    final oldContentY = _lastScaleScroll + focal.dy - axisTopPadding;
+    final newContentY = oldContentY * newPp / lastPp;
+    _lastScalePp = newPp;
     if (_scrollController.hasClients) {
       final max = _scrollController.position.maxScrollExtent;
       final target = (newContentY + axisTopPadding - focal.dy).clamp(0.0, max);
+      _lastScaleScroll = target;
       if ((_scrollController.offset - target).abs() > 0.5) {
         _scrollController.jumpTo(target);
       }
+    }
+    final notifier = ref.read(pixelPerHourProvider.notifier);
+    if (notifier.state != newPp) {
+      notifier.state = newPp;
     }
   }
 
   void _scaleEnd() {
     _scaleStartPp = null;
-    _scaleFocal = null;
+    _lastScalePp = null;
   }
 
   /// 是否显示在顶部置顶区（全天 / 无计划时间 / 跨天任务）
@@ -1191,3 +1205,28 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
 /// 边缘翻页控制器（WeekView/DayView 持有，跨页共享）：
 /// 连续翻周链的 Timer/方向/最后位置不随列重建丢失，
 /// 离开边缘/松手时任意列都可统一取消
+
+/// 时间轴缩放识别器：双指一到位立即赢得手势竞技场。
+/// 默认 ScaleGestureRecognizer 需等两指移动超过 slop 才 accepted——若第一指
+/// 先落地且微动超过 ListView/PageView 的 drag slop，drag 已抢先 started，
+/// scale 被判负、onScaleStart 不再触发，双指捏合完全无反应。
+/// 覆写 addAllowedPointer/handleEvent：第二指 down 或 move 时 pointerCount>=2
+/// 立即 resolve(accepted)，抢在 drag 之前占位；单指时保持默认让位（不破坏
+/// 单指滚动/翻页）。
+class _ImmediateScaleRecognizer extends ScaleGestureRecognizer {
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    if (pointerCount >= 2) {
+      resolve(GestureDisposition.accepted);
+    }
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    super.handleEvent(event);
+    if (pointerCount >= 2) {
+      resolve(GestureDisposition.accepted);
+    }
+  }
+}

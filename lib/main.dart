@@ -52,6 +52,17 @@ Future<void> _runStartupBackground(ProviderContainer container) async {
     debugPrint('启动后台：锚点修复失败 $e');
   }
   try {
+    // 回收站超期条目自动清理（保留期来自偏好设置）
+    final retention = await container
+        .read(settingsProvider)
+        .getTrashRetentionDays();
+    await container.read(dbProvider).deleteTrashOlderThan(
+      AppClock.now().subtract(Duration(days: retention)),
+    );
+  } catch (e) {
+    debugPrint('启动后台：回收站清理失败 $e');
+  }
+  try {
     await container.read(notificationServiceProvider).requestPermission();
   } catch (e) {
     debugPrint('启动后台：通知权限请求失败 $e');

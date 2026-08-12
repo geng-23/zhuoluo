@@ -2,6 +2,7 @@
 
 import 'package:drift/drift.dart' show Value;
 import 'package:zhuoluo/data/database/database.dart';
+import 'package:zhuoluo/data/services/backup_json.dart';
 import 'package:zhuoluo/data/services/backup_platform.dart';
 import 'package:zhuoluo/data/services/backup_types.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
@@ -37,13 +38,13 @@ class BackupService {
       'version': 1,
       'exportedAt': AppClock.now().toIso8601String(),
       'lists': lists.map((e) => _listToJson(e)).toList(),
-      'tasks': tasks.map((e) => _taskToJson(e)).toList(),
-      'reminders': reminders.map((e) => _reminderToJson(e)).toList(),
-      'completions': completions.map((e) => _completionToJson(e)).toList(),
-      'exceptions': exceptions.map((e) => _exceptionToJson(e)).toList(),
+      'tasks': tasks.map((e) => taskToJson(e)).toList(),
+      'reminders': reminders.map((e) => reminderToJson(e)).toList(),
+      'completions': completions.map((e) => completionToJson(e)).toList(),
+      'exceptions': exceptions.map((e) => exceptionToJson(e)).toList(),
       'habits': habits.map((e) => _habitToJson(e)).toList(),
       'habitRecords': habitRecords.map((e) => _habitRecordToJson(e)).toList(),
-      'pomodoros': pomodoros.map((e) => _pomodoroToJson(e)).toList(),
+      'pomodoros': pomodoros.map((e) => pomodoroToJson(e)).toList(),
       'settings': settings
           .map((e) => {'key': e.key, 'value': e.value})
           .toList(),
@@ -460,9 +461,7 @@ class BackupService {
     return a.isAtSameMomentAs(b);
   }
 
-  // ---- 序列化 ----
-  String? _dateToJson(DateTime? d) => d?.toIso8601String();
-
+  // ---- 序列化（任务域实体编码见 backup_json.dart，与回收站快照共用）----
   Map<String, dynamic> _listToJson(TaskList e) => {
     'id': e.id,
     'name': e.name,
@@ -473,56 +472,12 @@ class BackupService {
     'createdAt': e.createdAt.toIso8601String(),
   };
 
-  Map<String, dynamic> _taskToJson(Task e) => {
-    'id': e.id,
-    'listId': e.listId,
-    'parentId': e.parentId,
-    'title': e.title,
-    'note': e.note,
-    'quadrant': e.quadrant,
-    'planStart': _dateToJson(e.planStart),
-    'planEnd': _dateToJson(e.planEnd),
-    'dueTime': _dateToJson(e.dueTime),
-    'isAllDay': e.isAllDay,
-    'color': e.color,
-    'rrule': e.rrule,
-    'hasReminder': e.hasReminder,
-    'hasNote': e.hasNote,
-    'sortOrder': e.sortOrder,
-    'skippedDates': e.skippedDates,
-    'completedAt': _dateToJson(e.completedAt),
-    'createdAt': e.createdAt.toIso8601String(),
-  };
-
-  Map<String, dynamic> _reminderToJson(Reminder e) => {
-    'id': e.id,
-    'taskId': e.taskId,
-    'remindMinutesBefore': e.remindMinutesBefore,
-    'isPersistent': e.isPersistent,
-    'remindAtMinutes': e.remindAtMinutes,
-  };
-
-  Map<String, dynamic> _completionToJson(TaskCompletion e) => {
-    'id': e.id,
-    'taskId': e.taskId,
-    'instanceDate': e.instanceDate.toIso8601String(),
-    'completedAt': e.completedAt.toIso8601String(),
-  };
-
-  Map<String, dynamic> _exceptionToJson(TaskException e) => {
-    'id': e.id,
-    'taskId': e.taskId,
-    'instanceDate': e.instanceDate.toIso8601String(),
-    'action': e.action,
-    'overrideScheduledDate': _dateToJson(e.overrideScheduledDate),
-  };
-
   Map<String, dynamic> _habitToJson(Habit e) => {
     'id': e.id,
     'name': e.name,
     'icon': e.icon,
     'frequency': e.frequency,
-    'reminderTime': _dateToJson(e.reminderTime),
+    'reminderTime': dateToJson(e.reminderTime),
     'createdAt': e.createdAt.toIso8601String(),
   };
 
@@ -530,14 +485,6 @@ class BackupService {
     'id': e.id,
     'habitId': e.habitId,
     'date': e.date.toIso8601String(),
-    'completedAt': e.completedAt.toIso8601String(),
-  };
-
-  Map<String, dynamic> _pomodoroToJson(PomodoroRecord e) => {
-    'id': e.id,
-    'taskId': e.taskId,
-    'durationMinutes': e.durationMinutes,
-    'startedAt': e.startedAt.toIso8601String(),
     'completedAt': e.completedAt.toIso8601String(),
   };
 

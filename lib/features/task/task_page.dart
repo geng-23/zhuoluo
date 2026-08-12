@@ -13,6 +13,7 @@ import 'package:zhuoluo/data/services/chinese_date_parser.dart' hide TimeOfDay;
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
+import 'package:zhuoluo/features/trash/trash_page.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 任务页：抽屉侧栏 + 任务列表
@@ -132,7 +133,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
             '要删除哪个？\n\n'
             '「${t.title}」\n'
             '· 删除本次（${DateUtilsEx.dateCn(instDay)}）：仅跳过这一天\n'
-            '· 删除全部：删除整个系列及其全部记录',
+            '· 删除全部：删除整个系列并移入回收站，可恢复',
           ),
           actions: [
             TextButton(
@@ -612,7 +613,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('删除所选任务？'),
-        content: Text('将删除 ${_selected.length} 个任务及其子任务'),
+        content: Text('将删除 ${_selected.length} 个任务及其子任务，移入回收站可恢复'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),
@@ -1544,6 +1545,16 @@ class _TaskDrawer extends ConsumerWidget {
               onTap: () => selectAndClose(
                 () => notifier.selectSmartView('done'),
               ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('回收站'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const TrashPage()),
+                );
+              },
             ),
             // 搜索入口在右上角（AppBar 图标），侧边栏不再重复
             const Divider(),

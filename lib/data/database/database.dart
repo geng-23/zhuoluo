@@ -124,6 +124,22 @@ class Settings extends Table {
   Set<Column> get primaryKey => {key};
 }
 
+/// 回收站：已删除任务整棵树快照。
+/// 任务删除时仍物理删除，整棵树序列化 JSON 存入 [data]（任务+子树+提醒+
+/// 完成记录+例外+番茄），恢复时按原 ID 重建；彻底删除只删本条快照。
+/// 备份导出不含回收站；备份恢复（replaceAll）时清空本表，避免旧快照复活。
+class TrashItems extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  /// 被删任务根 id（撤销恢复后按此删除对应回收站行）
+  IntColumn get originalTaskId => integer()();
+  TextColumn get title => text()();
+  /// 删除时所属清单名快照（清单可能随后被删/改名）
+  TextColumn get listName => text()();
+  DateTimeColumn get deletedAt => dateTime()();
+  /// 整棵树 JSON 快照（encode/decode 见 trash_service.dart）
+  TextColumn get data => text()();
+}
+
 @DriftDatabase(
   tables: [
     Lists,
@@ -135,6 +151,7 @@ class Settings extends Table {
     HabitRecords,
     PomodoroRecords,
     Settings,
+    TrashItems,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -143,7 +160,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -169,6 +186,10 @@ class AppDatabase extends _$AppDatabase {
       }
     },
     onUpgrade: (m, from, to) async {
+      if (from < 6) {
+        // v6：回收站表（已删除任务整棵树快照）
+        await m.createTable(trashItems);
+      }
       if (from < 5) {
         // v5：habit_records 加唯一约束，先清理重复行（双击竞态崩溃修复）。
         // 容错：极旧/不完整库可能无该表（迁移测试手工构造的部分表库），跳过
@@ -1621,6 +1642,41 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
+  // ---------- 回收站 ----------
+  Future<int> insertTrashItem(TrashItemsCompanion c) => into(trashItems).insert(c);
+
+  /// 回收站条目（按删除时间倒序）
+  Future<List<TrashItem>> getTrashItems() =>
+      (select(trashItems)..orderBy([(t) => OrderingTerm.desc(t.deletedAt)]))
+          .get();
+
+  Future<TrashItem?> getTrashItem(int id) =>
+      (select(trashItems)..where((t) => t.id.equals(id))).getSingleOrNull();
+
+  /// 按被删任务根 id 查回收站条目（撤销条撤销后删除对应行用）
+  Future<TrashItem?> getTrashItemByOriginalTaskId(int originalTaskId) =>
+      (select(trashItems)
+            ..where((t) => t.originalTaskId.equals(originalTaskId)))
+          .getSingleOrNull();
+
+  Future<void> deleteTrashItem(int id) =>
+      (delete(trashItems)..where((t) => t.id.equals(id))).go();
+
+  Future<void> deleteTrashItemByOriginalTaskId(int originalTaskId) =>
+      (delete(trashItems)
+            ..where((t) => t.originalTaskId.equals(originalTaskId)))
+          .go();
+
+  Future<void> clearTrash() => delete(trashItems).go();
+
+  /// 删除删除时间早于 [cutoff] 的回收站条目（保留期自动清理）
+  Future<void> deleteTrashOlderThan(DateTime cutoff) =>
+      (delete(trashItems)..where((t) => t.deletedAt.isSmallerThanValue(cutoff)))
+          .go();
+
+  /// 回收站条目数量（抽屉入口角标用）
+  Future<int> countTrash() => trashItems.count().getSingle();
+
   // ---------- 备份支持 ----------
   Future<List<Task>> allTasksForBackup() => select(tasks).get();
 
@@ -1739,6 +1795,8 @@ class AppDatabase extends _$AppDatabase {
       await delete(habits).go();
       await delete(tasks).go();
       await delete(lists).go();
+      // 备份恢复清空回收站：避免旧快照恢复后被再次恢复成"复活任务"
+      await delete(trashItems).go();
       for (final l in listRows) {
         await into(lists).insert(l, mode: InsertMode.insertOrReplace);
       }

@@ -1750,7 +1750,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
             '要删除哪个？\n\n'
             '「${t.title}」\n'
             '· 删除本次（${DateUtilsEx.dateCn(instDay)}）：仅跳过这一天\n'
-            '· 删除全部：删除整个系列及其全部记录',
+            '· 删除全部：删除整个系列并移入回收站，可恢复',
           ),
           actions: [
             TextButton(
@@ -1800,7 +1800,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('删除任务？'),
-        content: Text('「${t.title}」及其子任务将被删除'),
+        content: Text('「${t.title}」及其子任务将移入回收站，可恢复'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),

@@ -44,6 +44,8 @@ class SettingsController {
   static const keyDefaultAllDayRemindAt = 'defaultAllDayRemindAt';
   /// 应用时区（IANA 名称，如 Asia/Shanghai）；null/空 = 跟随系统时区
   static const keyAppTimezone = 'appTimezone';
+  /// 回收站保留天数（默认 30；偏好设置可调）
+  static const keyTrashRetentionDays = 'trashRetentionDays';
 
   Future<String?> get(String key) => _db.getSetting(key);
 
@@ -81,6 +83,13 @@ class SettingsController {
   Future<String?> getAppTimezone() async {
     final raw = await get(keyAppTimezone);
     return (raw == null || raw.isEmpty) ? null : raw;
+  }
+
+  /// 回收站保留天数（默认 30）
+  Future<int> getTrashRetentionDays() async {
+    final raw = await get(keyTrashRetentionDays);
+    final d = int.tryParse(raw ?? '');
+    return (d == null || d <= 0) ? 30 : d;
   }
 
   // ---------- 音效 / 震动开关 ----------

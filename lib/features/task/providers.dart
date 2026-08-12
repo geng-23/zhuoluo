@@ -8,6 +8,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
+import 'package:zhuoluo/data/services/trash_service.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 
 class TasksState {
@@ -668,7 +669,7 @@ class TasksController extends StateNotifier<TasksState> {
   }
 
   // D1：删除撤销缓存（限容——超出上限丢弃最旧快照，防止长期不撤销时内存增长）
-  final Map<int, _DeletedSnapshot> _deletedCache = {};
+  final Map<int, TrashSnapshot> _deletedCache = {};
   static const int _deletedCacheLimit = 50;
 
   /// 递归收集任务子树（含自身后代，不含根）
@@ -684,7 +685,10 @@ class TasksController extends StateNotifier<TasksState> {
     return result;
   }
 
-  /// 删除任务并支持撤销（缓存快照：任务 + 子树 + 提醒 + 完成记录 + 例外 + 番茄记录）
+  /// 删除任务并支持撤销 + 进回收站（缓存快照：任务 + 子树 + 提醒 + 完成记录 +
+  /// 例外 + 番茄记录；同一快照持久化到 trash_items 供回收站页恢复）。
+  /// 写回收站快照与物理删除在同一事务内——中途失败整体回滚，
+  /// 不会出现"回收站有记录但任务还在"的孤儿。
   Future<void> deleteTaskWithUndo(int id) async {
     final t = await _db.getTask(id);
     if (t == null) return;
@@ -708,25 +712,39 @@ class TasksController extends StateNotifier<TasksState> {
     final pomodoros = await (_db.select(
       _db.pomodoroRecords,
     )..where((p) => p.taskId.isIn(allIds))).get();
-    _deletedCache[id] = _DeletedSnapshot(
-      t,
-      subs,
-      reminders,
-      completions,
-      exceptions,
-      pomodoros,
+    final snap = TrashSnapshot(
+      task: t,
+      subTasks: subs,
+      reminders: reminders,
+      completions: completions,
+      exceptions: exceptions,
+      pomodoros: pomodoros,
     );
+    _deletedCache[id] = snap;
     // 限容——超出上限丢弃最旧快照（Map 保持插入序，keys.first 最旧）
     while (_deletedCache.length > _deletedCacheLimit) {
       _deletedCache.remove(_deletedCache.keys.first);
     }
-    await _db.deleteTask(id);
+    // 清单名快照（清单可能随后被删/改名，回收站显示删除时上下文）
+    final list = await _db.getListById(t.listId);
+    await _db.transaction(() async {
+      await _db.insertTrashItem(
+        TrashItemsCompanion.insert(
+          originalTaskId: t.id,
+          title: t.title,
+          listName: list?.name ?? '未知清单',
+          deletedAt: AppClock.now(),
+          data: encodeTrashSnapshot(snap),
+        ),
+      );
+      await _db.deleteTask(id);
+    });
     // 删除主路径必须 bump，否则日历/四象限/统计常驻页不刷新
     _bump();
   }
 
   /// 撤销删除（恢复任务 + 子树 + 完整提醒 + 完成记录 + 例外 + 番茄记录，
-  /// 全部在同一事务内执行）
+  /// 全部在同一事务内执行；成功后删除对应回收站条目，避免残留旧快照）
   /// [silent]：批量撤销时静默（批4-2：此前批量撤销逐条播音效+震动）
   Future<void> undoDelete(int id, {bool silent = false}) async {
     // 事务成功前不得移除快照——失败回滚后快照仍在，数据不永久丢失
@@ -736,85 +754,10 @@ class TasksController extends StateNotifier<TasksState> {
       SoundService.instance.play(SoundKind.reopen);
       Haptics.light();
     }
-    await _db.transaction(() async {
-      // 兜底：恢复任务时清单可能已被删除（连带删除撤销前清单未恢复等），
-      // 重映射到默认清单，避免外键约束失败导致任务永久丢失
-      var listId = snap.task.listId;
-      if (await _db.getListById(listId) == null) {
-        await _db.ensureDefaultList();
-        listId = (await _db.getDefaultList()).id;
-      }
-      await _db.restoreTask(snap.task.copyWith(listId: listId));
-      for (final s in snap.subTasks) {
-        // 兜底延伸：子任务清单同样可能已被删除（与父同清单时
-        // 直接沿用兜底值，不同清单单独检查），否则子任务恢复时
-        // listId 外键崩溃导致整个撤销回滚
-        var sListId = s.listId;
-        if (await _db.getListById(sListId) == null) {
-          sListId = listId;
-        }
-        await _db.restoreTask(
-          sListId == s.listId ? s : s.copyWith(listId: sListId),
-        );
-      }
-      for (final r in snap.reminders) {
-        await _db.insertReminderRaw(
-          RemindersCompanion(
-            id: Value(r.id),
-            taskId: Value(r.taskId),
-            remindMinutesBefore: Value(r.remindMinutesBefore),
-            isPersistent: Value(r.isPersistent),
-            // 恢复全天任务提醒时刻（旧快照缺该字段时保持 null = 默认 09:00）
-            remindAtMinutes: r.remindAtMinutes == null
-                ? const Value(null)
-                : Value(r.remindAtMinutes),
-          ),
-        );
-      }
-      for (final c in snap.completions) {
-        await _db.insertCompletionRaw(
-          TaskCompletionsCompanion(
-            id: Value(c.id),
-            taskId: Value(c.taskId),
-            instanceDate: Value(c.instanceDate),
-            completedAt: Value(c.completedAt),
-          ),
-        );
-      }
-      for (final e in snap.exceptions) {
-        await _db.insertExceptionRaw(
-          TaskExceptionsCompanion(
-            id: Value(e.id),
-            taskId: Value(e.taskId),
-            instanceDate: Value(e.instanceDate),
-            action: Value(e.action),
-            overrideScheduledDate: e.overrideScheduledDate == null
-                ? const Value(null)
-                : Value(e.overrideScheduledDate),
-          ),
-        );
-      }
-      for (final p in snap.pomodoros) {
-        await _db.insertPomodoroRaw(
-          PomodoroRecordsCompanion(
-            id: Value(p.id),
-            taskId: p.taskId == null ? const Value(null) : Value(p.taskId),
-            durationMinutes: Value(p.durationMinutes),
-            startedAt: Value(p.startedAt),
-            completedAt: Value(p.completedAt),
-          ),
-        );
-      }
-    });
-    // 事务成功后才消费快照（失败保留，等待重试）
+    await restoreTrashSnapshot(_db, _scheduler, snap);
+    // 事务成功后才消费快照（失败保留，等待重试）与回收站条目
     _deletedCache.remove(id);
-    // 整棵树恢复后重排全部提醒（含子任务）
-    for (final tid in [snap.task.id, ...snap.subTasks.map((s) => s.id)]) {
-      final restored = await _db.getTask(tid);
-      if (restored != null) {
-        await _scheduler.scheduleTask(restored);
-      }
-    }
+    await _db.deleteTrashItemByOriginalTaskId(id);
     _bump();
   }
 
@@ -1056,7 +999,16 @@ class TasksController extends StateNotifier<TasksState> {
     // 默认清单（收件箱）不可删除：删除后无默认清单会导致后续操作异常
     final list = state.lists.where((l) => l.id == id).firstOrNull;
     if (list?.isDefault ?? false) return;
-    await _db.deleteList(id, deleteTasks: deleteTasks);
+    if (deleteTasks) {
+      // 连带删除的任务先进回收站（与 task_page 连带删除路径一致）
+      final tasks = await _db.getTasksByList(id);
+      for (final t in tasks.where((t) => t.parentId == null)) {
+        await deleteTaskWithUndo(t.id);
+      }
+      await _db.deleteList(id, deleteTasks: false);
+    } else {
+      await _db.deleteList(id, deleteTasks: false);
+    }
     if (state.currentListId == id) {
       state = state.copyWith(
         currentListId: TasksState._clearCurrentListId,
@@ -1072,27 +1024,74 @@ class TasksController extends StateNotifier<TasksState> {
     await _db.clearCompletedTasks();
     _bump();
   }
+
+  // ---------- 回收站 ----------
+  /// 回收站条目列表（删除时间倒序）
+  Future<List<TrashItem>> getTrashItems() => _db.getTrashItems();
+
+  /// 回收站：恢复任务（整棵树按原 ID 重建 + 重排提醒），成功后删除回收站条目。
+  /// 子任务先于父被删时（父在回收站中），先恢复父链上的祖先——
+  /// 否则子任务 parentId 引用缺失触发外键崩溃（父快照恢复后子即可安全恢复）。
+  Future<void> restoreFromTrash(int trashId) async {
+    final item = await _db.getTrashItem(trashId);
+    if (item == null) return;
+    final snap = decodeTrashSnapshot(item.data);
+    if (snap == null) return; // 损坏快照无法恢复，保留条目等待彻底删除
+    final ancestors = await _trashedAncestorItems(snap.task.parentId);
+    for (final a in ancestors.reversed) {
+      final aSnap = decodeTrashSnapshot(a.data);
+      if (aSnap == null) continue;
+      await restoreTrashSnapshot(_db, _scheduler, aSnap);
+      await _db.deleteTrashItem(a.id);
+    }
+    await restoreTrashSnapshot(_db, _scheduler, snap);
+    await _db.deleteTrashItem(trashId);
+    _bump();
+  }
+
+  /// 批量恢复（父链自动先恢复，无需调用方排序）
+  Future<void> batchRestoreFromTrash(List<int> ids) async {
+    for (final id in ids) {
+      await restoreFromTrash(id);
+    }
+  }
+
+  /// 彻底删除单条（仅删回收站快照；任务数据已随删除物理清理）
+  Future<void> purgeTrashItem(int trashId) async {
+    await _db.deleteTrashItem(trashId);
+    _bump();
+  }
+
+  /// 清空回收站（不可撤销）
+  Future<void> clearTrash() async {
+    await _db.clearTrash();
+    _bump();
+  }
+
+  /// 清理超过保留期的回收站条目（启动/打开回收站时调用）
+  Future<void> purgeExpiredTrash(DateTime cutoff) async {
+    await _db.deleteTrashOlderThan(cutoff);
+    _bump();
+  }
+
+  /// 收集 parentId 链上所有仍在回收站中的祖先条目（子→父顺序）
+  Future<List<TrashItem>> _trashedAncestorItems(int? parentId) async {
+    final result = <TrashItem>[];
+    var pid = parentId;
+    while (pid != null) {
+      final item = await _db.getTrashItemByOriginalTaskId(pid);
+      if (item == null) break;
+      final snap = decodeTrashSnapshot(item.data);
+      if (snap == null) break;
+      result.add(item);
+      pid = snap.task.parentId;
+    }
+    return result;
+  }
 }
 
-/// D1：删除撤销快照
-class _DeletedSnapshot {
-  final Task task;
-  final List<Task> subTasks;
-  final List<Reminder> reminders;
-  final List<TaskCompletion> completions;
-  final List<TaskException> exceptions;
-  final List<PomodoroRecord> pomodoros;
-
-  _DeletedSnapshot(
-    this.task,
-    this.subTasks,
-    this.reminders,
-    this.completions,
-    this.exceptions,
-    this.pomodoros,
-  );
-}
-
+/// D1：删除撤销快照——现由 [TrashSnapshot]（trash_service.dart）承担，
+/// 撤销条缓存与回收站持久化共用同一结构，恢复走同一事务。
 final tasksControllerProvider =
     StateNotifierProvider<TasksController, TasksState>((ref) {
       return TasksController(

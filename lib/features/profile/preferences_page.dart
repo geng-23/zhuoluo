@@ -20,6 +20,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
   String _defaultRemindLabel = '加载中…';
   String _allDayAtLabel = '加载中…';
   String _timezoneLabel = '加载中…';
+  String _retentionLabel = '加载中…';
 
   @override
   void initState() {
@@ -35,6 +36,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
     final remindMin = await settings.getDefaultRemindMinutes();
     final allDayAt = await settings.getDefaultAllDayRemindAt();
     final timezone = await settings.getAppTimezone();
+    final retention = await settings.getTrashRetentionDays();
 
     String listLabel;
     if (prefListId == null) {
@@ -57,6 +59,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
       _defaultRemindLabel = remindLabel;
       _allDayAtLabel = _minutesToHm(allDayAt);
       _timezoneLabel = timezone ?? '跟随系统';
+      _retentionLabel = '$retention 天';
     });
   }
 
@@ -125,6 +128,18 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: _pickTimezone,
+          ),
+          const Divider(),
+          const _SectionHeader('回收站'),
+          ListTile(
+            leading: const Icon(Icons.delete_outline),
+            title: const Text('保留期'),
+            subtitle: Text(
+              '$_retentionLabel（超过保留期的已删除任务自动清理）',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _pickRetention,
           ),
           const SizedBox(height: 24),
         ],
@@ -257,6 +272,37 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
     // 时区口径变化：bump 数据版本，触发任务页/日历/统计立即刷新
     // （今天/明天判定、红线列位、周基准、统计范围按新时区重算）
     bumpDataVersion(ref);
+    if (mounted) await _load();
+  }
+
+  /// 回收站保留期选择（7/15/30/60/90 天）
+  Future<void> _pickRetention() async {
+    final settings = ref.read(settingsProvider);
+    final current = await settings.getTrashRetentionDays();
+    if (!mounted) return;
+    const options = [7, 15, 30, 60, 90];
+    final choice = await showModalBottomSheet<int>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final d in options)
+              ListTile(
+                title: Text('$d 天'),
+                trailing: current == d ? const Icon(Icons.check) : null,
+                onTap: () => Navigator.pop(c, d),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return; // 取消
+    await settings.set(
+      SettingsController.keyTrashRetentionDays,
+      '$choice',
+    );
     if (mounted) await _load();
   }
 }

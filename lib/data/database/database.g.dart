@@ -3789,6 +3789,413 @@ class SettingsCompanion extends UpdateCompanion<Setting> {
   }
 }
 
+class $TrashItemsTable extends TrashItems
+    with TableInfo<$TrashItemsTable, TrashItem> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $TrashItemsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _originalTaskIdMeta = const VerificationMeta(
+    'originalTaskId',
+  );
+  @override
+  late final GeneratedColumn<int> originalTaskId = GeneratedColumn<int>(
+    'original_task_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _listNameMeta = const VerificationMeta(
+    'listName',
+  );
+  @override
+  late final GeneratedColumn<String> listName = GeneratedColumn<String>(
+    'list_name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _dataMeta = const VerificationMeta('data');
+  @override
+  late final GeneratedColumn<String> data = GeneratedColumn<String>(
+    'data',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    originalTaskId,
+    title,
+    listName,
+    deletedAt,
+    data,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'trash_items';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<TrashItem> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('original_task_id')) {
+      context.handle(
+        _originalTaskIdMeta,
+        originalTaskId.isAcceptableOrUnknown(
+          data['original_task_id']!,
+          _originalTaskIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originalTaskIdMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('list_name')) {
+      context.handle(
+        _listNameMeta,
+        listName.isAcceptableOrUnknown(data['list_name']!, _listNameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_listNameMeta);
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_deletedAtMeta);
+    }
+    if (data.containsKey('data')) {
+      context.handle(
+        _dataMeta,
+        this.data.isAcceptableOrUnknown(data['data']!, _dataMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_dataMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  TrashItem map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return TrashItem(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      originalTaskId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}original_task_id'],
+      )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      listName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}list_name'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      )!,
+      data: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}data'],
+      )!,
+    );
+  }
+
+  @override
+  $TrashItemsTable createAlias(String alias) {
+    return $TrashItemsTable(attachedDatabase, alias);
+  }
+}
+
+class TrashItem extends DataClass implements Insertable<TrashItem> {
+  final int id;
+
+  /// 被删任务根 id（撤销恢复后按此删除对应回收站行）
+  final int originalTaskId;
+  final String title;
+
+  /// 删除时所属清单名快照（清单可能随后被删/改名）
+  final String listName;
+  final DateTime deletedAt;
+
+  /// 整棵树 JSON 快照（encode/decode 见 trash_service.dart）
+  final String data;
+  const TrashItem({
+    required this.id,
+    required this.originalTaskId,
+    required this.title,
+    required this.listName,
+    required this.deletedAt,
+    required this.data,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['original_task_id'] = Variable<int>(originalTaskId);
+    map['title'] = Variable<String>(title);
+    map['list_name'] = Variable<String>(listName);
+    map['deleted_at'] = Variable<DateTime>(deletedAt);
+    map['data'] = Variable<String>(data);
+    return map;
+  }
+
+  TrashItemsCompanion toCompanion(bool nullToAbsent) {
+    return TrashItemsCompanion(
+      id: Value(id),
+      originalTaskId: Value(originalTaskId),
+      title: Value(title),
+      listName: Value(listName),
+      deletedAt: Value(deletedAt),
+      data: Value(data),
+    );
+  }
+
+  factory TrashItem.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return TrashItem(
+      id: serializer.fromJson<int>(json['id']),
+      originalTaskId: serializer.fromJson<int>(json['originalTaskId']),
+      title: serializer.fromJson<String>(json['title']),
+      listName: serializer.fromJson<String>(json['listName']),
+      deletedAt: serializer.fromJson<DateTime>(json['deletedAt']),
+      data: serializer.fromJson<String>(json['data']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'originalTaskId': serializer.toJson<int>(originalTaskId),
+      'title': serializer.toJson<String>(title),
+      'listName': serializer.toJson<String>(listName),
+      'deletedAt': serializer.toJson<DateTime>(deletedAt),
+      'data': serializer.toJson<String>(data),
+    };
+  }
+
+  TrashItem copyWith({
+    int? id,
+    int? originalTaskId,
+    String? title,
+    String? listName,
+    DateTime? deletedAt,
+    String? data,
+  }) => TrashItem(
+    id: id ?? this.id,
+    originalTaskId: originalTaskId ?? this.originalTaskId,
+    title: title ?? this.title,
+    listName: listName ?? this.listName,
+    deletedAt: deletedAt ?? this.deletedAt,
+    data: data ?? this.data,
+  );
+  TrashItem copyWithCompanion(TrashItemsCompanion data) {
+    return TrashItem(
+      id: data.id.present ? data.id.value : this.id,
+      originalTaskId: data.originalTaskId.present
+          ? data.originalTaskId.value
+          : this.originalTaskId,
+      title: data.title.present ? data.title.value : this.title,
+      listName: data.listName.present ? data.listName.value : this.listName,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      data: data.data.present ? data.data.value : this.data,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TrashItem(')
+          ..write('id: $id, ')
+          ..write('originalTaskId: $originalTaskId, ')
+          ..write('title: $title, ')
+          ..write('listName: $listName, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('data: $data')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, originalTaskId, title, listName, deletedAt, data);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is TrashItem &&
+          other.id == this.id &&
+          other.originalTaskId == this.originalTaskId &&
+          other.title == this.title &&
+          other.listName == this.listName &&
+          other.deletedAt == this.deletedAt &&
+          other.data == this.data);
+}
+
+class TrashItemsCompanion extends UpdateCompanion<TrashItem> {
+  final Value<int> id;
+  final Value<int> originalTaskId;
+  final Value<String> title;
+  final Value<String> listName;
+  final Value<DateTime> deletedAt;
+  final Value<String> data;
+  const TrashItemsCompanion({
+    this.id = const Value.absent(),
+    this.originalTaskId = const Value.absent(),
+    this.title = const Value.absent(),
+    this.listName = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.data = const Value.absent(),
+  });
+  TrashItemsCompanion.insert({
+    this.id = const Value.absent(),
+    required int originalTaskId,
+    required String title,
+    required String listName,
+    required DateTime deletedAt,
+    required String data,
+  }) : originalTaskId = Value(originalTaskId),
+       title = Value(title),
+       listName = Value(listName),
+       deletedAt = Value(deletedAt),
+       data = Value(data);
+  static Insertable<TrashItem> custom({
+    Expression<int>? id,
+    Expression<int>? originalTaskId,
+    Expression<String>? title,
+    Expression<String>? listName,
+    Expression<DateTime>? deletedAt,
+    Expression<String>? data,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (originalTaskId != null) 'original_task_id': originalTaskId,
+      if (title != null) 'title': title,
+      if (listName != null) 'list_name': listName,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (data != null) 'data': data,
+    });
+  }
+
+  TrashItemsCompanion copyWith({
+    Value<int>? id,
+    Value<int>? originalTaskId,
+    Value<String>? title,
+    Value<String>? listName,
+    Value<DateTime>? deletedAt,
+    Value<String>? data,
+  }) {
+    return TrashItemsCompanion(
+      id: id ?? this.id,
+      originalTaskId: originalTaskId ?? this.originalTaskId,
+      title: title ?? this.title,
+      listName: listName ?? this.listName,
+      deletedAt: deletedAt ?? this.deletedAt,
+      data: data ?? this.data,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (originalTaskId.present) {
+      map['original_task_id'] = Variable<int>(originalTaskId.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (listName.present) {
+      map['list_name'] = Variable<String>(listName.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    if (data.present) {
+      map['data'] = Variable<String>(data.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TrashItemsCompanion(')
+          ..write('id: $id, ')
+          ..write('originalTaskId: $originalTaskId, ')
+          ..write('title: $title, ')
+          ..write('listName: $listName, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('data: $data')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -3805,6 +4212,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     this,
   );
   late final $SettingsTable settings = $SettingsTable(this);
+  late final $TrashItemsTable trashItems = $TrashItemsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -3819,6 +4227,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     habitRecords,
     pomodoroRecords,
     settings,
+    trashItems,
   ];
 }
 
@@ -7183,6 +7592,218 @@ typedef $$SettingsTableProcessedTableManager =
       Setting,
       PrefetchHooks Function()
     >;
+typedef $$TrashItemsTableCreateCompanionBuilder =
+    TrashItemsCompanion Function({
+      Value<int> id,
+      required int originalTaskId,
+      required String title,
+      required String listName,
+      required DateTime deletedAt,
+      required String data,
+    });
+typedef $$TrashItemsTableUpdateCompanionBuilder =
+    TrashItemsCompanion Function({
+      Value<int> id,
+      Value<int> originalTaskId,
+      Value<String> title,
+      Value<String> listName,
+      Value<DateTime> deletedAt,
+      Value<String> data,
+    });
+
+class $$TrashItemsTableFilterComposer
+    extends Composer<_$AppDatabase, $TrashItemsTable> {
+  $$TrashItemsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get originalTaskId => $composableBuilder(
+    column: $table.originalTaskId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get listName => $composableBuilder(
+    column: $table.listName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get data => $composableBuilder(
+    column: $table.data,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$TrashItemsTableOrderingComposer
+    extends Composer<_$AppDatabase, $TrashItemsTable> {
+  $$TrashItemsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get originalTaskId => $composableBuilder(
+    column: $table.originalTaskId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get listName => $composableBuilder(
+    column: $table.listName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get data => $composableBuilder(
+    column: $table.data,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$TrashItemsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $TrashItemsTable> {
+  $$TrashItemsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get originalTaskId => $composableBuilder(
+    column: $table.originalTaskId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get listName =>
+      $composableBuilder(column: $table.listName, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get data =>
+      $composableBuilder(column: $table.data, builder: (column) => column);
+}
+
+class $$TrashItemsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $TrashItemsTable,
+          TrashItem,
+          $$TrashItemsTableFilterComposer,
+          $$TrashItemsTableOrderingComposer,
+          $$TrashItemsTableAnnotationComposer,
+          $$TrashItemsTableCreateCompanionBuilder,
+          $$TrashItemsTableUpdateCompanionBuilder,
+          (
+            TrashItem,
+            BaseReferences<_$AppDatabase, $TrashItemsTable, TrashItem>,
+          ),
+          TrashItem,
+          PrefetchHooks Function()
+        > {
+  $$TrashItemsTableTableManager(_$AppDatabase db, $TrashItemsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$TrashItemsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$TrashItemsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$TrashItemsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> originalTaskId = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<String> listName = const Value.absent(),
+                Value<DateTime> deletedAt = const Value.absent(),
+                Value<String> data = const Value.absent(),
+              }) => TrashItemsCompanion(
+                id: id,
+                originalTaskId: originalTaskId,
+                title: title,
+                listName: listName,
+                deletedAt: deletedAt,
+                data: data,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required int originalTaskId,
+                required String title,
+                required String listName,
+                required DateTime deletedAt,
+                required String data,
+              }) => TrashItemsCompanion.insert(
+                id: id,
+                originalTaskId: originalTaskId,
+                title: title,
+                listName: listName,
+                deletedAt: deletedAt,
+                data: data,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$TrashItemsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $TrashItemsTable,
+      TrashItem,
+      $$TrashItemsTableFilterComposer,
+      $$TrashItemsTableOrderingComposer,
+      $$TrashItemsTableAnnotationComposer,
+      $$TrashItemsTableCreateCompanionBuilder,
+      $$TrashItemsTableUpdateCompanionBuilder,
+      (TrashItem, BaseReferences<_$AppDatabase, $TrashItemsTable, TrashItem>),
+      TrashItem,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -7205,4 +7826,6 @@ class $AppDatabaseManager {
       $$PomodoroRecordsTableTableManager(_db, _db.pomodoroRecords);
   $$SettingsTableTableManager get settings =>
       $$SettingsTableTableManager(_db, _db.settings);
+  $$TrashItemsTableTableManager get trashItems =>
+      $$TrashItemsTableTableManager(_db, _db.trashItems);
 }

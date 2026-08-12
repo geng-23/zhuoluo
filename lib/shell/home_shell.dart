@@ -3,12 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/utils/date_utils.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
+import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/features/calendar/calendar_page.dart';
 import 'package:zhuoluo/features/profile/habit_page.dart';
 import 'package:zhuoluo/features/profile/profile_page.dart';
 import 'package:zhuoluo/features/profile/quadrant_page.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
 import 'package:zhuoluo/features/task/task_page.dart';
+
 /// 四栏主壳（任务 / 日历 / 四象限 / 我的）
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
@@ -20,9 +24,11 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell>
     with WidgetsBindingObserver {
   int _tab = 0;
+
   /// 用户是否已手动切换 Tab（_restoreTab 恢复结果不得覆盖手动选择）
   bool _tabChanged = false;
-  StreamSubscription<String?>? _tapSub;
+  StreamSubscription<NotificationTap>? _tapSub;
+
   /// A1：懒加载页面缓存——仅首次访问时创建，之后保留 State
   /// （IndexedStack 保留状态的前提是子树不因 key 变化重建）
   final List<Widget?> _pages = List<Widget?>.filled(4, null);
@@ -53,41 +59,95 @@ class _HomeShellState extends ConsumerState<HomeShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _restoreTab();
-    // 通知点击深链定位：'t{taskId}' 任务详情 / 'h{habitId}' 习惯页
-    _tapSub = ref.read(notificationServiceProvider).tapStream.listen((payload) {
-      if (payload == null || !mounted) return;
-      _handlePayload(payload);
+    // 通知点击深链定位：'t{taskId}' 任务详情 / 'h{habitId}' 习惯页；
+    // actionId：贪睡（snooze）/已完成（done）按钮，处理后不导航
+    _tapSub = ref.read(notificationServiceProvider).tapStream.listen((tap) {
+      if (!mounted) return;
+      _handleTap(tap);
     });
     // 冷启动深链——进程被杀后点通知启动 App，payload 不经 onTap 回调，
     // 需消费 init 时捕获的启动 payload（同步执行，无竞态）
-    final launchPayload = ref
-        .read(notificationServiceProvider)
-        .consumeLaunchPayload();
-    if (launchPayload != null) {
-      _handlePayload(launchPayload);
+    final launchTap = ref.read(notificationServiceProvider).consumeLaunchTap();
+    if (launchTap != null) {
+      _handleTap(launchTap);
     }
   }
 
-  /// 通知 payload 深链统一入口：'t{taskId}' 任务详情 / 'h{habitId}' 习惯页
-  void _handlePayload(String payload) {
+  /// 通知 tap 深链统一入口：
+  /// - actionId 'snooze'：贪睡 10 分钟，不导航
+  /// - actionId 'done'：完成指定任务/实例，不导航
+  /// - 正文点击：'t{taskId}' 打开任务详情（含提醒定位信息时弹延后选择）/
+  ///   'h{habitId}' 打开习惯页
+  void _handleTap(NotificationTap tap) {
     if (!mounted) return;
+    final payload = tap.payload;
+    if (payload == null) return;
     final nav = Navigator.of(context, rootNavigator: true);
-    if (payload.startsWith('t')) {
-      final id = int.tryParse(payload.substring(1));
-      if (id == null) return;
-      nav.push(
-        MaterialPageRoute(builder: (_) => TaskDetailPage(taskId: id)),
-      );
-    } else if (payload.startsWith('h')) {
+    if (payload.startsWith('h')) {
       // 5.4：携带习惯 ID 定位到具体习惯（此前只打开通用习惯页）
       final id = int.tryParse(payload.substring(1));
       if (id == null) return;
       nav.push(
-        MaterialPageRoute(
-          builder: (_) => HabitPage(initialHabitId: id),
-        ),
+        MaterialPageRoute(builder: (_) => HabitPage(initialHabitId: id)),
       );
+      return;
     }
+    final info = parseReminderTap(payload);
+    if (info == null) return;
+    if (tap.actionId == NotificationService.snoozeAction) {
+      // 贪睡 10 分钟：后台重排同 ID 通知，不打断用户当前界面
+      unawaited(_deferFromTap(info));
+      return;
+    }
+    if (tap.actionId == NotificationService.doneAction) {
+      // 已完成：直接完成（重复任务=payload 指定实例），不导航
+      unawaited(_completeFromTap(info));
+      return;
+    }
+    // 正文点击：打开任务详情；来自提醒通知时详情页弹出「延后提醒」选择
+    nav.push(
+      MaterialPageRoute(
+        builder: (_) => TaskDetailPage(
+          taskId: info.taskId,
+          fromNotification: info.reminderId != null ? tap : null,
+        ),
+      ),
+    );
+  }
+
+  /// 贪睡：同 ID 重排到 10 分钟后（不导航）
+  Future<void> _deferFromTap(ReminderTapInfo info) async {
+    final reminderId = info.reminderId;
+    final instanceDay = info.instanceDay;
+    if (reminderId == null || instanceDay == null) return;
+    await ref
+        .read(reminderSchedulerProvider)
+        .deferReminder(
+          taskId: info.taskId,
+          reminderId: reminderId,
+          instanceDay: instanceDay,
+        );
+  }
+
+  /// 已完成：标记任务/指定实例完成并重排取消其提醒（不导航）
+  Future<void> _completeFromTap(ReminderTapInfo info) async {
+    final db = ref.read(dbProvider);
+    final scheduler = ref.read(reminderSchedulerProvider);
+    final task = await db.getTask(info.taskId);
+    if (task == null) return;
+    if (task.rrule.isNotEmpty && info.instanceDay != null) {
+      // 完成指定实例（命中校验统一收口）；重排取消该实例已排提醒
+      await db.completeInstanceIfHit(
+        info.taskId,
+        DateUtilsEx.normalizeInstanceDate(info.instanceDay!),
+      );
+      final fresh = await db.getTask(info.taskId);
+      if (fresh != null) await scheduler.scheduleTask(fresh);
+    } else {
+      await db.completeTask(info.taskId);
+      await scheduler.cancelTask(info.taskId);
+    }
+    ref.read(dataVersionProvider.notifier).state++;
   }
 
   @override

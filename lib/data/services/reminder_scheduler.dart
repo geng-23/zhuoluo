@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/foundation.dart';
@@ -28,11 +28,8 @@ class ReminderScheduler {
     List<Reminder> reminders,
   ) {
     return reminders.map((r) {
-      final t = _reminderBase(
-        task,
-        instanceDate,
-        r,
-      ).subtract(Duration(minutes: r.remindMinutesBefore));
+      final t = _reminderBase(task, instanceDate, r)
+          .subtract(Duration(minutes: r.remindMinutesBefore));
       return t;
     }).toList();
   }
@@ -172,11 +169,7 @@ class ReminderScheduler {
         title: task.title,
         body: _bodyText(task, day, r),
         when: when,
-        // 结构化深链载荷：t{taskId}|r{reminderId}|d{实例日}
-        // ——贪睡/延后重排需定位到具体提醒实例；正文导航取 t 前缀
-        payload: reminderPayload(task.id, r.id, day),
-        // 智能提醒：贪睡（再提醒）/已完成操作按钮
-        actions: NotificationService.taskActions,
+        payload: 't${task.id}',
       );
       if (!scheduled) ok = false;
     }
@@ -191,60 +184,6 @@ class ReminderScheduler {
     final hh = t.hour.toString().padLeft(2, '0');
     final mm = t.minute.toString().padLeft(2, '0');
     return '${task.title} · $hh:$mm';
-  }
-
-  // ---------- 智能提醒：贪睡 / 延后（同 ID 重排） ----------
-
-  /// 贪睡 / 延后提醒：在同一通知 ID 上重新调度到新时刻——同 ID 更新即
-  /// "稍后提醒"（Android 通知替换语义）；任务完成/改期/删除时
-  /// cancelTask 按原 ID 枚举即可一并取消贪睡，无需独立 ID 段。
-  /// [delay] 相对当前时间的延后（如 10/30 分钟）；[tomorrow] 延后到
-  /// 原提醒时刻的明天同一时刻（二选一，tomorrow 优先）。
-  /// 返回 false 表示调度失败（任务不存在/权限被拒/精确闹钟缺失）。
-  Future<bool> deferReminder({
-    required int taskId,
-    required int reminderId,
-    required DateTime instanceDay,
-    Duration delay = const Duration(minutes: 10),
-    bool tomorrow = false,
-  }) async {
-    try {
-      final task = await _db.getTask(taskId);
-      if (task == null) return false;
-      // 已完成的任务/实例不再提醒
-      if (task.completedAt != null) return true;
-      final day = DateUtilsEx.normalizeInstanceDate(instanceDay);
-      if (task.rrule.isNotEmpty && await _db.isInstanceCompleted(taskId, day)) {
-        return true;
-      }
-      final reminders = await _db.getReminders(taskId);
-      Reminder? r;
-      for (final e in reminders) {
-        if (e.id == reminderId) {
-          r = e;
-          break;
-        }
-      }
-      if (r == null) return true;
-      final base = _reminderBase(task, day, r);
-      final original = base.subtract(Duration(minutes: r.remindMinutesBefore));
-      final to = tomorrow
-          ? original.add(const Duration(days: 1))
-          : AppClock.now().add(delay);
-      if (to.isBefore(AppClock.now())) return true;
-      final id = NotificationIds.forReminder(r.id, day);
-      return await NotificationService.instance.schedule(
-        id,
-        title: task.title,
-        body: _bodyText(task, day, r),
-        when: to,
-        payload: reminderPayload(task.id, r.id, day),
-        actions: NotificationService.taskActions,
-      );
-    } catch (e) {
-      debugPrint('延后提醒失败 taskId=$taskId: $e');
-      return false;
-    }
   }
 
   /// 任务在"排期窗口"内的全部提醒日期（规则实例 + 例外改期日期）。
@@ -363,7 +302,8 @@ class ReminderScheduler {
   Future<void> rescheduleIfStale() async {
     final last = _lastFullReschedule;
     if (last == null) return;
-    final stale = AppClock.now().difference(last) > const Duration(hours: 24);
+    final stale =
+        AppClock.now().difference(last) > const Duration(hours: 24);
     if (stale) {
       await rescheduleAll();
     }
@@ -401,8 +341,7 @@ class ReminderScheduler {
         );
         // 已过去的提醒时刻（今天）跳过，从明天开始
         if (when.isBefore(now)) continue;
-        ok =
-            await NotificationService.instance.schedule(
+        ok = await NotificationService.instance.schedule(
               NotificationIds.forHabit(habit.id, day),
               title: '习惯提醒',
               body: '该打卡「${habit.name}」了',
@@ -461,7 +400,8 @@ class ReminderScheduler {
       if (comp != null) {
         _skippedCompletionCache[_skipCompletionKey(taskId, day)] =
             comp.completedAt;
-        while (_skippedCompletionCache.length > _skippedCompletionCacheLimit) {
+        while (_skippedCompletionCache.length >
+            _skippedCompletionCacheLimit) {
           _skippedCompletionCache.remove(_skippedCompletionCache.keys.first);
         }
       }
@@ -549,47 +489,4 @@ DateTime? reminderTriggerAt(
     pa.hour,
     pa.minute,
   ).subtract(Duration(minutes: remindMinutesBefore));
-}
-
-// ---------- 结构化通知深链载荷编解码 ----------
-/// 贪睡/延后需定位到具体提醒实例，通知 payload 编码为
-/// 't{taskId}|r{reminderId}|d{实例日ISO}'；正文导航取 t 前缀。
-/// 旧格式 't{taskId}'（无 r/d）解析时兼容降级（可导航但无贪睡/延后信息）。
-String reminderPayload(int taskId, int reminderId, DateTime instanceDay) =>
-    't$taskId|r$reminderId|d${instanceDay.toIso8601String()}';
-
-/// 任务提醒通知 payload 的解析结果
-class ReminderTapInfo {
-  const ReminderTapInfo({
-    required this.taskId,
-    this.reminderId,
-    this.instanceDay,
-  });
-
-  final int taskId;
-
-  /// 触发该通知的提醒记录（贪睡/延后重排定位用；旧 payload 为 null）
-  final int? reminderId;
-
-  /// 该通知的实例日（贪睡/延后重排定位用；旧 payload 为 null）
-  final DateTime? instanceDay;
-}
-
-/// 解析任务提醒通知 payload；非任务通知或不可解析返回 null
-ReminderTapInfo? parseReminderTap(String? payload) {
-  if (payload == null || !payload.startsWith('t')) return null;
-  final parts = payload.split('|');
-  final taskId = int.tryParse(parts[0].substring(1));
-  if (taskId == null) return null;
-  int? reminderId;
-  DateTime? instanceDay;
-  for (final p in parts.skip(1)) {
-    if (p.startsWith('r')) reminderId = int.tryParse(p.substring(1));
-    if (p.startsWith('d')) instanceDay = DateTime.tryParse(p.substring(1));
-  }
-  return ReminderTapInfo(
-    taskId: taskId,
-    reminderId: reminderId,
-    instanceDay: instanceDay,
-  );
 }

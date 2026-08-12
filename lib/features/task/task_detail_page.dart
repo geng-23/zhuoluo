@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
@@ -10,7 +10,6 @@ import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
-import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/task/plan_time_sheet.dart';
@@ -20,17 +19,9 @@ import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 任务详情页（7 区块，自动保存）
 class TaskDetailPage extends ConsumerStatefulWidget {
-  const TaskDetailPage({
-    super.key,
-    required this.taskId,
-    this.fromNotification,
-  });
+  const TaskDetailPage({super.key, required this.taskId});
 
   final int taskId;
-
-  /// 从任务提醒通知正文点击进入时的来源信息（含提醒定位 r/d）：
-  /// 打开详情后弹出「延后提醒」选择（贪睡/延后的另一个入口）。
-  final NotificationTap? fromNotification;
 
   @override
   ConsumerState<TaskDetailPage> createState() => _TaskDetailPageState();
@@ -44,33 +35,24 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
   late Task? _task;
   List<Reminder> _reminders = [];
   List<Task> _subTasks = [];
-
   /// 子任务"今天完成"状态（重复子任务按实例表判断）
   final Map<int, bool> _subTasksDone = {};
-
   /// 重复任务：当前实例日（今天有实例→今天；否则→下一个计划实例）
   DateTime? _currentInstance;
-
   /// 当前实例日是否有实例（规则命中且未跳过/未改期移走）
   bool _currentHas = true;
-
   /// 当前实例日是否已完成
   bool _currentDone = false;
-
   /// 当前实例日是否被跳过（显示"已跳过"占位）
   bool _currentSkipped = false;
-
   /// 当前实例日被"改期本次"到的目标日期/时间（改期行/状态行显示用）
   DateTime? _currentRescheduleTarget;
-
   /// 当前实例改期目标日的完成记录（完成→改期后完成记录迁移到目标日，
   /// 用于状态行"已完成并改期至 X"的交代）
   bool _currentMigratedDone = false;
-
   /// 下一次实例日期（含例外改期目标；跳过/改期行显示用）
   DateTime? _nextInstance;
   bool _loaded = false;
-
   /// _load 请求序号——丢弃过期请求结果，防止旧数据覆盖新状态
   /// （用户输入标题/备注时，较慢的旧 _load 会把输入框回滚为旧值）
   int _loadSeq = 0;
@@ -92,60 +74,6 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     return r;
   }
 
-  /// 智能提醒：从通知正文进入 → 弹出「延后提醒」选择（10 分钟/30 分钟/明天/取消）。
-  /// 选择后同 ID 重排提醒通知（贪睡/延后的另一个入口）。
-  Future<void> _maybeShowDeferSheet(NotificationTap from) async {
-    final info = parseReminderTap(from.payload);
-    final reminderId = info?.reminderId;
-    final instanceDay = info?.instanceDay;
-    if (info == null || reminderId == null || instanceDay == null) return;
-    final choice = await _showSheet<String>(
-      builder: (c) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(
-                '延后提醒',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-            ),
-            for (final (label, key) in [
-              ('10 分钟', '10'),
-              ('30 分钟', '30'),
-              ('明天', 'tomorrow'),
-            ])
-              ListTile(
-                leading: const Icon(Icons.schedule),
-                title: Text(label),
-                onTap: () => Navigator.pop(c, key),
-              ),
-            const Divider(height: 1),
-            ListTile(title: const Text('取消'), onTap: () => Navigator.pop(c)),
-          ],
-        ),
-      ),
-    );
-    if (choice == null || !mounted) return;
-    final scheduler = ref.read(reminderSchedulerProvider);
-    final ok = await scheduler.deferReminder(
-      taskId: info.taskId,
-      reminderId: reminderId,
-      instanceDay: instanceDay,
-      delay: choice == 'tomorrow'
-          ? const Duration(minutes: 10)
-          : Duration(minutes: int.parse(choice)),
-      tomorrow: choice == 'tomorrow',
-    );
-    if (!mounted) return;
-    showAppSnackBar(
-      context,
-      ok ? '已设置稍后提醒' : '设置稍后提醒失败，请检查通知权限',
-      icon: Icons.snooze,
-    );
-  }
-
   @override
   void initState() {
     super.initState();
@@ -155,13 +83,6 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) FocusManager.instance.primaryFocus?.unfocus();
     });
-    // 智能提醒：从通知正文进入且携带提醒定位信息 → 弹出「延后提醒」选择
-    final from = widget.fromNotification;
-    if (from != null && from.payload != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _maybeShowDeferSheet(from);
-      });
-    }
     _load();
   }
 
@@ -249,10 +170,8 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         _currentMigratedDone = false;
         final reschedTo = _currentRescheduleTarget;
         if (reschedTo != null) {
-          _currentMigratedDone = await db.isInstanceCompleted(
-            task.id,
-            reschedTo,
-          );
+          _currentMigratedDone =
+              await db.isInstanceCompleted(task.id, reschedTo);
           if (!mounted || seq != _loadSeq) return;
         }
         _nextInstance = await _notifier.nextInstanceFor(task);
@@ -413,7 +332,9 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                   // 保留主题 filled，聚焦时蓝色圆角高亮）
                   decoration: InputDecoration(
                     hintText: '任务标题',
-                    border: OutlineInputBorder(borderRadius: AppRadius.field),
+                    border: OutlineInputBorder(
+                      borderRadius: AppRadius.field,
+                    ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: AppRadius.field,
                       borderSide: BorderSide(
@@ -491,10 +412,10 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                 onTap: _task!.isAllDay
                     ? () => _editReminderAt(r)
                     : () => showAppSnackBar(
-                        context,
-                        '提醒时刻仅全天任务可调整',
-                        icon: Icons.info_outline,
-                      ),
+                          context,
+                          '提醒时刻仅全天任务可调整',
+                          icon: Icons.info_outline,
+                        ),
                 trailing: IconButton(
                   icon: const Icon(Icons.close, size: 18),
                   onPressed: () => _removeReminder(r),
@@ -559,8 +480,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
               _ListTileRow(
                 icon: Icons.skip_next,
                 label: '当前实例已跳过',
-                value:
-                    '已跳过 ${DateUtilsEx.dateCn(_currentInstance ?? AppClock.now())}',
+                value: '已跳过 ${DateUtilsEx.dateCn(_currentInstance ?? AppClock.now())}',
                 onTap: () async {
                   final instDay = _currentInstance;
                   if (instDay != null) {
@@ -583,15 +503,15 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                 value: _currentRescheduleTarget != null
                     ? '已改到 ${DateUtilsEx.dateCn(_currentRescheduleTarget!)}'
                     : '${DateUtilsEx.dateCn(_currentInstance ?? AppClock.now())} '
-                          '没有可完成的实例',
+                        '没有可完成的实例',
                 onTap: () {
                   showAppSnackBar(
                     context,
                     _currentRescheduleTarget != null
                         ? '当前实例已改期到 '
-                              '${DateUtilsEx.dateCn(_currentRescheduleTarget!)}'
+                            '${DateUtilsEx.dateCn(_currentRescheduleTarget!)}'
                         : '${DateUtilsEx.dateCn(_currentInstance ?? AppClock.now())} '
-                              '不在重复规则内',
+                            '不在重复规则内',
                     icon: Icons.event_busy,
                   );
                 },
@@ -601,7 +521,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
               label: '改期本次',
               value: _currentRescheduleTarget != null
                   ? '已改到 ${DateUtilsEx.dateCn(_currentRescheduleTarget!)} '
-                        '${DateUtilsEx.timeCn(_currentRescheduleTarget!)}'
+                      '${DateUtilsEx.timeCn(_currentRescheduleTarget!)}'
                   : DateUtilsEx.dateCn(_currentInstance ?? AppClock.now()),
               onTap: () => _rescheduleInstance(t),
             ),
@@ -727,36 +647,23 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
               constraints: const BoxConstraints(minHeight: 100),
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                ),
+                border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: t.note.isEmpty
-                  ? Text(
-                      '无备注',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    )
+                  ? Text('无备注', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))
                   : MarkdownBody(data: t.note),
             ),
           const SizedBox(height: 16),
           // 区块7：时间与删除
           Text(
             '创建于 ${DateUtilsEx.dateCn(t.createdAt)}',
-            style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           if (t.completedAt != null)
             Text(
               '完成于 ${DateUtilsEx.dateCn(t.completedAt!)}',
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           if (done)
             TextButton(
@@ -1120,7 +1027,9 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     if (t.rrule.isNotEmpty) {
       final histCount = (await (db.select(
         db.taskCompletions,
-      )..where((c) => c.taskId.equals(t.id))).get()).length;
+      )..where((c) => c.taskId.equals(t.id)))
+              .get())
+          .length;
       if (!mounted) return;
       final ok = await showDialog<bool>(
         context: context,
@@ -1239,9 +1148,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       return;
     }
     // 偏好设置组：命中默认提醒提前量时标记"（默认）"并高亮
-    final defaultMin = await ref
-        .read(settingsProvider)
-        .getDefaultRemindMinutes();
+    final defaultMin = await ref.read(settingsProvider).getDefaultRemindMinutes();
     final choice = await _showSheet<int>(
       // 8 个选项可能超出默认最大高度，允许滚动/自适应
       isScrollControlled: true,
@@ -1437,14 +1344,20 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       );
       return false;
     }
-    showAppSnackBar(context, '今天的提醒已过，将从下次实例开始提醒。', icon: Icons.info_outline);
+    showAppSnackBar(
+      context,
+      '今天的提醒已过，将从下次实例开始提醒。',
+      icon: Icons.info_outline,
+    );
     return true;
   }
 
   /// 全天任务提醒时刻选择（当天 0 点起分钟数；null = 取消）
   Future<int?> _pickRemindAt(int? current) async {
     // 偏好设置组：全天任务默认提醒时刻（默认 540 = 09:00）
-    final defAt = await ref.read(settingsProvider).getDefaultAllDayRemindAt();
+    final defAt = await ref
+        .read(settingsProvider)
+        .getDefaultAllDayRemindAt();
     if (!mounted) return null;
     final initial = current ?? defAt;
     final picked = await showTimePicker(
@@ -1474,7 +1387,9 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     ref.read(dataVersionProvider.notifier).state++;
     final t = await db.getTask(_task!.id);
     if (t != null) {
-      await ref.read(reminderSchedulerProvider).scheduleTask(t);
+      await ref
+          .read(reminderSchedulerProvider)
+          .scheduleTask(t);
     }
     _load();
   }
@@ -1591,7 +1506,9 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     FocusScope.of(context).unfocus();
     final db = ref.read(dbProvider);
     // C1：取消该提醒的全部已排通知（ID 含实例维度，按排期窗口枚举取消）
-    await ref.read(reminderSchedulerProvider).cancelReminder(_task!.id, r.id);
+    await ref
+        .read(reminderSchedulerProvider)
+        .cancelReminder(_task!.id, r.id);
     await db.deleteReminder(r.id);
     final remaining = await db.getReminders(_task!.id);
     if (remaining.isEmpty) {
@@ -1676,7 +1593,9 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         final db = ref.read(dbProvider);
         final histCount = (await (db.select(
           db.taskCompletions,
-        )..where((c) => c.taskId.equals(t.id))).get()).length;
+        )..where((c) => c.taskId.equals(t.id)))
+                .get())
+            .length;
         if (!mounted) return;
         final ok = await showDialog<bool>(
           context: context,
@@ -1702,7 +1621,11 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         );
         if (ok != true || !mounted) return;
         // 清除重复规则 → 删除全部实例完成记录与例外（语义失效）
-        await db.applyRecurringChange(t.id, oldRrule: t.rrule, newRrule: rrule);
+        await db.applyRecurringChange(
+          t.id,
+          oldRrule: t.rrule,
+          newRrule: rrule,
+        );
         await _notifier.updateTaskFields(
           t.id,
           TasksCompanion(rrule: Value(rrule)),
@@ -1840,10 +1763,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
             ),
             TextButton(
               onPressed: () => Navigator.pop(c, 'all'),
-              child: Text(
-                '删除全部',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
+              child: Text('删除全部', style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ),
           ],
         ),
@@ -1888,10 +1808,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: Text(
-              '删除',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
+            child: Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
           ),
         ],
       ),

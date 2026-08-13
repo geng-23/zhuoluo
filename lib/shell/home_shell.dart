@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
-import 'package:zhuoluo/data/services/notification_service.dart';
-import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/features/calendar/calendar_page.dart';
 import 'package:zhuoluo/features/profile/habit_page.dart';
 import 'package:zhuoluo/features/profile/profile_page.dart';
@@ -24,7 +22,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
   int _tab = 0;
   /// 用户是否已手动切换 Tab（_restoreTab 恢复结果不得覆盖手动选择）
   bool _tabChanged = false;
-  StreamSubscription<NotificationTap>? _tapSub;
+  StreamSubscription<String?>? _tapSub;
   /// A1：懒加载页面缓存——仅首次访问时创建，之后保留 State
   /// （IndexedStack 保留状态的前提是子树不因 key 变化重建）
   final List<Widget?> _pages = List<Widget?>.filled(4, null);
@@ -55,31 +53,32 @@ class _HomeShellState extends ConsumerState<HomeShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _restoreTab();
-    // 通知点击深链定位：'t{taskId}' 任务详情 / 'h{habitId}' 习惯页；
-    // actionId：贪睡（snooze）/已完成（done）按钮，处理后不导航
-    _tapSub = ref.read(notificationServiceProvider).tapStream.listen((tap) {
-      if (!mounted) return;
-      _handleTap(tap);
+    // 通知点击深链定位：'t{taskId}' 任务详情 / 'h{habitId}' 习惯页
+    _tapSub = ref.read(notificationServiceProvider).tapStream.listen((payload) {
+      if (payload == null || !mounted) return;
+      _handlePayload(payload);
     });
     // 冷启动深链——进程被杀后点通知启动 App，payload 不经 onTap 回调，
     // 需消费 init 时捕获的启动 payload（同步执行，无竞态）
-    final launchTap = ref.read(notificationServiceProvider).consumeLaunchTap();
-    if (launchTap != null) {
-      _handleTap(launchTap);
+    final launchPayload = ref
+        .read(notificationServiceProvider)
+        .consumeLaunchPayload();
+    if (launchPayload != null) {
+      _handlePayload(launchPayload);
     }
   }
 
-  /// 通知 tap 深链统一入口：
-  /// - actionId 'snooze'：贪睡 10 分钟，不导航
-  /// - actionId 'done'：完成指定任务/实例，不导航
-  /// - 正文点击：'t{taskId}' 打开任务详情（含提醒定位信息时弹延后选择）/
-  ///   'h{habitId}' 打开习惯页
-  void _handleTap(NotificationTap tap) {
+  /// 通知 payload 深链统一入口：'t{taskId}' 任务详情 / 'h{habitId}' 习惯页
+  void _handlePayload(String payload) {
     if (!mounted) return;
-    final payload = tap.payload;
-    if (payload == null) return;
     final nav = Navigator.of(context, rootNavigator: true);
-    if (payload.startsWith('h')) {
+    if (payload.startsWith('t')) {
+      final id = int.tryParse(payload.substring(1));
+      if (id == null) return;
+      nav.push(
+        MaterialPageRoute(builder: (_) => TaskDetailPage(taskId: id)),
+      );
+    } else if (payload.startsWith('h')) {
       // 5.4：携带习惯 ID 定位到具体习惯（此前只打开通用习惯页）
       final id = int.tryParse(payload.substring(1));
       if (id == null) return;
@@ -88,40 +87,6 @@ class _HomeShellState extends ConsumerState<HomeShell>
           builder: (_) => HabitPage(initialHabitId: id),
         ),
       );
-      return;
-    }
-    final info = parseReminderTap(payload);
-    if (info == null) return;
-    // 按钮 action：贪睡/已完成统一走处理函数（前台 App 内也直接生效）
-    if (tap.actionId == NotificationService.snoozeAction ||
-        tap.actionId == NotificationService.doneAction) {
-      unawaited(_handleSmartAction(tap));
-      return;
-    }
-    // 正文点击：打开任务详情；来自提醒通知时详情页弹出「延后提醒」选择
-    nav.push(
-      MaterialPageRoute(
-        builder: (_) => TaskDetailPage(
-          taskId: info.taskId,
-          fromNotification: info.reminderId != null ? tap : null,
-        ),
-      ),
-    );
-  }
-
-  /// 智能提醒按钮 action 处理（贪睡/已完成）。前台分发与后台 isolate
-  /// 共用 handleSmartReminderAction，保证行为一致；返回变更时刷新界面。
-  Future<void> _handleSmartAction(NotificationTap tap) async {
-    final db = ref.read(dbProvider);
-    final scheduler = ref.read(reminderSchedulerProvider);
-    final changed = await handleSmartReminderAction(
-      db: db,
-      scheduler: scheduler,
-      actionId: tap.actionId,
-      payload: tap.payload,
-    );
-    if (changed && mounted) {
-      ref.read(dataVersionProvider.notifier).state++;
     }
   }
 
@@ -153,14 +118,6 @@ class _HomeShellState extends ConsumerState<HomeShell>
       await scheduler.rescheduleAll();
     } else {
       await scheduler.rescheduleIfStale();
-    }
-    // 后台智能提醒完成标记：App 被杀时点「已完成」，后台 isolate 写入 DB，
-    // 回前台时消费标记并刷新界面（后台 isolate 无法直接通知主 isolate）
-    final db = ref.read(dbProvider);
-    final mark = await db.getSetting(settingsKeySmartReminderChanged);
-    if (mark == '1') {
-      await db.setSetting(settingsKeySmartReminderChanged, '');
-      ref.read(dataVersionProvider.notifier).state++;
     }
   }
 

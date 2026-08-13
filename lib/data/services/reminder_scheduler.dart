@@ -2,21 +2,11 @@
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/foundation.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/data/latest_all.dart' as tzdata;
-import 'package:timezone/timezone.dart' as tz;
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
-
-/// 应用时区设置键（与 SettingsController.keyAppTimezone 同值；
-/// 后台 isolate 无法访问 Riverpod，用字面量避免循环依赖）
-const String settingsKeyAppTimezone = 'appTimezone';
-
-/// 后台智能提醒完成标记（主 isolate resumed 时据此刷新界面）
-const String settingsKeySmartReminderChanged = 'smartReminderChanged';
 
 /// 提醒调度引擎
 ///
@@ -179,11 +169,7 @@ class ReminderScheduler {
         title: task.title,
         body: _bodyText(task, day, r),
         when: when,
-        // 结构化深链载荷：t{taskId}|r{reminderId}|d{实例日}——贪睡/延后/已完成
-        // 按钮需定位到具体提醒实例，正文导航取 t 前缀
-        payload: reminderPayload(task.id, r.id, day),
-        // 智能提醒：贪睡（再提醒 10 分钟）/已完成操作按钮
-        actions: NotificationService.taskActions,
+        payload: 't${task.id}',
       );
       if (!scheduled) ok = false;
     }
@@ -198,60 +184,6 @@ class ReminderScheduler {
     final hh = t.hour.toString().padLeft(2, '0');
     final mm = t.minute.toString().padLeft(2, '0');
     return '${task.title} · $hh:$mm';
-  }
-
-  // ---------- 智能提醒：贪睡 / 延后（同 ID 重排） ----------
-
-  /// 贪睡 / 延后提醒：在同一通知 ID 上重新调度到新时刻——同 ID 更新即
-  /// "稍后提醒"（Android 通知替换语义）；任务完成/改期/删除时
-  /// cancelTask 按原 ID 枚举即可一并取消贪睡，无需独立 ID 段。
-  /// [delay] 相对当前时间的延后（如 10/30 分钟）；[tomorrow] 延后到
-  /// 原提醒时刻的明天同一时刻（二选一，tomorrow 优先）。
-  /// 返回 false 表示调度失败（任务不存在/权限被拒/精确闹钟缺失）。
-  Future<bool> deferReminder({
-    required int taskId,
-    required int reminderId,
-    required DateTime instanceDay,
-    Duration delay = const Duration(minutes: 10),
-    bool tomorrow = false,
-  }) async {
-    try {
-      final task = await _db.getTask(taskId);
-      if (task == null) return false;
-      // 已完成的任务/实例不再提醒
-      if (task.completedAt != null) return true;
-      final day = DateUtilsEx.normalizeInstanceDate(instanceDay);
-      if (task.rrule.isNotEmpty && await _db.isInstanceCompleted(taskId, day)) {
-        return true;
-      }
-      final reminders = await _db.getReminders(taskId);
-      Reminder? r;
-      for (final e in reminders) {
-        if (e.id == reminderId) {
-          r = e;
-          break;
-        }
-      }
-      if (r == null) return true;
-      final base = _reminderBase(task, day, r);
-      final original = base.subtract(Duration(minutes: r.remindMinutesBefore));
-      final to = tomorrow
-          ? original.add(const Duration(days: 1))
-          : AppClock.now().add(delay);
-      if (to.isBefore(AppClock.now())) return true;
-      final id = NotificationIds.forReminder(r.id, day);
-      return await NotificationService.instance.schedule(
-        id,
-        title: task.title,
-        body: _bodyText(task, day, r),
-        when: to,
-        payload: reminderPayload(task.id, r.id, day),
-        actions: NotificationService.taskActions,
-      );
-    } catch (e) {
-      debugPrint('延后提醒失败 taskId=$taskId: $e');
-      return false;
-    }
   }
 
   /// 任务在"排期窗口"内的全部提醒日期（规则实例 + 例外改期日期）。
@@ -557,126 +489,4 @@ DateTime? reminderTriggerAt(
     pa.hour,
     pa.minute,
   ).subtract(Duration(minutes: remindMinutesBefore));
-}
-
-// ---------- 结构化通知深链载荷编解码 ----------
-/// 贪睡/延后需定位到具体提醒实例，通知 payload 编码为
-/// 't{taskId}|r{reminderId}|d{实例日ISO}'；正文导航取 t 前缀。
-/// 旧格式 't{taskId}'（无 r/d）解析时兼容降级（可导航但无贪睡/延后信息）。
-String reminderPayload(int taskId, int reminderId, DateTime instanceDay) =>
-    't$taskId|r$reminderId|d${instanceDay.toIso8601String()}';
-
-/// 任务提醒通知 payload 的解析结果
-class ReminderTapInfo {
-  const ReminderTapInfo({
-    required this.taskId,
-    this.reminderId,
-    this.instanceDay,
-  });
-
-  final int taskId;
-
-  /// 触发该通知的提醒记录（贪睡/延后重排定位用；旧 payload 为 null）
-  final int? reminderId;
-
-  /// 该通知的实例日（贪睡/延后重排定位用；旧 payload 为 null）
-  final DateTime? instanceDay;
-}
-
-/// 解析任务提醒通知 payload；非任务通知或不可解析返回 null
-ReminderTapInfo? parseReminderTap(String? payload) {
-  if (payload == null || !payload.startsWith('t')) return null;
-  final parts = payload.split('|');
-  final taskId = int.tryParse(parts[0].substring(1));
-  if (taskId == null) return null;
-  int? reminderId;
-  DateTime? instanceDay;
-  for (final p in parts.skip(1)) {
-    if (p.startsWith('r')) reminderId = int.tryParse(p.substring(1));
-    if (p.startsWith('d')) instanceDay = DateTime.tryParse(p.substring(1));
-  }
-  return ReminderTapInfo(
-    taskId: taskId,
-    reminderId: reminderId,
-    instanceDay: instanceDay,
-  );
-}
-
-// ---------- 智能提醒：通知按钮 action 处理（主/后台 isolate 共用） ----------
-
-/// 通知 action（贪睡/已完成）的统一处理。主 isolate 的 HomeShell 分发
-/// 与后台 isolate 入口都调用本函数，保证前台/后台行为一致。
-///
-/// - 'snooze'：贪睡重排到 10 分钟后（同 ID），不返回变更
-/// - 'done'：完成任务（重复任务=payload 指定实例），返回已发生数据变更
-///
-/// 返回 true 表示发生了数据变更（调用方决定是否刷新界面）。
-Future<bool> handleSmartReminderAction({
-  required AppDatabase db,
-  required ReminderScheduler scheduler,
-  required String? actionId,
-  required String? payload,
-}) async {
-  final info = parseReminderTap(payload);
-  if (info == null) return false;
-  if (actionId == NotificationService.snoozeAction) {
-    final reminderId = info.reminderId;
-    final instanceDay = info.instanceDay;
-    if (reminderId == null || instanceDay == null) return false;
-    await scheduler.deferReminder(
-      taskId: info.taskId,
-      reminderId: reminderId,
-      instanceDay: instanceDay,
-    );
-    return false;
-  }
-  if (actionId == NotificationService.doneAction) {
-    final task = await db.getTask(info.taskId);
-    if (task == null) return false;
-    if (task.rrule.isNotEmpty && info.instanceDay != null) {
-      // 完成指定实例（命中校验统一收口）；重排取消该实例已排提醒
-      await db.completeInstanceIfHit(
-        info.taskId,
-        DateUtilsEx.normalizeInstanceDate(info.instanceDay!),
-      );
-      final fresh = await db.getTask(info.taskId);
-      if (fresh != null) await scheduler.scheduleTask(fresh);
-    } else {
-      await db.completeTask(info.taskId);
-      await scheduler.cancelTask(info.taskId);
-    }
-    return true;
-  }
-  return false;
-}
-
-/// 后台 isolate 入口：App 被杀/后台时点击通知按钮（贪睡/已完成），
-/// flutter_local_notifications 在独立 FlutterEngine 中调用本函数。
-/// 后台 isolate 无 Riverpod/UI，需自行初始化时区与数据库。
-@pragma('vm:entry-point')
-Future<void> notificationTapBackground(NotificationResponse response) async {
-  try {
-    tzdata.initializeTimeZones();
-    tz.setLocalLocation(tz.local);
-    final db = AppDatabase();
-    try {
-      final tzName = await db.getSetting(settingsKeyAppTimezone);
-      AppClock.setTimezone(tzName);
-      final scheduler = ReminderScheduler(db);
-      final changed = await handleSmartReminderAction(
-        db: db,
-        scheduler: scheduler,
-        actionId: response.actionId,
-        payload: response.payload,
-      );
-      if (changed) {
-        // 后台完成标记：主 isolate resumed 时据此刷新界面
-        await db.setSetting(settingsKeySmartReminderChanged, '1');
-      }
-    } finally {
-      await db.close();
-    }
-  } catch (e) {
-    debugPrint('后台智能提醒处理失败: $e');
-  }
 }

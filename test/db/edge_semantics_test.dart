@@ -351,7 +351,7 @@ void main() {
         title: '带提醒任务',
         planStart: futureStart,
       );
-      await db.insertReminder(
+      final reminderId = await db.insertReminder(
         RemindersCompanion.insert(
           taskId: withReminder,
           remindMinutesBefore: const Value(10),
@@ -377,7 +377,18 @@ void main() {
         lessThanOrEqualTo(1),
         reason: '通知时刻 = 计划开始 − 提前 10 分钟',
       );
-      expect(s.payload, 't$withReminder', reason: '深链载荷定位任务');
+      // 结构化深链载荷：t{taskId}|r{reminderId}|d{实例日}（贪睡/延后定位）
+      final a = AppClock.asApp(futureStart);
+      final instanceDay = AppClock.at(a.year, a.month, a.day);
+      expect(
+        s.payload,
+        reminderPayload(withReminder, reminderId, instanceDay),
+        reason: '深链载荷定位任务并携带提醒信息',
+      );
+      expect(s.actions?.map((x) => x.id).toList(), [
+        NotificationService.snoozeAction,
+        NotificationService.doneAction,
+      ], reason: '任务提醒通知带贪睡/已完成按钮');
     });
   });
 

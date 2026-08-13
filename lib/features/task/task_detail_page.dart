@@ -16,12 +16,21 @@ import 'package:zhuoluo/features/task/plan_time_sheet.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/repeat_rule_sheet.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
 
 /// 任务详情页（7 区块，自动保存）
 class TaskDetailPage extends ConsumerStatefulWidget {
-  const TaskDetailPage({super.key, required this.taskId});
+  const TaskDetailPage({
+    super.key,
+    required this.taskId,
+    this.fromNotification,
+  });
 
   final int taskId;
+
+  /// 从任务提醒通知正文点击进入时的来源信息（含提醒定位 r/d）：
+  /// 打开详情后弹出「延后提醒」选择（贪睡/延后的另一个入口）。
+  final NotificationTap? fromNotification;
 
   @override
   ConsumerState<TaskDetailPage> createState() => _TaskDetailPageState();
@@ -74,6 +83,60 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     return r;
   }
 
+  /// 智能提醒：从通知正文进入 → 弹出「延后提醒」选择（10 分钟/30 分钟/明天/取消）。
+  /// 选择后同 ID 重排提醒通知（贪睡/延后的另一个入口）。
+  Future<void> _maybeShowDeferSheet(NotificationTap from) async {
+    final info = parseReminderTap(from.payload);
+    final reminderId = info?.reminderId;
+    final instanceDay = info?.instanceDay;
+    if (info == null || reminderId == null || instanceDay == null) return;
+    final choice = await _showSheet<String>(
+      builder: (c) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                '延后提醒',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+            for (final (label, key) in [
+              ('10 分钟', '10'),
+              ('30 分钟', '30'),
+              ('明天', 'tomorrow'),
+            ])
+              ListTile(
+                leading: const Icon(Icons.schedule),
+                title: Text(label),
+                onTap: () => Navigator.pop(c, key),
+              ),
+            const Divider(height: 1),
+            ListTile(title: const Text('取消'), onTap: () => Navigator.pop(c)),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    final scheduler = ref.read(reminderSchedulerProvider);
+    final ok = await scheduler.deferReminder(
+      taskId: info.taskId,
+      reminderId: reminderId,
+      instanceDay: instanceDay,
+      delay: choice == 'tomorrow'
+          ? const Duration(minutes: 10)
+          : Duration(minutes: int.parse(choice)),
+      tomorrow: choice == 'tomorrow',
+    );
+    if (!mounted) return;
+    showAppSnackBar(
+      context,
+      ok ? '已设置稍后提醒' : '设置稍后提醒失败，请检查通知权限',
+      icon: Icons.snooze,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -83,6 +146,13 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) FocusManager.instance.primaryFocus?.unfocus();
     });
+    // 智能提醒：从通知正文进入且携带提醒定位信息 → 弹出「延后提醒」选择
+    final from = widget.fromNotification;
+    if (from != null && from.payload != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _maybeShowDeferSheet(from);
+      });
+    }
     _load();
   }
 

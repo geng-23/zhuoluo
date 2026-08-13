@@ -6,6 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:zhuoluo/core/utils/app_clock.dart';
+import 'package:zhuoluo/data/services/reminder_scheduler.dart' show notificationTapBackground;
 
 /// 本地通知服务（flutter_local_notifications v22 封装）
 ///
@@ -17,9 +18,23 @@ class NotificationService {
 
   static final NotificationService instance = NotificationService._();
 
+  /// 任务提醒通知的 action 常量（通知按钮点击经
+  /// onDidReceiveNotificationResponse / 后台回调的 actionId 分发）
+  static const String snoozeAction = 'snooze';
+  static const String doneAction = 'done';
+
+  /// 任务提醒通知（含贪睡/延后重排后的）默认操作按钮：
+  /// 「再提醒 10 分钟」贪睡、「已完成」直接完成。
+  /// showsUserInterface=false：按钮点击走后台 isolate（App 前台/后台/被杀
+  /// 均可生效），由 notificationTapBackground 处理。
+  static const List<AndroidNotificationAction> taskActions = [
+    AndroidNotificationAction(snoozeAction, '再提醒 10 分钟'),
+    AndroidNotificationAction(doneAction, '已完成'),
+  ];
+
   final _plugin = FlutterLocalNotificationsPlugin();
 
-  final _tapController = StreamController<String?>.broadcast();
+  final _tapController = StreamController<NotificationTap>.broadcast();
 
   bool _initialized = false;
 
@@ -30,7 +45,7 @@ class NotificationService {
   /// 冷启动深链——进程被杀后点击通知启动 App 时，
   /// payload 不经过 onDidReceiveNotificationResponse 回调（此时无人订阅），
   /// 需在 init 时通过 getNotificationAppLaunchDetails 主动捕获，供订阅前消费。
-  String? _launchPayload;
+  NotificationTap? _launchTap;
 
   /// 测试替身调度内核（非空时接管 schedule/cancel/cancelAll，不触平台插件）。
   /// 生产代码永不设置；测试 setUp 注入记录型替身并断言结果。
@@ -125,9 +140,20 @@ class NotificationService {
     await _plugin.initialize(
       settings: settings,
       // 点击通知 → 打开 App 定位任务
+      // actionId：通知 action（贪睡/已完成）的 id；正文点击为 null
       onDidReceiveNotificationResponse: (response) {
-        _tapController.add(response.payload);
+        _tapController.add(
+          NotificationTap(
+            actionId: response.actionId,
+            payload: response.payload,
+          ),
+        );
       },
+      // 智能提醒：贪睡/已完成按钮在 App 后台或被杀时点击，
+      // 插件在独立 FlutterEngine 的后台 isolate 调用本回调
+      //（showsUserInterface=false 的 action 默认走此路径）
+      onDidReceiveBackgroundNotificationResponse:
+          notificationTapBackground,
     );
     // 显式创建 channel（幂等；importance/声音在首次创建时生效）
     // N1-C：渠道显式指定系统默认通知音 URI（content://settings/system/notification_sound）。
@@ -180,8 +206,12 @@ class NotificationService {
     try {
       final details = await _plugin.getNotificationAppLaunchDetails();
       if (details?.didNotificationLaunchApp == true) {
-        _launchPayload = details?.notificationResponse?.payload;
-        debugPrint('通知：捕获启动深链 payload=$_launchPayload');
+        final resp = details?.notificationResponse;
+        _launchTap = NotificationTap(
+          actionId: resp?.actionId,
+          payload: resp?.payload,
+        );
+        debugPrint('通知：捕获启动深链 payload=${resp?.payload}');
       }
     } catch (e) {
       debugPrint('通知：读取启动详情失败 $e');
@@ -189,21 +219,21 @@ class NotificationService {
     _initialized = true;
   }
 
-  /// 取出并清空冷启动深链 payload（HomeShell 订阅前调用一次）。
+  /// 取出并清空冷启动深链（HomeShell 订阅前调用一次）。
   /// 返回 null 表示非通知启动或无 payload。
-  String? consumeLaunchPayload() {
-    final p = _launchPayload;
-    _launchPayload = null;
-    return p;
+  NotificationTap? consumeLaunchTap() {
+    final t = _launchTap;
+    _launchTap = null;
+    return t;
   }
 
-  /// 通知点击深链流（HomeShell 订阅消费 payload）
-  Stream<String?> get tapStream => _tapController.stream;
+  /// 通知点击/按钮点击深链流（HomeShell 订阅消费）
+  Stream<NotificationTap> get tapStream => _tapController.stream;
 
-  /// 测试用：模拟一次通知点击（向深链流注入 payload）。
+  /// 测试用：模拟一次通知点击（向深链流注入）。
   /// 生产代码不使用——与 [debugOverrideScheduler] 同属测试替身通道。
-  void debugSimulateTap(String? payload) {
-    _tapController.add(payload);
+  void debugSimulateTap(String? payload, {String? actionId}) {
+    _tapController.add(NotificationTap(actionId: actionId, payload: payload));
   }
 
   /// 请求通知权限（Android 13+；Web = 浏览器通知权限）。
@@ -289,6 +319,8 @@ class NotificationService {
     // 可空：测试通知不带深链
     String? payload,
     String channel = 'task_reminder_v4',
+    // 通知操作按钮（贪睡/已完成）；任务提醒通知默认带，可传覆盖
+    List<AndroidNotificationAction>? actions,
   }) async {
     // 测试替身接管：直接记录调度请求，不触平台插件
     final stub = debugOverrideScheduler;
@@ -300,6 +332,7 @@ class NotificationService {
         when: when,
         payload: payload,
         channel: channel,
+        actions: actions,
       );
     }
     if (!_initialized) await init();
@@ -332,7 +365,7 @@ class NotificationService {
               priority: Priority.high,
             ),
           )
-        : const NotificationDetails(
+        : NotificationDetails(
             android: AndroidNotificationDetails(
               'task_reminder_v4',
               '任务提醒',
@@ -340,6 +373,8 @@ class NotificationService {
               visibility: NotificationVisibility.public,
               importance: Importance.high,
               priority: Priority.high,
+              // 智能提醒：贪睡（再提醒）/已完成操作按钮
+              actions: actions,
             ),
           );
     // 精确闹钟失败（如厂商默认拒绝 SCHEDULE_EXACT_ALARM）时降级为 inexact，
@@ -415,6 +450,7 @@ abstract class NotificationScheduler {
     required DateTime when,
     String? payload,
     String channel = 'task_reminder_v4',
+    List<AndroidNotificationAction>? actions,
   });
 
   /// 取消单条通知
@@ -422,6 +458,17 @@ abstract class NotificationScheduler {
 
   /// 取消全部通知
   Future<void> cancelAll();
+}
+
+/// 通知点击事件（深链分发载体）：
+/// - [actionId]：通知按钮 id（贪睡 'snooze' / 已完成 'done'）；
+///   正文点击为 null
+/// - [payload]：通知深链载荷（'t{taskId}' 任务 / 'h{habitId}' 习惯）
+class NotificationTap {
+  const NotificationTap({this.actionId, this.payload});
+
+  final String? actionId;
+  final String? payload;
 }
 
 /// 通知 ID 分配

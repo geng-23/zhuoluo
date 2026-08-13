@@ -1,3 +1,4 @@
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
 
 /// 记录型通知调度替身：记录每次 schedule/cancel/cancelAll 调用，
@@ -11,8 +12,19 @@ import 'package:zhuoluo/data/services/notification_service.dart';
 /// addTearDown(() => NotificationService.instance.debugOverrideScheduler = null);
 /// ```
 class FakeNotificationScheduler implements NotificationScheduler {
-  /// 成功调度记录（title/body/when/payload/channel 全量）
-  final List<({int id, String title, String body, DateTime when, String? payload, String channel})> scheduled = [];
+  /// 成功调度记录（title/body/when/payload/channel/actions 全量）
+  final List<
+    ({
+      int id,
+      String title,
+      String body,
+      DateTime when,
+      String? payload,
+      String channel,
+      List<AndroidNotificationAction>? actions,
+    })
+  >
+  scheduled = [];
 
   /// 取消记录（按调用顺序）
   final List<int> cancelled = [];
@@ -24,8 +36,16 @@ class FakeNotificationScheduler implements NotificationScheduler {
   bool failSchedules = false;
 
   /// 最后一条成功调度的通知（无则 null）
-  ({int id, String title, String body, DateTime when, String? payload, String channel})?
-      get lastScheduled => scheduled.isEmpty ? null : scheduled.last;
+  ({
+    int id,
+    String title,
+    String body,
+    DateTime when,
+    String? payload,
+    String channel,
+    List<AndroidNotificationAction>? actions,
+  })?
+  get lastScheduled => scheduled.isEmpty ? null : scheduled.last;
 
   @override
   Future<bool> schedule(
@@ -35,6 +55,7 @@ class FakeNotificationScheduler implements NotificationScheduler {
     required DateTime when,
     String? payload,
     String channel = 'task_reminder_v4',
+    List<AndroidNotificationAction>? actions,
   }) async {
     if (failSchedules) return false;
     scheduled.add((
@@ -44,6 +65,7 @@ class FakeNotificationScheduler implements NotificationScheduler {
       when: when,
       payload: payload,
       channel: channel,
+      actions: actions,
     ));
     return true;
   }
@@ -59,8 +81,18 @@ class FakeNotificationScheduler implements NotificationScheduler {
   }
 
   /// 按通知 ID 筛选的调度记录
-  List<({int id, String title, String body, DateTime when, String? payload, String channel})>
-      byId(int id) => scheduled.where((s) => s.id == id).toList();
+  List<
+    ({
+      int id,
+      String title,
+      String body,
+      DateTime when,
+      String? payload,
+      String channel,
+      List<AndroidNotificationAction>? actions,
+    })
+  >
+  byId(int id) => scheduled.where((s) => s.id == id).toList();
 
   void clear() {
     scheduled.clear();

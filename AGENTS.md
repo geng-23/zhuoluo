@@ -104,10 +104,14 @@ export PATH="$HOME/flutter/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdlin
 
 默认流程（用户未要求发布）：
 
-1. **更新文档**：README（测试数 / 测试文件数等）及确有必要的其他项目文档。
+1. **真机运行验证**：`flutter run -d <deviceId>`（验证改动后按 `q` 退出）
+   - 若用户未指定 deviceId，可用 `flutter devices` 查看。
+   - 若无真机可用或用户明确不需要验证，跳过本步。
+
+2. **更新文档**：README（测试数 / 测试文件数等）及确有必要的其他项目文档。
    - **除非用户明确要求，否则不更新、不生成项目总览文档**（见 [第 8 章](#8-项目总览文档规则)）。
 
-2. **提交推送**（仓库 `geng-23/zhuoluo`，分支 `main`）：
+3. **提交推送**（仓库 `geng-23/zhuoluo`，分支 `main`）：
    ```bash
    git add -A
    git commit -m "<简洁中文提交信息>"

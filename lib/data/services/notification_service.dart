@@ -342,8 +342,9 @@ class NotificationService {
               priority: Priority.high,
             ),
           );
-    // 精确闹钟失败（如厂商默认拒绝 SCHEDULE_EXACT_ALARM）时降级为 inexact，
-    // 保证通知仍能触发（时间可能延迟）
+    // 系统闹钟调度失败（如厂商默认拒绝 SCHEDULE_EXACT_ALARM）时降级为
+    // inexact，保证通知仍能触发（时间可能延迟）。alarmClock 由系统闹钟
+    // 服务持有，不要求 Flutter 应用进程持续运行。
     try {
       await _plugin.zonedSchedule(
         id: id,
@@ -351,7 +352,7 @@ class NotificationService {
         body: body,
         scheduledDate: tzWhen,
         notificationDetails: details,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        androidScheduleMode: AndroidScheduleMode.alarmClock,
         payload: payload,
       );
       debugPrint('通知：已调度 $id @ $tzWhen');

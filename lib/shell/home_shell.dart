@@ -22,6 +22,9 @@ class _HomeShellState extends ConsumerState<HomeShell>
   int _tab = 0;
   /// 用户是否已手动切换 Tab（_restoreTab 恢复结果不得覆盖手动选择）
   bool _tabChanged = false;
+  /// 是否曾进入后台（paused）。回前台 resume 时据此前台补触发自动备份；
+  /// 冷启动首个 resumed 无前置 paused，不重复触发（main() 已触发过）。
+  bool _wasBackgrounded = false;
   StreamSubscription<String?>? _tapSub;
   /// A1：懒加载页面缓存——仅首次访问时创建，之后保留 State
   /// （IndexedStack 保留状态的前提是子树不因 key 变化重建）
@@ -98,13 +101,22 @@ class _HomeShellState extends ConsumerState<HomeShell>
     super.dispose();
   }
 
-  /// 回到前台：先刷新通知权限缓存，再按状态重排。
+  /// 回前台：先刷新通知权限缓存，再按状态重排。
   /// HCI-1：用户在系统设置开启通知后返回 App（不重启/不进权限中心）时，
   /// 旧缓存 false 会让提醒全部静默跳过——先刷新缓存；若从"被拒"变"已授权"，
   /// 强制全量重排补齐之前被短路/清掉的提醒；否则走 24h 窗口滚动。
+  /// 另：进程常驻时"打开 App"（后台切回前台）不经过 main() 冷启动路径，
+  /// 自动备份由这里补触发——24h 门控在 BackupService 内，一天最多一次。
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.paused) {
+      _wasBackgrounded = true;
+    } else if (state == AppLifecycleState.resumed) {
+      if (_wasBackgrounded) {
+        _wasBackgrounded = false;
+        debugPrint('回前台：触发自动备份检查');
+        unawaited(ref.read(backupServiceProvider).autoBackup());
+      }
       unawaited(_onResume());
     }
   }

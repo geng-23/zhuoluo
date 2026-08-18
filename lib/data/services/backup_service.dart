@@ -1,5 +1,6 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:drift/drift.dart' show Value;
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_json.dart';
@@ -61,9 +62,22 @@ class BackupService {
   /// 读取备份文件内容
   Future<String> readFile(String path) => readFileImpl(path);
 
-  /// H2：#30 删除备份文件（支持多份/全部）
-  Future<void> deleteBackupFiles(List<String> paths) =>
-      deleteBackupFilesImpl(paths);
+  /// H2：#30 删除备份文件（支持多份/全部）。
+  /// 删除后若一份备份都不剩（数据零保护），重置自动备份时间戳——
+  /// 下次打开 App（冷启动或回前台）自动补一份，24h 门控不再拦截。
+  Future<void> deleteBackupFiles(List<String> paths) async {
+    await deleteBackupFilesImpl(paths);
+    List<BackupFileInfo> remaining;
+    try {
+      remaining = await listBackupInfos();
+    } catch (_) {
+      // 平台层不可用（如测试环境无 path_provider 通道）：不重置，保持原样
+      return;
+    }
+    if (remaining.isEmpty) {
+      await _db.setSetting(keyLastAutoBackupAt, '');
+    }
+  }
 
   /// H2：备份文件详情（路径 + 文件名 + 修改时间）
   Future<List<BackupFileInfo>> listBackupInfos() => listBackupInfosImpl();
@@ -106,18 +120,37 @@ class BackupService {
           ? data[key] as List
           : const [];
 
-  /// 每天首次打开自动备份（备份方案设计 3.2）：
+  /// 自动备份执行中的 Future（并发去重）。
+  /// 冷启动 main() 与回前台生命周期可能先后触发，同一时刻只执行一次，
+  /// 后续调用复用进行中的 Future，避免同秒写两份备份。
+  Future<bool>? _autoBackupInFlight;
+
+  /// 每天首次打开/回到前台自动备份（备份方案设计 3.2）：
   /// 1) Settings 读 lastAutoBackupAt；距现在 <24h → 直接返回
   /// 2) exportJson → 写应用文档目录（私有目录，规避 Android 11+ 作用域存储限制）
   /// 3) 清理：全量备份文件（下载 + 私有目录）按修改时间降序，删除第 11 份及更旧
   /// 4) 成功 → 写 lastAutoBackupAt；失败 → 写 autoBackupFailed（角标提示）
-  Future<bool> autoBackup() async {
+  Future<bool> autoBackup() {
+    final inFlight = _autoBackupInFlight;
+    if (inFlight != null) return inFlight;
+    final future = _autoBackupImpl().whenComplete(() {
+      _autoBackupInFlight = null;
+    });
+    _autoBackupInFlight = future;
+    return future;
+  }
+
+  Future<bool> _autoBackupImpl() async {
     if (!autoBackupSupportedImpl()) return false;
     final last = await _db.getSetting(keyLastAutoBackupAt);
     if (last != null && last.isNotEmpty) {
       final t = DateTime.tryParse(last);
-      if (t != null && AppClock.now().difference(t).inHours < 24) return true;
+      if (t != null && AppClock.now().difference(t).inHours < 24) {
+        debugPrint('自动备份：距上次（$last）不足 24h，跳过');
+        return true;
+      }
     }
+    debugPrint('自动备份：执行写盘');
     try {
       final json = await exportJson();
       await exportToFileImpl(json, toDownloads: false);
@@ -131,6 +164,7 @@ class BackupService {
       await _db.setSetting(keyAutoBackupFailed, '');
       return true;
     } catch (e) {
+      debugPrint('自动备份：写盘失败 $e');
       try {
         await _db.setSetting(
           keyAutoBackupFailed,

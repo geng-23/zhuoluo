@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -148,7 +148,7 @@ class ProfilePage extends ConsumerWidget {
             const _SectionHeader('关于'),
             ListTile(
               leading: const Icon(Icons.info_outline),
-              title: const Text('着落 v1.2.5+26'),
+              title: const Text('着落 v1.2.6+27'),
               subtitle: const Text('事事有着落 · 本地数据'),
               onTap: () => _showAbout(context),
             ),

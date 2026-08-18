@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_service.dart';
+import 'package:zhuoluo/data/services/backup_types.dart';
 
 /// 备份方案 A 回归测试（系统文件选择器导出/导入 + 冲突增强）
 void main() {
@@ -122,4 +123,48 @@ void main() {
       expect(tasks.single.title, '任务A');
     },
   );
+
+  group('删除备份与自动备份计时重置', () {
+    test('删除后无任何备份文件 → 重置 lastAutoBackupAt（下次打开补一份）', () async {
+      await db.ensureDefaultList();
+      await db.setSetting(
+        BackupService.keyLastAutoBackupAt,
+        DateTime.now().toIso8601String(),
+      );
+      final service = _InjectingBackupService(db)..remaining = [];
+      await service.deleteBackupFiles(['/nonexistent/a.json']);
+      expect(await db.getSetting(BackupService.keyLastAutoBackupAt), '',
+          reason: '备份删光后重置计时，24h 门控不再拦截');
+    });
+
+    test('删除后仍有备份文件 → 不重置计时', () async {
+      await db.ensureDefaultList();
+      final old =
+          DateTime.now().subtract(const Duration(hours: 1)).toIso8601String();
+      await db.setSetting(BackupService.keyLastAutoBackupAt, old);
+      final service = _InjectingBackupService(db)
+        ..remaining = [
+          BackupFileInfo(
+            path: '/x/zhuoluo_backup_1.json',
+            name: 'zhuoluo_backup_1.json',
+            modified: DateTime.now(),
+            size: 100,
+          ),
+        ];
+      await service.deleteBackupFiles(['/nonexistent/a.json']);
+      expect(await db.getSetting(BackupService.keyLastAutoBackupAt), old,
+          reason: '仍有备份时保持计时，一天最多一次');
+    });
+  });
+}
+
+/// 测试替身：注入 listBackupInfos 结果，绕开测试环境
+/// path_provider 无通道导致文件列表不可用的问题。
+class _InjectingBackupService extends BackupService {
+  _InjectingBackupService(super.db);
+
+  List<BackupFileInfo> remaining = [];
+
+  @override
+  Future<List<BackupFileInfo>> listBackupInfos() async => remaining;
 }

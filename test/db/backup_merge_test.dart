@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
@@ -343,6 +343,19 @@ void main() {
       final ok = await BackupService(db).autoBackup();
       expect(ok, isFalse, reason: '测试环境写盘失败');
       expect(await db.getSetting(BackupService.keyAutoBackupFailed), isNotNull);
+    });
+
+    test('并发去重：同刻多次调用复用同一 Future（冷启动+回前台不重复写盘）', () async {
+      await db.ensureDefaultList();
+      final service = BackupService(db);
+      final f1 = service.autoBackup();
+      final f2 = service.autoBackup();
+      final f3 = service.autoBackup();
+      // 三调用必须拿到同一 Future（第一次执行中即复用），否则会并发写两份备份
+      expect(identical(f1, f2), isTrue, reason: '进行中的自动备份应被复用');
+      expect(identical(f2, f3), isTrue, reason: '进行中的自动备份应被复用');
+      final results = await Future.wait([f1, f2, f3]);
+      expect(results.toSet(), {false}, reason: '三调用共享同一结果（测试环境写盘失败）');
     });
   });
 }

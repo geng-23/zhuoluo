@@ -41,6 +41,7 @@ Future<void> main() async {
   unawaited(_runStartupBackground(container));
   // 每天首次打开自动备份（备份方案设计 3.2），不阻塞启动流程
   unawaited(container.read(backupServiceProvider).autoBackup());
+  debugPrint('启动：已请求自动备份');
 }
 
 /// 启动后台任务链：锚点修复（数据正确性）→ 权限请求 → 全量重排（最重）。

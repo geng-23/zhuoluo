@@ -148,7 +148,7 @@ class ProfilePage extends ConsumerWidget {
             const _SectionHeader('关于'),
             ListTile(
               leading: const Icon(Icons.info_outline),
-              title: const Text('着落 v1.2.2+23'),
+              title: const Text('着落 v1.2.3+24'),
               subtitle: const Text('事事有着落 · 本地数据'),
               onTap: () => _showAbout(context),
             ),

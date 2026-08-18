@@ -71,3 +71,6 @@ devtools_options.yaml
 # 隐私文件
 opencode.jsonc
 *.md
+
+
+.gitignore

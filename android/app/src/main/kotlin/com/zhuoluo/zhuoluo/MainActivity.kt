@@ -2,6 +2,7 @@ package com.zhuoluo.zhuoluo
 
 import android.app.Notification
 import android.app.NotificationManager
+import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
@@ -50,6 +51,42 @@ class MainActivity : FlutterActivity() {
                         Uri.parse("package:$packageName"),
                     )
                     startActivity(intent)
+                    result.success(null)
+                }
+                // 打开小米/HyperOS 自启动管理页（进程被清理后系统才会恢复
+                // 闹钟触发的通知）；组件不存在时回退应用详情页。
+                "openAutoStartSettings" -> {
+                    var opened = false
+                    if (Build.MANUFACTURER.equals("xiaomi", true)) {
+                        try {
+                            val intent = Intent("miui.intent.action.OP_AUTO_START")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                .setPackage("com.miui.securitycenter")
+                            startActivity(intent)
+                            opened = true
+                        } catch (_: ActivityNotFoundException) {
+                            // 尝试显式组件，再回退应用详情页
+                        }
+                    }
+                    if (!opened) {
+                        try {
+                            val intent = Intent()
+                                .setClassName(
+                                    "com.miui.securitycenter",
+                                    "com.miui.permcenter.autostart.AutoStartManagementActivity",
+                                )
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
+                            opened = true
+                        } catch (_: ActivityNotFoundException) {
+                            // 回退应用详情页
+                        }
+                    }
+                    if (!opened) {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            .setData(Uri.parse("package:$packageName"))
+                        startActivity(intent)
+                    }
                     result.success(null)
                 }
                 // 将指定通知渠道的锁屏可见性更新为 PUBLIC。

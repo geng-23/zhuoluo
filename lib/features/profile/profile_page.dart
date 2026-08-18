@@ -148,7 +148,7 @@ class ProfilePage extends ConsumerWidget {
             const _SectionHeader('关于'),
             ListTile(
               leading: const Icon(Icons.info_outline),
-              title: const Text('着落 v1.2.3+24'),
+              title: const Text('着落 v1.2.4+25'),
               subtitle: const Text('事事有着落 · 本地数据'),
               onTap: () => _showAbout(context),
             ),
@@ -360,7 +360,7 @@ class _SectionHeader extends StatelessWidget {
 
 // ================= 通知权限中心 =================
 
-/// 通知权限中心：通知权限 / 精确闹钟 / 电池优化三项状态，
+/// 通知权限中心：通知权限 / 精确闹钟 / 电池优化 / 自启动四项，
 /// 每项可一键跳对应系统设置（通知方案 A）
 class _NotificationPermissionTile extends ConsumerStatefulWidget {
   const _NotificationPermissionTile();
@@ -477,6 +477,24 @@ class _NotificationPermissionTileState
                 .requestBatteryOptimizationExemption();
             Future.delayed(const Duration(seconds: 1), _check);
           },
+        ),
+        // 自启动（HyperOS：进程被清理后系统才会恢复闹钟通知）
+        ListTile(
+          dense: true,
+          leading: Icon(
+            Icons.power_settings_new,
+            size: 20,
+            color: Colors.grey.shade600,
+          ),
+          title: const Text('自启动', style: TextStyle(fontSize: 14)),
+          subtitle: const Text(
+            'HyperOS 需允许自启动，进程被清理后系统才会恢复提醒',
+            style: TextStyle(fontSize: 11),
+          ),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => ref
+              .read(notificationServiceProvider)
+              .openAutoStartSettings(),
         ),
       ],
     );

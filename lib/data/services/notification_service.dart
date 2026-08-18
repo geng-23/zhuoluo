@@ -99,6 +99,16 @@ class NotificationService {
     } catch (_) {}
   }
 
+  /// 打开小米/HyperOS 自启动管理页（进程被清理后系统才会恢复闹钟通知；
+  /// 非小米设备回退应用详情页）
+  Future<void> openAutoStartSettings() async {
+    try {
+      await _systemChannel
+          .invokeMethod<void>('openAutoStartSettings')
+          .timeout(const Duration(seconds: 2), onTimeout: () {});
+    } catch (_) {}
+  }
+
   /// 发送测试通知（1 秒后弹出，验证通知链路是否正常）。
   /// 返回 false 表示未成功排入系统（权限被拒等）。
   Future<bool> sendTestNotification() async {

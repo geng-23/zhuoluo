@@ -122,6 +122,13 @@ class MainActivity : FlutterActivity() {
                         result.error("save_failed", e.message ?: "保存失败", null)
                     }
                 }
+                // 返回当前系统时区 IANA ID（如 Asia/Shanghai、America/Los_Angeles）。
+                // 用于"跟随系统时区"模式下运行中检测时区变化：Flutter 引擎的
+                // 本地时区在进程启动时缓存，改系统时区后 Dart 侧读不到新值，
+                // 必须由原生侧实时返回，App 回前台据此重读并全量重排提醒。
+                "getSystemTimezoneId" -> {
+                    result.success(java.util.TimeZone.getDefault().id)
+                }
                 else -> result.notImplemented()
             }
         }

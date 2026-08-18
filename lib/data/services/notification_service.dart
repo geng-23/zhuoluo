@@ -125,9 +125,9 @@ class NotificationService {
   Future<void> init() async {
     if (_initialized) return;
     tzdata.initializeTimeZones();
-    // 使用设备本地时区（此前硬编码 Asia/Shanghai，非中国时区用户
-    // 通知时刻全部偏移；"回退本地时区"分支实为不可达死代码）
-    tz.setLocalLocation(tz.local);
+    // 原生同步系统时区（引擎本地时区在进程启动时缓存，改系统时区后
+    // Dart 侧读不到新值；首次启动这里确保 AppClock/tz.local 与系统一致）
+    await reloadSystemTimezone();
     const settings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       iOS: DarwinInitializationSettings(),
@@ -209,6 +209,30 @@ class NotificationService {
 
   /// 通知点击深链流（HomeShell 订阅消费 payload）
   Stream<String?> get tapStream => _tapController.stream;
+
+  /// 重新读取系统时区（原生侧实时获取——Flutter 引擎的本地时区在进程启动
+  /// 时缓存，运行中修改系统时区后 Dart 侧 `DateTime` 偏移不会更新）。
+  /// 时区变化时同步 AppClock 与 tz.local；返回 true 表示发生变化
+  ///（调用方应触发全量重排，通知时刻按新时区重算）。
+  /// 无原生宿主（测试环境）/获取失败时静默返回 false。
+  Future<bool> reloadSystemTimezone() async {
+    String? id;
+    try {
+      id = await const MethodChannel('zhuoluo/notifications')
+          .invokeMethod<String>('getSystemTimezoneId');
+    } catch (_) {
+      return false;
+    }
+    if (id == null || id == AppClock.systemTimezoneName) return false;
+    AppClock.syncSystemTimezone(id);
+    try {
+      tz.setLocalLocation(AppClock.location);
+    } catch (_) {
+      // tzdata 未初始化等异常：AppClock 已按显式时区生效，不影响排期
+    }
+    debugPrint('系统时区变化：${AppClock.systemTimezoneName}，触发全量重排');
+    return true;
+  }
 
   /// 测试用：模拟一次通知点击（向深链流注入 payload）。
   /// 生产代码不使用——与 [debugOverrideScheduler] 同属测试替身通道。

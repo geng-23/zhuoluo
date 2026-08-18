@@ -123,9 +123,15 @@ class _HomeShellState extends ConsumerState<HomeShell>
 
   Future<void> _onResume() async {
     final svc = ref.read(notificationServiceProvider);
+    final scheduler = ref.read(reminderSchedulerProvider);
+    // 运行中系统时区变化：重读时区；变化则全量重排（所有通知时刻按
+    // 新系统时区重算，AppClock 随后续业务读取自动切换解释口径）
+    if (await svc.reloadSystemTimezone()) {
+      await scheduler.rescheduleAll();
+      return;
+    }
     final wasDenied = svc.permissionCache == false;
     final granted = await svc.refreshPermissionCache();
-    final scheduler = ref.read(reminderSchedulerProvider);
     if (wasDenied && granted) {
       await scheduler.rescheduleAll();
     } else {

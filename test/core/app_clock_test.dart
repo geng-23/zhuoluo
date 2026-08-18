@@ -16,6 +16,7 @@ void main() {
   tearDown(() {
     AppClock.setTimezone(null);
     AppClock.setNow(null);
+    AppClock.syncSystemTimezone(null);
   });
 
   group('nextDay', () {
@@ -166,6 +167,61 @@ void main() {
       final w1 = AppClock.at(2026, 2, 23); // 周一
       final w5 = AppClock.at(2026, 3, 23); // 周一（中间含 3/8 春季转换）
       expect(AppClock.weeksBetweenMonday(w1, w5), 4);
+    });
+  });
+
+  group('syncSystemTimezone（跟随系统时区，运行中变化可切换）', () {
+    test('未设应用时区时按显式系统时区构造/解释', () {
+      AppClock.syncSystemTimezone('America/New_York');
+      // 纽约 EDT（UTC-4）09:00 = 13:00Z
+      final t = AppClock.at(2026, 8, 18, 9, 0);
+      expect(
+        t.millisecondsSinceEpoch,
+        DateTime.utc(2026, 8, 18, 13, 0).millisecondsSinceEpoch,
+      );
+      expect(AppClock.asApp(t).hour, 9);
+      expect(AppClock.systemTimezoneName, 'America/New_York');
+    });
+
+    test('运行中切换系统时区：同一墙钟时间的绝对时刻即时变化', () {
+      AppClock.syncSystemTimezone('America/New_York');
+      final ny = AppClock.at(2026, 8, 18, 9, 0);
+      // 模拟改系统时区：回前台重新同步
+      AppClock.syncSystemTimezone('America/Los_Angeles');
+      final la = AppClock.at(2026, 8, 18, 9, 0);
+      expect(
+        la.millisecondsSinceEpoch,
+        DateTime.utc(2026, 8, 18, 16, 0).millisecondsSinceEpoch,
+        reason: 'LA PDT(UTC-7) 09:00 = 16:00Z，与纽约 13:00Z 不同',
+      );
+      expect(ny.millisecondsSinceEpoch, isNot(la.millisecondsSinceEpoch));
+      // 已构造的绝对时刻按新时区解释字段随之变化：13:00Z 在 LA = 06:00
+      expect(AppClock.asApp(ny).hour, 6,
+          reason: '纽约 09:00 = 13:00Z，切到 LA 后同一时刻字段变 06:00');
+    });
+
+    test('同步 null/非法名回退引擎本地时区（行为不变）', () {
+      AppClock.syncSystemTimezone(null);
+      expect(AppClock.systemTimezoneName, isNull);
+      final t = AppClock.at(2026, 8, 18, 9, 0);
+      expect(
+        t.millisecondsSinceEpoch,
+        DateTime(2026, 8, 18, 9, 0).millisecondsSinceEpoch,
+        reason: '未启用显式时区时退化为普通 DateTime（系统 TZ 环境）',
+      );
+      AppClock.syncSystemTimezone('Not/AZone');
+      expect(AppClock.systemTimezoneName, isNull, reason: '非法名回退');
+    });
+
+    test('应用时区优先于显式系统时区', () {
+      AppClock.setTimezone('Asia/Shanghai');
+      AppClock.syncSystemTimezone('America/New_York');
+      final t = AppClock.at(2026, 8, 18, 9, 0);
+      expect(
+        t.millisecondsSinceEpoch,
+        DateTime.utc(2026, 8, 18, 1, 0).millisecondsSinceEpoch,
+        reason: '上海 UTC+8 09:00 = 01:00Z（应用时区优先）',
+      );
     });
   });
 

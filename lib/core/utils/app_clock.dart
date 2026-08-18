@@ -23,6 +23,7 @@ class AppClock {
   static String? _name;
   static tz.Location? _loc;
   static DateTime? _nowOverride;
+  static String? _sysName;
 
   /// 设置应用时区（IANA 名称）。null/空 = 跟随系统时区；非法名称回落系统。
   static void setTimezone(String? ianaName) {
@@ -41,6 +42,29 @@ class AppClock {
     }
   }
 
+  /// 同步系统时区（IANA 名称，由原生侧实时读取传入）。
+  ///
+  /// Flutter 引擎的本地时区在进程启动时缓存，运行中修改系统时区后 Dart 侧
+  /// `DateTime` 偏移不会更新——跟随系统时区模式下必须由原生侧重新读取，
+  /// 回前台时同步本方法，让 [at]/[now]/[asApp] 按新系统时区解释。
+  /// null/空/非法名称 = 不启用显式系统时区（测试环境或获取失败时，
+  /// 回退引擎本地时区，行为与之前完全一致）。
+  static void syncSystemTimezone(String? ianaName) {
+    if (ianaName == null || ianaName.isEmpty) {
+      _sysName = null;
+      return;
+    }
+    try {
+      tz.getLocation(ianaName); // 校验合法性（未初始化 tzdata 时抛异常）
+      _sysName = ianaName;
+    } catch (_) {
+      _sysName = null;
+    }
+  }
+
+  /// 显式同步的系统时区 IANA 名称；null = 未启用
+  static String? get systemTimezoneName => _sysName;
+
   /// 应用时区 IANA 名称；null = 跟随系统时区
   static String? get timezoneName => _name;
 
@@ -51,21 +75,46 @@ class AppClock {
     _nowOverride = now;
   }
 
-  /// 应用时区下的当前时刻（未设置时等同 DateTime.now()）；
-  /// 测试注入后返回注入值（原样，不按应用时区重解释）。
+  /// 当前生效的时区位置：应用时区 > 显式系统时区 > 引擎本地时区。
+  static tz.Location get location {
+    final loc = _loc;
+    if (loc != null) return loc;
+    final name = _sysName;
+    if (name != null) {
+      try {
+        return tz.getLocation(name);
+      } catch (_) {
+        // 时区数据库未初始化等异常：回落引擎本地时区
+      }
+    }
+    return tz.local;
+  }
+
+  /// 应用时区/系统时区下的当前时刻（两者均未启用时等同 DateTime.now()）；
+  /// 测试注入后返回注入值（原样，不按时区重解释）。
+  /// 注意：两者均未启用时**不访问** tz.local（timezone 包的 late 字段在
+  /// 未初始化时求值会抛 LateInitializationError，如测试环境未加载 tzdata）。
   static DateTime now() {
     final o = _nowOverride;
     if (o != null) return o;
     final loc = _loc;
-    if (loc == null) return DateTime.now();
-    return tz.TZDateTime.now(loc);
+    if (loc != null) return tz.TZDateTime.now(loc);
+    final name = _sysName;
+    if (name != null) {
+      try {
+        return tz.TZDateTime.now(tz.getLocation(name));
+      } catch (_) {
+        // 时区数据库未初始化等异常：回落普通 DateTime
+      }
+    }
+    return DateTime.now();
   }
 
   /// 应用时区下的"墙上时间"构造（统一时间模型）。
-  /// 未设置应用时区时退化为普通 DateTime(y,m,d,h,min)，行为完全不变；
-  /// 设置了应用时区时返回该时区的 TZDateTime（绝对时刻 = 应用时区墙上时间）。
+  /// 未设置应用时区时按显式系统时区解释（引擎缓存无法跟随运行中时区变化）；
+  /// 两者均未启用时退化为普通 DateTime(y,m,d,h,min)，行为完全不变。
   /// 业务写入侧构造任务时间/提醒基准/日历窗口必须走本方法，
-  /// 避免普通 DateTime 按系统时区解释造成跨时区偏移。
+  /// 避免普通 DateTime 按引擎缓存时区解释造成跨时区偏移。
   static DateTime at(
     int y,
     int m,
@@ -74,23 +123,35 @@ class AppClock {
     int min = 0,
   ]) {
     final loc = _loc;
-    if (loc == null) return DateTime(y, m, d, h, min);
-    return tz.TZDateTime(loc, y, m, d, h, min);
+    if (loc != null) return tz.TZDateTime(loc, y, m, d, h, min);
+    final name = _sysName;
+    if (name != null) {
+      try {
+        return tz.TZDateTime(tz.getLocation(name), y, m, d, h, min);
+      } catch (_) {
+        // 时区数据库未初始化等异常：回落普通 DateTime
+      }
+    }
+    return DateTime(y, m, d, h, min);
   }
 
-  /// 把任意 DateTime 按应用时区重新解释（统一时间模型）。
-  /// 未设置应用时区时原样返回；设置了应用时区时返回 TZDateTime——
-  /// 绝对时刻不变，仅字段（year/month/day/hour 等）改按应用时区解释。
+  /// 把任意 DateTime 按当前生效时区重新解释（统一时间模型）。
+  /// 未设置应用时区时按显式系统时区解释；两者均未启用时原样返回。
   /// 业务读取侧从数据库取出的时间必须先经本方法再取字段，
-  /// 否则字段按系统时区解释造成跨时区偏移。
+  /// 否则字段按引擎缓存时区解释造成跨时区偏移。
   static DateTime asApp(DateTime t) {
     final loc = _loc;
-    if (loc == null) return t;
-    return tz.TZDateTime.from(t, loc);
+    if (loc != null) return tz.TZDateTime.from(t, loc);
+    final name = _sysName;
+    if (name != null) {
+      try {
+        return tz.TZDateTime.from(t, tz.getLocation(name));
+      } catch (_) {
+        // 时区数据库未初始化等异常：原样返回
+      }
+    }
+    return t;
   }
-
-  /// 通知排期/换算用位置（未设置时跟随系统 tz.local）
-  static tz.Location get location => _loc ?? tz.local;
 
   // ---------- 日历日运算（DST 安全） ----------
 

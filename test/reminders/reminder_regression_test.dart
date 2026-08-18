@@ -284,6 +284,13 @@ void main() {
         reason: '测试环境无原生宿主，权限查询应兜底返回 true');
   });
 
+  test('reloadSystemTimezone 无原生宿主时静默返回 false（不抛异常）', () async {
+    // 测试环境无 'zhuoluo/notifications' 原生通道：invokeMethod 抛
+    // MissingPluginException，必须被捕获并返回 false（不触发重排）
+    final changed = await NotificationService.instance.reloadSystemTimezone();
+    expect(changed, isFalse);
+  });
+
   test('习惯提醒 ID 含日期维度且段位不碰撞', () {
     final day1 = DateTime(2026, 8, 10);
     final day2 = DateTime(2026, 8, 11);

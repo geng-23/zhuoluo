@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 日期工具（周一为一周开始，中文格式化）
@@ -21,7 +21,7 @@ class DateUtilsEx {
   static DateTime mondayOf(DateTime d) {
     final a = AppClock.asApp(d);
     final day = AppClock.at(a.year, a.month, a.day);
-    return day.subtract(Duration(days: day.weekday - 1));
+    return AppClock.addCalendarDays(day, -(day.weekday - 1));
   }
 
   /// 是否为同一天（按应用时区解释比较）
@@ -43,8 +43,8 @@ class DateUtilsEx {
     final today = day(base);
     final target = day(d);
     if (sameDay(target, today)) return '今天';
-    if (sameDay(target, today.add(const Duration(days: 1)))) return '明天';
-    if (sameDay(target, today.subtract(const Duration(days: 1)))) return '昨天';
+    if (sameDay(target, AppClock.addCalendarDays(today, 1))) return '明天';
+    if (sameDay(target, AppClock.addCalendarDays(today, -1))) return '昨天';
     if (target.year == today.year) {
       return '${target.month}月${target.day}日 ${weekdayCn[target.weekday - 1]}';
     }

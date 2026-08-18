@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
@@ -54,7 +54,7 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
     switch (_range) {
       case 'week':
         from = DateUtilsEx.mondayOf(now);
-        to = from.add(const Duration(days: 6));
+        to = AppClock.addCalendarDays(from, 6);
         break;
       case 'month':
         from = AppClock.at(now.year, now.month, 1);
@@ -74,12 +74,17 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
 
     // F1：习惯热力图（每个习惯独立）
     final habits = await db.getHabits();
-    final habitStart = now.subtract(const Duration(days: 89));
+    // 90 天窗口按"日历日"展开（今天 00:00 起往回 89 天），跨 DST 转换日
+    // 不得因 ±1 小时漂移成 89/91 个日历日
+    final habitStart = AppClock.addCalendarDays(
+      AppClock.startOfDay(now),
+      -89,
+    );
     final heatByHabit = <int, Map<DateTime, bool>>{};
     for (final h in habits) {
       final map = <DateTime, bool>{};
       for (var d = 0; d < 90; d++) {
-        final day = habitStart.add(Duration(days: d));
+        final day = AppClock.addCalendarDays(habitStart, d);
         map[AppClock.at(day.year, day.month, day.day)] = false;
       }
       heatByHabit[h.id] = map;
@@ -462,12 +467,12 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
         .fold<int>(0, (a, b) => b > a ? b : a)
         .clamp(1, 10)
         .toInt();
-    // 闰年 366 天（此前固定 365 格漏掉 12/31）
-    final daysInYear = AppClock.at(
-      now.year + 1,
-      1,
-      1,
-    ).difference(AppClock.at(now.year, 1, 1)).inDays;
+    // 闰年 366 天（此前固定 365 格漏掉 12/31）；
+    // 用日历日差而非绝对时长差——DST 时区一年 365*24±1h，inDays 会得 364
+    final daysInYear = AppClock.daysBetween(
+      AppClock.at(now.year, 1, 1),
+      AppClock.at(now.year + 1, 1, 1),
+    );
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -513,11 +518,10 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
                         ),
                     itemCount: daysInYear,
                     itemBuilder: (context, i) {
-                      final day = AppClock.at(
-                        now.year,
-                        1,
-                        1,
-                      ).add(Duration(days: i));
+                      final day = AppClock.addCalendarDays(
+                        AppClock.at(now.year, 1, 1),
+                        i,
+                      );
                       if (day.isAfter(now)) {
                         return Container(color: Colors.transparent);
                       }

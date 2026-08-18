@@ -1,4 +1,4 @@
-﻿import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
@@ -220,7 +220,7 @@ class TasksController extends StateNotifier<TasksState> {
     final doneSet = await _db.getCompletedSetForTasks(
       ids,
       today,
-      today.add(Duration(days: maxWindow)),
+      AppClock.addCalendarDays(today, maxWindow),
     );
     final result = <int, DateTime?>{};
     for (final t in recTasks) {
@@ -250,7 +250,10 @@ class TasksController extends StateNotifier<TasksState> {
       base,
       t.rrule,
       from: today,
-      to: today.add(Duration(days: RruleService.windowDaysFor(t.rrule))),
+      to: AppClock.addCalendarDays(
+        today,
+        RruleService.windowDaysFor(t.rrule),
+      ),
       limit: 400,
     );
     // 候选日期 = 规则实例（被"改期本次"移走的实例替换为其目标日）
@@ -306,7 +309,7 @@ class TasksController extends StateNotifier<TasksState> {
     final doneSet = await _db.getCompletedSetForTasks(
       [t.id],
       today,
-      today.add(Duration(days: RruleService.windowDaysFor(t.rrule))),
+      AppClock.addCalendarDays(today, RruleService.windowDaysFor(t.rrule)),
     );
     return _nextInstanceDate(t, today, exceptions, doneSet);
   }
@@ -408,11 +411,13 @@ class TasksController extends StateNotifier<TasksState> {
     var ps = planStart;
     var pe = planEnd;
     if (rrule.isNotEmpty && ps != null) {
-      final hit = RruleService.instance.nearestHitOnOrNear(ps, rrule);
-      if (hit != null &&
-          !(hit.year == ps.year && hit.month == ps.month && hit.day == ps.day)) {
+      // 锚点吸附统一收口（与详情页改规则 / 启动 fixOrphan 同一函数）：
+      // ps 可能来自 UI 回传（字段按系统时区解释），normalizeAnchor 内部
+      // 先按应用时区解释再吸附，避免跨时区偏移
+      final newStart = RruleService.instance.normalizeAnchor(ps, rrule);
+      if (newStart != null) {
         final dur = pe?.difference(ps);
-        ps = AppClock.at(hit.year, hit.month, hit.day, ps.hour, ps.minute);
+        ps = newStart;
         pe = dur == null ? ps.add(const Duration(hours: 1)) : ps.add(dur);
       }
     }

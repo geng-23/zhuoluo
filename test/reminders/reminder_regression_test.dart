@@ -1,6 +1,7 @@
-﻿import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
@@ -21,6 +22,9 @@ void main() {
   late AppDatabase db;
 
   setUp(() {
+    // 调度器内部用 AppClock.now() 计算 93 天窗口，注入固定时钟保证
+    // 跨午夜/任意系统时区下排期窗口与断言一致
+    AppClock.setNow(now);
     db = AppDatabase.forTesting(NativeDatabase.memory());
     // 调度路径注入替身（重排/取消提醒走记录型替身，不触平台插件）
     final fake = FakeNotificationScheduler();
@@ -28,6 +32,7 @@ void main() {
   });
 
   tearDown(() async {
+    AppClock.setNow(null);
     NotificationService.instance.debugOverrideScheduler = null;
     NotificationService.instance.debugOverridePermission = null;
     await db.close();

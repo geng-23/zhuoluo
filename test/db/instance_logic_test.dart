@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_service.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
@@ -10,8 +11,11 @@ import 'package:zhuoluo/data/services/rrule_expander.dart';
 
 /// 实例完成/全天提醒时刻回归测试
 void main() {
-  final now = DateTime.now();
+  // 固定时钟：套件内所有"今天"口径一致，跨午夜不漂移
+  AppClock.setNow(DateTime(2026, 8, 20, 10, 0));
+  final now = AppClock.now();
   final today = DateTime(now.year, now.month, now.day);
+  tearDownAll(() => AppClock.setNow(null));
 
   late AppDatabase db;
 

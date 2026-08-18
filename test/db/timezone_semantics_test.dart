@@ -1,4 +1,4 @@
-﻿import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timezone/data/latest.dart' as tzdata;
@@ -27,9 +27,13 @@ void main() {
     // Asia/Shanghai（UTC+8），两者相差 12 小时，能真实暴露跨时区偏移。
     // 此前用 Asia/Shanghai 与系统时区相同，测试形同虚设。
     AppClock.setTimezone('America/New_York');
+    // 固定时钟：完成记录/提醒基准不再依赖真实时间，跨午夜与日期漂移
+    // 后仍确定（此前固定窗口 2026-08 断言在 8/31 后必挂）
+    AppClock.setNow(DateTime(2026, 8, 20, 10, 0));
   });
 
   tearDown(() async {
+    AppClock.setNow(null);
     AppClock.setTimezone(null);
     await db.close();
   });
@@ -309,12 +313,13 @@ void main() {
     );
     expect(aug13.length, 1, reason: '8/13 一个实例');
     expect(aug13.first.completed, isFalse, reason: '8/13 未完成');
-    // 统计按 completedAt（完成时刻=应用时区今天）归组
-    final now = AppClock.now();
-    final todayKey = AppClock.at(now.year, now.month, now.day);
+    // 统计按 completedAt（完成时刻=应用时区今天）归组；
+    // now 为注入的固定时刻，按应用时区解释后取字段（与归组口径一致）
+    final nowA = AppClock.asApp(AppClock.now());
+    final todayKey = AppClock.at(nowA.year, nowA.month, nowA.day);
     final counts = await db.getCompletedCountByDay(
-      todayKey.subtract(const Duration(days: 1)),
-      todayKey.add(const Duration(days: 1)),
+      AppClock.addCalendarDays(todayKey, -1),
+      AppClock.addCalendarDays(todayKey, 1),
     );
     expect(counts[todayKey], 1,
         reason: '统计按完成时刻（应用时区今天）归组');

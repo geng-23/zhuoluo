@@ -217,9 +217,10 @@ class DayColumnState extends ConsumerState<DayColumn> {
         DateUtilsEx.mondayOf(widget.day),
       );
       if (sameWeek) return widget.day;
-      return DateUtilsEx.mondayOf(
-        dd,
-      ).add(Duration(days: widget.day.weekday - 1));
+      return AppClock.addCalendarDays(
+        DateUtilsEx.mondayOf(dd),
+        widget.day.weekday - 1,
+      );
     }
     if (DateUtilsEx.sameDay(dd, widget.day)) return widget.day;
     return dd;
@@ -1292,7 +1293,9 @@ class DayColumnState extends ConsumerState<DayColumn> {
               endTime.hour,
               endTime.minute,
             );
-      if (e.isBefore(s)) e = e.add(const Duration(days: 1)); // 跨天（22:00-02:00）
+      // 跨天（22:00-02:00）：结束时刻移到次日同一墙钟时间（日历日 +1，
+      // 不用 +24h——DST 转换日会落在同日 23:00/次日 01:00）
+      if (e.isBefore(s)) e = AppClock.addCalendarDays(e, 1);
       intervals.add(Interval(s, e));
     }
     final n = intervals.length;

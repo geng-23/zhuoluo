@@ -100,8 +100,7 @@ class RruleService {
       final y = int.parse(s.substring(0, 4));
       final mo = int.parse(s.substring(4, 6));
       final d = int.parse(s.substring(6, 8));
-      return AppClock.at(y, mo, d)
-          .add(const Duration(days: 1))
+      return AppClock.nextDay(AppClock.at(y, mo, d))
           .subtract(const Duration(milliseconds: 1));
     }
     final parsed = DateTime.tryParse(s);
@@ -142,7 +141,7 @@ class RruleService {
 
     // 遍历上限：覆盖窗口跨度 + 目标数量，并防 INTERVAL=0 等非法规则死循环
     final interval = rule.interval > 0 ? rule.interval : 1;
-    final spanDays = (t ?? f ?? s).difference(s).inDays.clamp(0, 1 << 31);
+    final spanDays = AppClock.daysBetween(s, t ?? f ?? s).clamp(0, 1 << 31);
     final step = switch (rule.freq) {
       'WEEKLY' => interval * 7,
       'MONTHLY' => interval * 31,
@@ -161,31 +160,30 @@ class RruleService {
     if (rule.freq == 'DAILY') {
       var startIdx = 0;
       if (skipTo != null) {
-        final diff = skipTo.difference(s).inDays;
+        final diff = AppClock.daysBetween(s, skipTo);
         if (diff > 0) startIdx = (diff / interval).ceil();
       }
       for (var i = startIdx; i < maxIter; i++) {
-        if (!emit(s.add(Duration(days: i * interval)))) break;
+        if (!emit(AppClock.addCalendarDays(s, i * interval))) break;
       }
     } else if (rule.freq == 'WEEKLY') {
       // 无 BYDAY 时默认锚点星期（此前固定周一，旧"每N周"任务错落周一；
       // 与解析器"每N周补 BYDAY=起始星期"语义一致）
       final days = rule.byDay ?? [_byDayCode(s.weekday)];
       // 从 start 所在周周一起算
-      final monday = AppClock.at(
-        s.year,
-        s.month,
-        s.day,
-      ).subtract(Duration(days: s.weekday - 1));
+      final monday = AppClock.addCalendarDays(
+        AppClock.at(s.year, s.month, s.day),
+        -(s.weekday - 1),
+      );
       var startIdx = 0;
       if (skipTo != null) {
-        final diff = skipTo.difference(monday).inDays;
+        final diff = AppClock.daysBetween(monday, skipTo);
         if (diff > 0) startIdx = diff ~/ (interval * 7);
       }
       for (var i = startIdx; i < maxIter; i++) {
-        final base = monday.add(Duration(days: i * 7 * interval));
+        final base = AppClock.addCalendarDays(monday, i * 7 * interval);
         for (final d in days) {
-          final day = base.add(Duration(days: _weekdayIndex(d)));
+          final day = AppClock.addCalendarDays(base, _weekdayIndex(d));
           if (!emit(day)) return result;
         }
       }
@@ -238,7 +236,7 @@ class RruleService {
       day,
       rrule,
       from: day,
-      to: day.add(const Duration(days: 370)),
+      to: AppClock.addCalendarDays(day, 370),
       limit: 1,
     );
     return hits.isEmpty ? null : hits.first;
@@ -269,13 +267,30 @@ class RruleService {
       'YEARLY' => (rule.interval > 0 ? rule.interval : 1) * 366,
       _ => (rule.interval > 0 ? rule.interval : 1),
     };
-    final from = day.subtract(Duration(days: windowDays));
+    final from = AppClock.addCalendarDays(day, -windowDays);
     final prevHits = expand(from, rrule, from: from, to: day);
     final prev = prevHits.isEmpty ? null : prevHits.last;
     if (prev == null) return next;
-    final dNext = day.difference(next).inDays.abs();
-    final dPrev = day.difference(prev).inDays.abs();
+    final dNext = AppClock.daysBetween(day, next).abs();
+    final dPrev = AppClock.daysBetween(day, prev).abs();
     return dPrev <= dNext ? prev : next;
+  }
+
+  /// 锚点吸附统一收口：把任务 planStart 吸附到**距其最近**的规则命中日
+  /// （可早于锚点，≤一个周期；规则与 A13 语义见 [nearestHitOnOrNear]）。
+  ///
+  /// [planStart] 可能来自 DB 读回（字段按系统时区解释），内部先按应用时区
+  /// 重新解释再取时分/比较日期，避免"应用时区 ≠ 系统时区"时吸附结果整体
+  /// 偏移时区差。返回调整后的应用时区时刻（保持时分）；
+  /// 已命中规则/无命中时返回 null（无需调整）。
+  DateTime? normalizeAnchor(DateTime planStart, String rrule) {
+    final a = AppClock.asApp(planStart);
+    final hit = nearestHitOnOrNear(planStart, rrule);
+    if (hit == null) return null;
+    if (hit.year == a.year && hit.month == a.month && hit.day == a.day) {
+      return null; // 锚点已命中规则，无需调整
+    }
+    return AppClock.at(hit.year, hit.month, hit.day, a.hour, a.minute);
   }
 
   /// 判断 [date] 是否命中规则（含 COUNT/UNTIL 边界）
@@ -304,23 +319,23 @@ class RruleService {
     switch (rule.freq) {
       case 'DAILY':
         // 天数差必须按"日"归一：dateKey 是 00:00 而 start 带时分，
-        // 直接用 inDays 会让间隔>1 的实例错位（如 20:00 起的每2天任务）
+        // 直接用 inDays 会让间隔>1 的实例错位（如 20:00 起的每2天任务），
+        // DST 转换日 23h/25h 时长更会被 floor 截断成 0/2
         final startDay = AppClock.at(s.year, s.month, s.day);
         final dateDay = AppClock.at(d.year, d.month, d.day);
-        return dateDay.difference(startDay).inDays %
+        return AppClock.daysBetween(startDay, dateDay) %
                 (rule.interval > 0 ? rule.interval : 1) ==
             0;
       case 'WEEKLY':
         final days = rule.byDay ?? [_byDayCode(s.weekday)];
         final offsets = days.map(_weekdayIndex).toSet();
         if (!offsets.contains(d.weekday - 1)) return false;
-        // 从 start 所在周周一起算周差
-        final startMonday = AppClock.at(
-          s.year,
-          s.month,
-          s.day,
-        ).subtract(Duration(days: s.weekday - 1));
-        final weeks = d.difference(startMonday).inDays ~/ 7;
+        // 从 start 所在周周一起算周差（周一基准，DST 安全）
+        final startMonday = AppClock.addCalendarDays(
+          AppClock.at(s.year, s.month, s.day),
+          -(s.weekday - 1),
+        );
+        final weeks = AppClock.weeksBetweenMonday(startMonday, d);
         return weeks % (rule.interval > 0 ? rule.interval : 1) == 0;
       case 'MONTHLY':
         if (rule.byMonthDay != null && rule.byMonthDay!.isNotEmpty) {

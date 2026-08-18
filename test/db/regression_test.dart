@@ -1,10 +1,11 @@
-﻿import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/task/providers.dart';
@@ -12,8 +13,11 @@ import 'package:zhuoluo/features/task/task_page.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final now = DateTime.now();
+  // 固定时钟：套件内所有"今天/本周/明天"口径一致，跨午夜不漂移
+  AppClock.setNow(DateTime(2026, 8, 20, 10, 0));
+  final now = AppClock.now();
   final today = DateTime(now.year, now.month, now.day);
+  tearDownAll(() => AppClock.setNow(null));
 
   late AppDatabase db;
 
@@ -141,7 +145,7 @@ void main() {
       );
       // 改期本次：原实例（本周一）→ 改到明天 14:30
       final fromMonday = await (() async {
-        final nowD = DateTime.now();
+        final nowD = AppClock.now();
         final d = DateTime(nowD.year, nowD.month, nowD.day);
         return d.subtract(Duration(days: d.weekday - 1));
       })();

@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/foundation.dart';
@@ -104,8 +104,11 @@ class ReminderScheduler {
       // 重复任务：调度未来 3 个月内的实例
       final today = AppClock.now();
       final start = task.planStart ?? today;
-      final windowStart = today.subtract(const Duration(days: 1));
-      final windowEnd = today.add(const Duration(days: 93));
+      // 93 天滚动窗口按"日历日"展开：今天 00:00 起 ±N 天，跨 DST 转换日
+      // 不得因 ±1 小时漂移（排期/取消/完成预取口径必须一致）
+      final todayDay = AppClock.startOfDay(today);
+      final windowStart = AppClock.addCalendarDays(todayDay, -1);
+      final windowEnd = AppClock.addCalendarDays(todayDay, 93);
       // 批量预取例外/完成记录/跳过日期——此前逐实例查库（每实例 2 次查询，
       // 93 天窗口单任务约 186 次），无限期任务实例多时调度慢
       final exceptions = await _db.getExceptions(task.id);
@@ -203,11 +206,12 @@ class ReminderScheduler {
     }
     final today = AppClock.now();
     final start = t.planStart ?? today;
+    final todayDay = AppClock.startOfDay(today);
     final instances = RruleService.instance.expand(
       start,
       t.rrule,
-      from: today.subtract(const Duration(days: 1)),
-      to: today.add(const Duration(days: 93)),
+      from: AppClock.addCalendarDays(todayDay, -1),
+      to: AppClock.addCalendarDays(todayDay, 93),
       limit: 500,
     );
     final dates = instances
@@ -327,7 +331,7 @@ class ReminderScheduler {
       final now = AppClock.now();
       final start = AppClock.at(now.year, now.month, now.day);
       for (var i = 0; i < 93; i++) {
-        final day = start.add(Duration(days: i));
+        final day = AppClock.addCalendarDays(start, i);
         // 已打卡的日期不排提醒（无效打扰）
         if (await _db.isHabitDone(habit.id, day)) continue;
         // reminderTime 为 DB 读回值（系统时区字段），先按应用时区解释
@@ -365,7 +369,7 @@ class ReminderScheduler {
     final start = AppClock.at(now.year, now.month, now.day);
     for (var i = 0; i < 93; i++) {
       await NotificationService.instance.cancel(
-        NotificationIds.forHabit(habitId, start.add(Duration(days: i))),
+        NotificationIds.forHabit(habitId, AppClock.addCalendarDays(start, i)),
       );
     }
   }

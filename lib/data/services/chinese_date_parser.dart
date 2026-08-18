@@ -1,4 +1,4 @@
-﻿import 'package:zhuoluo/core/utils/app_clock.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 解析结果
 ///
 /// [date] 命中日期（可能为 null）
@@ -91,7 +91,7 @@ class ChineseDateParser {
         // 同时设置首个实例日期（本周未到的取本周，已过的取下周）
         var diff = d - today.weekday;
         if (diff < 0) diff += 7;
-        date = today.add(Duration(days: diff));
+        date = AppClock.addCalendarDays(today, diff);
         matched = true;
         rest = rest.replaceAll(m.group(0)!, '');
       }
@@ -115,7 +115,7 @@ class ChineseDateParser {
             // 带星期：首个实例日期取本周未到/已过取下周（与"每周X"一致）
             var diff = wd - today.weekday;
             if (diff < 0) diff += 7;
-            date = today.add(Duration(days: diff));
+            date = AppClock.addCalendarDays(today, diff);
           }
         } else {
           rrule = 'FREQ=MONTHLY;INTERVAL=$n';
@@ -136,7 +136,7 @@ class ChineseDateParser {
     // ---- 具体日期 ----
     // 昨天
     if (rest.contains('昨天') && date == null) {
-      date = today.subtract(const Duration(days: 1));
+      date = AppClock.addCalendarDays(today, -1);
       matched = true;
       rest = rest.replaceAll('昨天', '');
     }
@@ -148,19 +148,19 @@ class ChineseDateParser {
     }
     // 明天
     if (rest.contains('明天') && date == null) {
-      date = today.add(const Duration(days: 1));
+      date = AppClock.addCalendarDays(today, 1);
       matched = true;
       rest = rest.replaceAll('明天', '');
     }
     // 大后天（必须先于"后天"匹配，否则"大后天"会先命中"后天"）
     if (rest.contains('大后天') && date == null) {
-      date = today.add(const Duration(days: 3));
+      date = AppClock.addCalendarDays(today, 3);
       matched = true;
       rest = rest.replaceAll('大后天', '');
     }
     // 后天
     if (rest.contains('后天') && date == null) {
-      date = today.add(const Duration(days: 2));
+      date = AppClock.addCalendarDays(today, 2);
       matched = true;
       rest = rest.replaceAll('后天', '');
     }
@@ -171,7 +171,7 @@ class ChineseDateParser {
       if (m != null) {
         final n = _toInt(m.group(1)!);
         if (n != null && n >= 1) {
-          date = today.add(Duration(days: n));
+          date = AppClock.addCalendarDays(today, n);
           matched = true;
           rest = rest.replaceAll(m.group(0)!, '');
         }
@@ -182,16 +182,20 @@ class ChineseDateParser {
       final m = RegExp(r'([下本这])周([一二三四五六日天])').firstMatch(rest);
       if (m != null) {
         final wd = _weekdayNames[m.group(2)!]!;
-        final thisWeekMonday = today.subtract(
-          Duration(days: today.weekday - 1),
+        final thisWeekMonday = AppClock.addCalendarDays(
+          today,
+          -(today.weekday - 1),
         );
         final offset = (wd - 1) - (today.weekday - 1);
         if (m.group(1) == '下' || m.group(1) == '本') {
           date = m.group(1) == '下'
-              ? thisWeekMonday.add(Duration(days: 7 + (wd - 1)))
-              : today.add(Duration(days: offset < 0 ? offset + 7 : offset));
+              ? AppClock.addCalendarDays(thisWeekMonday, 7 + (wd - 1))
+              : AppClock.addCalendarDays(
+                  today,
+                  offset < 0 ? offset + 7 : offset,
+                );
         } else {
-          date = today.add(Duration(days: offset));
+          date = AppClock.addCalendarDays(today, offset);
         }
         matched = true;
         rest = rest.replaceAll(m.group(0)!, '');
@@ -204,7 +208,7 @@ class ChineseDateParser {
         final wd = _weekdayNames[m.group(1)!]!;
         var diff = wd - today.weekday;
         if (diff < 0) diff += 7; // 本周已过的取下周；今天则保持今天
-        date = today.add(Duration(days: diff));
+        date = AppClock.addCalendarDays(today, diff);
         matched = true;
         rest = rest.replaceAll(m.group(0)!, '');
       }

@@ -312,7 +312,7 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
     // 缩放级别变化 → 重建（时间轴高/刻度/网格线/红线随 pp 刷新）
     final pp = ref.watch(pixelPerHourProvider);
     final days = widget.isWeek
-        ? List.generate(7, (i) => widget.start.add(Duration(days: i)))
+        ? List.generate(7, (i) => AppClock.addCalendarDays(widget.start, i))
         : [widget.start];
     final notifier = ref.read(calendarControllerProvider.notifier);
     // A7：表头"今天"高亮由 build 时实时计算（跨天时随页面重建自然更新），

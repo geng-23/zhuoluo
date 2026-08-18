@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
@@ -439,17 +439,15 @@ class AppDatabase extends _$AppDatabase {
   Future<List<Task>> getTasksForDate(DateTime day) => _tasksForRange(day, day);
 
   /// 智能清单：未来 7 天（今天起 7 天，含重复任务实例展开）
-  Future<List<Task>> getTasksNext7Days(DateTime today) =>
-      _tasksForRange(today, today.add(const Duration(days: 6)));
+  Future<List<Task>> getTasksNext7Days(DateTime today) => _tasksForRange(
+    today,
+    AppClock.addCalendarDays(today, 6),
+  );
 
   /// 时间范围智能清单（含重复任务实例展开）
   Future<List<Task>> _tasksForRange(DateTime from, DateTime to) async {
     final start = AppClock.at(from.year, from.month, from.day);
-    final end = AppClock.at(
-      to.year,
-      to.month,
-      to.day,
-    ).add(const Duration(days: 1));
+    final end = AppClock.nextDay(to);
     final rows =
         await (select(tasks)..where(
               (t) =>
@@ -546,11 +544,7 @@ class AppDatabase extends _$AppDatabase {
   ) async {
     if (ids.isEmpty) return {};
     final start = AppClock.at(from.year, from.month, from.day);
-    final end = AppClock.at(
-      to.year,
-      to.month,
-      to.day,
-    ).add(const Duration(days: 1));
+    final end = AppClock.nextDay(to);
     final rows =
         await (select(taskCompletions)..where(
               (c) =>
@@ -594,7 +588,10 @@ class AppDatabase extends _$AppDatabase {
       base,
       t.rrule,
       from: now,
-      to: now.add(Duration(days: RruleService.windowDaysFor(t.rrule))),
+      to: AppClock.addCalendarDays(
+        now,
+        RruleService.windowDaysFor(t.rrule),
+      ),
       limit: 1,
     );
     return hits.isNotEmpty;
@@ -752,7 +749,7 @@ class AppDatabase extends _$AppDatabase {
     final instances = RruleService.instance.expand(
       newStart,
       rrule,
-      to: today.add(const Duration(days: 93)),
+      to: AppClock.addCalendarDays(today, 93),
       limit: 5000,
     );
     if (instances.isEmpty) return const []; // 展开失败则保守不清理
@@ -989,11 +986,7 @@ class AppDatabase extends _$AppDatabase {
     DateTime to,
   ) async {
     final start = AppClock.at(from.year, from.month, from.day);
-    final end = AppClock.at(
-      to.year,
-      to.month,
-      to.day,
-    ).add(const Duration(days: 1));
+    final end = AppClock.nextDay(to);
     final listIds = await getVisibleCalendarListIds();
     // 防空：全部清单都从日历隐藏时 listIds 为空，
     // isIn([]) 会生成非法 SQL（IN ()）——直接返回空
@@ -1068,7 +1061,7 @@ class AppDatabase extends _$AppDatabase {
               ),
             );
           }
-          d = d.add(const Duration(days: 1));
+          d = AppClock.addCalendarDays(d, 1);
         }
         continue;
       }
@@ -1135,11 +1128,9 @@ class AppDatabase extends _$AppDatabase {
           final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
           final psA = AppClock.asApp(ps);
           final peA = AppClock.asApp(pe);
-          final spanDays = AppClock.at(peA.year, peA.month, peA.day)
-              .difference(AppClock.at(psA.year, psA.month, psA.day))
-              .inDays;
+          final spanDays = AppClock.daysBetween(psA, peA);
           for (var i = 1; i <= spanDays; i++) {
-            final coverDay = dayStart.add(Duration(days: i));
+            final coverDay = AppClock.addCalendarDays(dayStart, i);
             if (coverDay.isBefore(start) || !coverDay.isBefore(end)) {
               continue;
             }
@@ -1170,18 +1161,8 @@ class AppDatabase extends _$AppDatabase {
     for (final t in rows) {
       final ps = t.planStart;
       if (ps == null) continue;
-      final hit = RruleService.instance.nearestHitOnOrNear(ps, t.rrule);
-      if (hit == null) continue;
-      if (hit.year == ps.year && hit.month == ps.month && hit.day == ps.day) {
-        continue; // 锚点已命中规则，无需调整
-      }
-      final newStart = AppClock.at(
-        hit.year,
-        hit.month,
-        hit.day,
-        ps.hour,
-        ps.minute,
-      );
+      final newStart = RruleService.instance.normalizeAnchor(ps, t.rrule);
+      if (newStart == null) continue;
       final pe = t.planEnd;
       final newEnd = pe == null
           ? newStart.add(const Duration(hours: 1))
@@ -1275,7 +1256,7 @@ class AppDatabase extends _$AppDatabase {
       if (ps == null) return false;
       final pe = t.planEnd ?? ps.add(const Duration(hours: 1));
       final dayStart = AppClock.at(da.year, da.month, da.day);
-      final dayEnd = dayStart.add(const Duration(days: 1));
+      final dayEnd = AppClock.nextDay(dayStart);
       return ps.isBefore(dayEnd) && pe.isAfter(dayStart);
     }
     final dateKey = AppClock.at(da.year, da.month, da.day);
@@ -1460,11 +1441,7 @@ class AppDatabase extends _$AppDatabase {
     if (to != null) {
       // 与 getCompletedCountByDay 口径一致——to 排他 + 内部 +1 天，
       // 否则统计页传"周日/月末/12-31 00:00"时当天记录全部漏计
-      final end = AppClock.at(
-        to.year,
-        to.month,
-        to.day,
-      ).add(const Duration(days: 1));
+      final end = AppClock.nextDay(to);
       q.where((p) => p.completedAt.isSmallerThanValue(end));
     }
     return q.get();
@@ -1491,11 +1468,7 @@ class AppDatabase extends _$AppDatabase {
     DateTime to,
   ) async {
     final start = AppClock.at(from.year, from.month, from.day);
-    final end = AppClock.at(
-      to.year,
-      to.month,
-      to.day,
-    ).add(const Duration(days: 1));
+    final end = AppClock.nextDay(to);
     final result = <DateTime, int>{};
     // 重复任务实例完成（task_completions）
     final completions =
@@ -1552,11 +1525,7 @@ class AppDatabase extends _$AppDatabase {
     DateTime to,
   ) async {
     final start = AppClock.at(from.year, from.month, from.day);
-    final end = AppClock.at(
-      to.year,
-      to.month,
-      to.day,
-    ).add(const Duration(days: 1));
+    final end = AppClock.nextDay(to);
     final result = <DateTime, int>{};
 
     void add(DateTime d) {
@@ -1615,7 +1584,7 @@ class AppDatabase extends _$AppDatabase {
           exMap[t.id] ?? const [],
         );
         if (hit.isNotEmpty) add(day);
-        day = day.add(const Duration(days: 1));
+        day = AppClock.addCalendarDays(day, 1);
       }
     }
     return result;

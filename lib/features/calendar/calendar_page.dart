@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
@@ -148,7 +148,7 @@ class CalendarPage extends ConsumerWidget {
         return DateUtilsEx.monthCn(state.displayedMonth);
       case 'week':
         final monday = DateUtilsEx.mondayOf(d);
-        final sunday = monday.add(const Duration(days: 6));
+        final sunday = AppClock.addCalendarDays(monday, 6);
         // 跨月周（如 8/31-9/6）拆分显示，此前"8月 31-6日"误导
         if (monday.month == sunday.month) {
           return '${DateUtilsEx.monthCn(monday)} '

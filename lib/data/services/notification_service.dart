@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -453,7 +453,10 @@ abstract class NotificationScheduler {
 /// 时最高 ID ≈2.100e9 仍低于习惯段 2.1e9（隔离带成立），且不超 int32。
 /// 上限 12.8 万条提醒记录（含删除，自增不复用），现实使用不可达。
 class NotificationIds {
-  static final DateTime _epoch = DateTime(2024, 1, 1);
+  /// 日序号基准（UTC 纯日期）：dayIndex 按"应用时区 y/m/d 转 UTC 日期"计算，
+  /// 不受系统时区/应用时区/DST 影响——本地差 23h/25h 会被 inDays floor 截断，
+  /// 春季转换日前后两天序号相同（通知 ID 互相覆盖）、秋季跳号。
+  static final DateTime _epoch = DateTime.utc(2024, 1, 1);
 
   /// 实例日槽宽：须大于任意可能 dayIndex（约 45 年内的天数），
   /// 保证同 reminderId 不同实例日不碰撞、相邻 reminderId 不跨日侵入。
@@ -462,6 +465,13 @@ class NotificationIds {
   /// 提醒记录 ID（Reminders 表自增主键）上限：128000*16384 ≈ 2.097e9，
   /// 低于习惯段起点 2.1e9（隔离带）。
   static const int _maxReminderId = 128000;
+
+  /// 应用时区下的日历日序号（距 2024-01-01 天数）：先按应用时区取 y/m/d，
+  /// 再转 UTC 纯日期求差——连续两天一定差 1，任何时区组合下稳定。
+  static int _dayIndex(DateTime d) {
+    final a = AppClock.asApp(d);
+    return DateTime.utc(a.year, a.month, a.day).difference(_epoch).inDays;
+  }
 
   /// 提醒通知 ID：reminderId*16384 + 实例日距 2024-01-01 天数
   /// 实例日必须传入当天 00:00（与排期/取消使用同一天数基准）。
@@ -472,7 +482,7 @@ class NotificationIds {
       '提醒 ID 段位溢出：reminderId=$reminderId ≥ $_maxReminderId，'
       '提醒记录累积过多将导致通知 ID 侵入习惯段',
     );
-    final dayIndex = instanceDate.difference(_epoch).inDays;
+    final dayIndex = _dayIndex(instanceDate);
     return reminderId * _daySlotWidth + (dayIndex < 0 ? 0 : dayIndex);
   }
 
@@ -480,7 +490,7 @@ class NotificationIds {
   /// 逐日排期后需区分日期——每习惯占 65536 槽（约 179 年），
   /// 上限约 3.2 万个习惯，仍低于 forTest（2147483646）。
   static int forHabit(int habitId, DateTime day) {
-    final dayIndex = day.difference(_epoch).inDays;
+    final dayIndex = _dayIndex(day);
     return 2100000000 - habitId * 65536 - (dayIndex < 0 ? 0 : dayIndex);
   }
 

@@ -107,12 +107,15 @@ class CalendarController extends StateNotifier<CalendarState> {
         );
         return (first, last);
       case 'week':
-        final monday = AppClock.at(
-          state.selectedDay.year,
-          state.selectedDay.month,
-          state.selectedDay.day,
-        ).subtract(Duration(days: state.selectedDay.weekday - 1));
-        return (monday, monday.add(const Duration(days: 6)));
+        final monday = AppClock.addCalendarDays(
+          AppClock.at(
+            state.selectedDay.year,
+            state.selectedDay.month,
+            state.selectedDay.day,
+          ),
+          -(state.selectedDay.weekday - 1),
+        );
+        return (monday, AppClock.addCalendarDays(monday, 6));
       case 'day':
         final d = AppClock.at(
           state.selectedDay.year,
@@ -496,7 +499,7 @@ class CalendarController extends StateNotifier<CalendarState> {
       taskId,
       TasksCompanion(
         planStart: Value(start),
-        planEnd: Value(start.add(const Duration(days: 1))),
+        planEnd: Value(AppClock.nextDay(start)),
         isAllDay: const Value(true),
       ),
     );
@@ -537,7 +540,7 @@ class CalendarController extends StateNotifier<CalendarState> {
       taskId,
       TasksCompanion(
         planStart: Value(start),
-        planEnd: Value(start.add(const Duration(days: 1))),
+        planEnd: Value(AppClock.nextDay(start)),
         isAllDay: const Value(true),
       ),
     );

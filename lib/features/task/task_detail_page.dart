@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
@@ -979,7 +979,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
       return;
     }
     final planEnd = isAllDay
-        ? start.add(const Duration(days: 1))
+        ? AppClock.nextDay(start)
         : (end ?? start.add(const Duration(hours: 1)));
     await _notifier.updateTaskFields(
       t.id,
@@ -1541,17 +1541,19 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         // 锚点吸附：开始日期自动对齐到距锚点最近的规则命中日
         // （A13：改为 nearestHitOnOrNear——此前仅向未来吸附，周三设"每周一"
         // 会落到下周一，当前周窗口无实例导致任务从日历"消失"）
-        var startDay = AppClock.at(anchor.year, anchor.month, anchor.day);
+        // anchor/base 可能来自 DB 读回（字段按系统时区解释），先按应用
+        // 时区重新解释再取时分，避免"应用时区≠系统时区"时整体偏移
+        final aa = AppClock.asApp(anchor);
+        final bb = AppClock.asApp(base);
+        final startDay = AppClock.at(aa.year, aa.month, aa.day);
         final hit = RruleService.instance.nearestHitOnOrNear(startDay, rrule);
-        if (hit != null) {
-          startDay = AppClock.at(hit.year, hit.month, hit.day);
-        }
+        final startDayHit = hit ?? startDay;
         final newStart = AppClock.at(
-          startDay.year,
-          startDay.month,
-          startDay.day,
-          base.hour,
-          base.minute,
+          startDayHit.year,
+          startDayHit.month,
+          startDayHit.day,
+          bb.hour,
+          bb.minute,
         );
         final newEnd = t.planEnd == null
             ? newStart.add(const Duration(hours: 1))

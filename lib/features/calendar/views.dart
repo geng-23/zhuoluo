@@ -122,7 +122,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
   late final DateTime _epochMonday;
 
   int _pageForMonday(DateTime monday) =>
-      500 + monday.difference(_epochMonday).inDays ~/ 7;
+      500 + AppClock.weeksBetweenMonday(_epochMonday, monday);
 
   @override
   void initState() {
@@ -221,10 +221,10 @@ class _WeekViewState extends ConsumerState<WeekView> {
     }
     // 同步目标日 + 虚影跟随到新页边缘列（右缘 → 新页最后一列，左缘 → 新页第一列）
     final offset = page - 500 + (dx > 0 ? 1 : -1);
-    final targetMonday = _epochMonday.add(Duration(days: offset * 7));
+    final targetMonday = AppClock.addCalendarDays(_epochMonday, offset * 7);
     _dragDay.value = targetMonday;
     dragActiveDay.value = dx > 0
-        ? targetMonday.add(const Duration(days: 6))
+        ? AppClock.addCalendarDays(targetMonday, 6)
         : targetMonday;
   }
 
@@ -435,7 +435,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
     // 不被松手/取消清理）——周视图 7 列
     final colWidth = (MediaQuery.sizeOf(context).width - 44) / 7;
     final col = ((pos.dx - 44) / colWidth).floor().clamp(0, 6);
-    final day = _dragDay.value.add(Duration(days: col));
+    final day = AppClock.addCalendarDays(_dragDay.value, col);
     // 稳定基准换算内容 y：视口顶部 + 轴顶部 padding + 共享滚动 offset。
     // 不依赖各页自身 scroll offset（跨页翻页恢复前的瞬态会让落点偏上）
     final localDy =
@@ -446,12 +446,13 @@ class _WeekViewState extends ConsumerState<WeekView> {
     // 与时间轴渲染同口径（整周 7 天取最早任务）：单日口径在周内有
     // 更早任务时落点会偏移 1 小时（所见非所得）；渲染周起点与
     // build 中 weekStart 同式（_epochMonday + 当前页偏移）
-    final weekStart = _epochMonday.add(
-      Duration(days: (_activePage.value - 500) * 7),
+    final weekStart = AppClock.addCalendarDays(
+      _epochMonday,
+      (_activePage.value - 500) * 7,
     );
     final startHour = effectiveStartHourFor(
       byDay: widget.byDay,
-      days: List.generate(7, (i) => weekStart.add(Duration(days: i))),
+      days: List.generate(7, (i) => AppClock.addCalendarDays(weekStart, i)),
     );
     final minutes =
         (startHour * 60 + localDy / ref.read(pixelPerHourProvider) * 60)
@@ -532,7 +533,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
         onPageChanged: (page) {
           _activePage.value = page;
           final offset = page - 500;
-          final weekMonday = _epochMonday.add(Duration(days: offset * 7));
+          final weekMonday = AppClock.addCalendarDays(_epochMonday, offset * 7);
           // 外部跳页（今天按钮/日期选择）动画期间——onPageChanged
           // 在动画中（round 变化）多次触发，一律只同步 _dragDay、不回写
           // selectedDay（否则回写→didUpdateWidget→animateToPage 回跳打断
@@ -551,7 +552,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
         },
         itemBuilder: (context, page) {
           final offset = page - 500;
-          final weekStart = _epochMonday.add(Duration(days: offset * 7));
+          final weekStart = AppClock.addCalendarDays(_epochMonday, offset * 7);
           return AxisKeepAlive(
             child: TimeAxisView(
               pageIndex: page,
@@ -656,13 +657,10 @@ class _DayViewState extends ConsumerState<DayView> {
   ValueNotifier<double>? _ownScroll;
 
   int _pageFor(DateTime d) {
-    // ：按应用时区日期字段计算页号（两侧同口径，跨时区不偏移）
+    // ：按应用时区日期字段计算页号（两侧同口径，跨时区不偏移；
+    // 用日历日差——DST 时区相邻两天绝对差 23h，inDays 会 floor 成同日）
     final a = AppClock.asApp(d);
-    return AppClock.at(
-      a.year,
-      a.month,
-      a.day,
-    ).difference(AppClock.at(2000, 1, 1)).inDays;
+    return AppClock.daysBetween(AppClock.at(2000, 1, 1), AppClock.at(a.year, a.month, a.day));
   }
 
   @override
@@ -740,11 +738,10 @@ class _DayViewState extends ConsumerState<DayView> {
         curve: Curves.easeOutCubic,
       );
     }
-    _dragDay.value = AppClock.at(
-      2000,
-      1,
-      1,
-    ).add(Duration(days: page + (dx > 0 ? 1 : -1)));
+    _dragDay.value = AppClock.addCalendarDays(
+      AppClock.at(2000, 1, 1),
+      page + (dx > 0 ? 1 : -1),
+    );
     // 虚影跟随到新页（日视图单列即目标日）
     dragActiveDay.value = _dragDay.value;
   }
@@ -965,11 +962,10 @@ class _DayViewState extends ConsumerState<DayView> {
         _sharedScrollOffset.value;
     // 与时间轴渲染同口径（单日 = 渲染起点，与 build 中 day 同式）；
     // _dragDay 可能已翻页 ≠ 渲染日，直接用渲染日避免换算偏移
-    final renderDay = AppClock.at(
-      2000,
-      1,
-      1,
-    ).add(Duration(days: _activePage.value));
+    final renderDay = AppClock.addCalendarDays(
+      AppClock.at(2000, 1, 1),
+      _activePage.value,
+    );
     final startHour = effectiveStartHourFor(
       byDay: widget.byDay,
       days: [renderDay],
@@ -1049,7 +1045,7 @@ class _DayViewState extends ConsumerState<DayView> {
         // 丝滑翻页主要靠窗口缓存（翻页零 DB）+ byDay 分组 build 减负
         onPageChanged: (page) {
           _activePage.value = page;
-          final day = AppClock.at(2000, 1, 1).add(Duration(days: page));
+          final day = AppClock.addCalendarDays(AppClock.at(2000, 1, 1), page);
           // 外部跳日动画期间：onPageChanged 多次触发（round 变化），只同步
           // _dragDay 不回写 selectedDay（防回跳打断动画停在中间日）；到达
           // 目标页结束拦截（动画结束时 whenComplete 也会清理）
@@ -1064,7 +1060,7 @@ class _DayViewState extends ConsumerState<DayView> {
           widget.onDayChanged(day);
         },
         itemBuilder: (context, page) {
-          final day = AppClock.at(2000, 1, 1).add(Duration(days: page));
+          final day = AppClock.addCalendarDays(AppClock.at(2000, 1, 1), page);
           return AxisKeepAlive(
             child: TimeAxisView(
               pageIndex: page,

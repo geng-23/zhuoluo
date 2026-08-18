@@ -201,23 +201,50 @@ void main() {
     });
   });
 
-  group('新任务置顶', () {
-    test('新任务排在同清单已有任务之前', () async {
+  group('任务按开始时间排序', () {
+    test('按开始时间升序（最近在前），新任务按时间落位，无时间任务排最后', () async {
       final container = makeContainer();
       await settle(container);
       final notifier = container.read(tasksControllerProvider.notifier);
-      final firstId = await notifier.addTask(title: '旧任务');
+      // 先添加晚时间任务，再添加早时间任务：排序应无视添加顺序
+      await notifier.addTask(
+        title: '晚任务',
+        planStart: AppClock.at(today.year, today.month, today.day, 18, 0),
+      );
       await drain();
-      final secondId = await notifier.addTask(title: '新任务');
+      await notifier.addTask(
+        title: '早任务',
+        planStart: AppClock.at(today.year, today.month, today.day, 9, 0),
+      );
+      await drain();
+      // 无开始时间的任务排最后
+      await notifier.addTask(title: '无时间任务');
       await drain();
 
-      final list = await db.getDefaultList();
-      final tasks = await db.getTasksByList(list.id);
-      expect(tasks.first.id, secondId,
-          reason: '新任务应排顶部（shift 不再误加新任务自身）');
-      expect(tasks.first.sortOrder, 0);
-      expect(tasks[1].id, firstId);
-      expect(tasks[1].sortOrder, 1);
+      final state = container.read(tasksControllerProvider);
+      final titles = state.tasks.map((t) => t.title).toList();
+      expect(titles, ['早任务', '晚任务', '无时间任务'],
+          reason: '任务列表按开始时间升序，无开始时间排最后');
+    });
+
+    test('相同开始时间按添加顺序稳定排序', () async {
+      final container = makeContainer();
+      await settle(container);
+      final notifier = container.read(tasksControllerProvider.notifier);
+      final a = await notifier.addTask(
+        title: 'A',
+        planStart: AppClock.at(today.year, today.month, today.day, 10, 0),
+      );
+      await drain();
+      final b = await notifier.addTask(
+        title: 'B',
+        planStart: AppClock.at(today.year, today.month, today.day, 10, 0),
+      );
+      await drain();
+      final state = container.read(tasksControllerProvider);
+      final ids = state.tasks.map((t) => t.id).toList();
+      expect(ids.indexOf(a), lessThan(ids.indexOf(b)),
+          reason: '相同开始时间按添加顺序稳定排序');
     });
   });
 

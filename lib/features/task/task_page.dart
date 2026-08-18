@@ -430,45 +430,10 @@ class _TaskPageState extends ConsumerState<TaskPage> {
               // 只重载当前视图，不跳回"全部"
               await ref.read(tasksControllerProvider.notifier).reload();
             },
-            child: ReorderableListView.builder(
-              buildDefaultDragHandles: false,
+            child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.symmetric(vertical: 4),
-              // 拖拽浮层保持卡片样式，避免默认浮起闪烁
-              proxyDecorator: (child, index, animation) {
-                return AnimatedBuilder(
-                  animation: animation,
-                  builder: (context, _) => Material(
-                    color: Colors.transparent,
-                    elevation: 0,
-                    child: Transform.scale(scale: 1.02, child: child),
-                  ),
-                );
-              },
               itemCount: visible.length,
-              // 批4-4：拖拽排序起拖补触觉反馈（此前无）
-              onReorderStart: (_) => Haptics.select(),
-              onReorder: (oldIndex, newIndex) {
-                // 仅手动排序模式可拖拽重排（智能视图/按时间/按象限排序
-                // 时列表顺序由查询决定，跨清单拖拽会污染各清单独立 sortOrder）
-                if (state.sortMode != 'manual') {
-                  if (mounted) {
-                    showAppSnackBar(
-                      context,
-                      '请先切换到手动排序（排序菜单）',
-                      icon: Icons.drag_handle,
-                    );
-                  }
-                  return;
-                }
-                // C2：重排顶层任务
-                if (newIndex > oldIndex) newIndex--;
-                final ordered = List<Task>.from(visible);
-                final moved = ordered.removeAt(oldIndex);
-                ordered.insert(newIndex, moved);
-                final notifier = ref.read(tasksControllerProvider.notifier);
-                notifier.reorder(ordered.map((t) => t.id).toList());
-              },
               itemBuilder: (context, index) {
                 final t = visible[index];
                 final listColor = state.lists
@@ -489,7 +454,6 @@ class _TaskPageState extends ConsumerState<TaskPage> {
                   nextInstance: t.rrule.isNotEmpty
                       ? state.nextInstance[t.id]
                       : null,
-                  dragIndex: index,
                   listColorHex: listColor,
                   multiSelect: _multiSelect,
                   selected: _selected.contains(t.id),
@@ -703,7 +667,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const ListTile(title: Text('排序方式')),
-            ...[('manual', '手动排序'), ('time', '按时间'), ('quadrant', '按象限')].map(
+            ...[('time', '按时间'), ('quadrant', '按象限')].map(
               (e) => RadioListTile<String>(
                 value: e.$1,
                 groupValue: state.sortMode,
@@ -1207,7 +1171,6 @@ class _TaskTile extends StatelessWidget {
     required this.onSwipeMore,
     this.todayHas,
     this.nextInstance,
-    this.dragIndex,
     this.listColorHex,
   });
 
@@ -1220,7 +1183,6 @@ class _TaskTile extends StatelessWidget {
   final bool? todayHas;
   /// 重复任务：下一个未完成实例（null = 非重复任务）
   final DateTime? nextInstance;
-  final int? dragIndex;
   final String? listColorHex;
   final VoidCallback onLongPress;
   final VoidCallback onTap;
@@ -1398,21 +1360,6 @@ class _TaskTile extends StatelessWidget {
               const SizedBox(width: 6),
               if (task.hasNote)
                 Icon(Icons.notes, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-              // C2：拖动手柄（仅顶层任务；热区 40dp 便于精准按住）
-              if (dragIndex != null)
-                ReorderableDelayedDragStartListener(
-                  index: dragIndex!,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    alignment: Alignment.center,
-                    child: Icon(
-                      Icons.drag_handle,
-                      size: 18,
-                      color: Colors.grey.shade400,
-                    ),
-                  ),
-                ),
             ],
           ),
         ),

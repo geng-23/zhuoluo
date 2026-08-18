@@ -959,17 +959,6 @@ class AppDatabase extends _$AppDatabase {
     return rows.where((t) => !isCompleted(t)).toList();
   }
 
-  /// 手动排序：更新 sortOrder
-  Future<void> reorderTasks(List<int> orderedIds) async {
-    await transaction(() async {
-      for (var i = 0; i < orderedIds.length; i++) {
-        await (update(tasks)..where((t) => t.id.equals(orderedIds[i]))).write(
-          TasksCompanion(sortOrder: Value(i)),
-        );
-      }
-    });
-  }
-
   /// 批量完成/删除/移动
   Future<void> batchComplete(List<int> ids) async {
     for (final id in ids) {

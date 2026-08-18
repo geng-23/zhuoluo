@@ -5,6 +5,7 @@ import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
+import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
@@ -48,12 +49,27 @@ class _QuadrantPageState extends ConsumerState<QuadrantPage> {
   Future<void> _load() async {
     final db = ref.read(dbProvider);
     final tasks = await db.getAllUncompleted();
+    // 各象限内按开始时间升序（最近在前）；无开始时间排最后
+    tasks.sort(_byStartTime);
     if (mounted) {
       setState(() {
         _tasks = tasks;
         _loading = false;
       });
     }
+  }
+
+  static DateTime _startTime(Task t) {
+    final ps = t.planStart;
+    if (ps == null) return DateTime(9999); // 无开始时间排最后
+    final a = AppClock.asApp(ps);
+    return AppClock.at(a.year, a.month, a.day, a.hour, a.minute);
+  }
+
+  static int _byStartTime(Task a, Task b) {
+    final c = _startTime(a).compareTo(_startTime(b));
+    if (c != 0) return c;
+    return a.createdAt.compareTo(b.createdAt);
   }
 
   /// C7-2：展开未分类任务列表（可完成/拖动归类）

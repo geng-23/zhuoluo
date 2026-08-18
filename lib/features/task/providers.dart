@@ -17,7 +17,7 @@ class TasksState {
   final String smartView; // today / week7 / all / done / list / search
   final List<Task> tasks;
   final String searchQuery;
-  final String sortMode; // manual / time / quadrant
+  final String sortMode; // time / quadrant
   final bool loading;
   /// 重复任务：今天实例是否已完成（今天命中规则时才有意义）
   final Map<int, bool> instanceDone;
@@ -36,7 +36,7 @@ class TasksState {
     this.smartView = 'all',
     this.tasks = const [],
     this.searchQuery = '',
-    this.sortMode = 'manual',
+    this.sortMode = 'time',
     this.loading = true,
     this.instanceDone = const {},
     this.nextInstance = const {},
@@ -314,13 +314,6 @@ class TasksController extends StateNotifier<TasksState> {
   List<Task> _sort(List<Task> tasks) {
     final sorted = List<Task>.from(tasks);
     switch (state.sortMode) {
-      case 'time':
-        sorted.sort((a, b) {
-          final at = _sortTime(a);
-          final bt = _sortTime(b);
-          return at.compareTo(bt);
-        });
-        break;
       case 'quadrant':
         sorted.sort((a, b) {
           final qa = a.quadrant;
@@ -330,8 +323,10 @@ class TasksController extends StateNotifier<TasksState> {
         });
         break;
       default:
+        // 手动排序已移除：任务列表统一按开始时间升序（最近在前），
+        // 无开始时间的任务排最后；同一时间按添加顺序稳定
         sorted.sort((a, b) {
-          final c = a.sortOrder.compareTo(b.sortOrder);
+          final c = _sortTime(a).compareTo(_sortTime(b));
           if (c != 0) return c;
           return a.createdAt.compareTo(b.createdAt);
         });
@@ -341,7 +336,7 @@ class TasksController extends StateNotifier<TasksState> {
 
   DateTime _sortTime(Task t) {
     final ps = t.planStart;
-    if (ps == null) return DateTime(0);
+    if (ps == null) return DateTime(9999); // 无开始时间排最后
     final a = AppClock.asApp(ps);
     return AppClock.at(a.year, a.month, a.day, a.hour, a.minute);
   }
@@ -449,9 +444,6 @@ class TasksController extends StateNotifier<TasksState> {
         createdAt: AppClock.now(),
       ),
     );
-    // 新任务排顶部：把现有同清单任务 sortOrder +1，新任务保持 0
-    // 排除新任务自身（此前把新任务也 +1，导致排序可能不是置顶）
-    await _shiftSortOrders(targetList, parentId, excludeId: id);
     // 偏好设置组：设置了默认提醒提前量时，新建任务自动带默认提醒
     // （仅有计划时间/重复规则的任务；纯标题任务与子任务不自动添加，
     // 无计划时间时提醒无法排期）。
@@ -486,23 +478,6 @@ class TasksController extends StateNotifier<TasksState> {
     }
     _bump();
     return id;
-  }
-
-  Future<void> _shiftSortOrders(
-    int listId,
-    int? parentId, {
-    required int excludeId,
-  }) async {
-    final tasks = parentId == null
-        ? await _db.getTasksByList(listId)
-        : await _db.getSubTasks(parentId);
-    for (final t in tasks) {
-      if (t.id == excludeId) continue;
-      await _db.updateTask(
-        t.id,
-        TasksCompanion(sortOrder: Value(t.sortOrder + 1)),
-      );
-    }
   }
 
   Future<int?> addTaskFromParsed(
@@ -758,23 +733,6 @@ class TasksController extends StateNotifier<TasksState> {
     // 事务成功后才消费快照（失败保留，等待重试）与回收站条目
     _deletedCache.remove(id);
     await _db.deleteTrashItemByOriginalTaskId(id);
-    _bump();
-  }
-
-  Future<void> reorder(List<int> orderedIds) async {
-    // 拖拽排序会修改 sortOrder：若非手动排序模式，自动切回手动（否则刷新被排回去）
-    if (state.sortMode != 'manual') {
-      state = state.copyWith(sortMode: 'manual');
-    }
-    await _db.reorderTasks(orderedIds);
-    // 本地重排，避免全量 reload 导致列表重建闪烁
-    final current = List<Task>.from(state.tasks);
-    final byId = {for (final t in current) t.id: t};
-    final reordered = orderedIds
-        .map((id) => byId[id])
-        .whereType<Task>()
-        .toList();
-    state = state.copyWith(tasks: reordered);
     _bump();
   }
 

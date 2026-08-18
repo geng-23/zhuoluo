@@ -100,7 +100,9 @@ export PATH="$HOME/flutter/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdlin
 
 ## 6. 发布流程
 
-对 zhuoluo 做出**任何代码修改**后，**默认只做「提交推送」，不改版本号、不构建、不发布、不安装 APK**。改版本号、构建 APK、发布 Release、安装到手机**仅在用户明确要求时**才执行，用户未要求即为要求跳过。
+对 zhuoluo 做出**任何代码修改**后，**默认只做「提交推送」，不改版本号、不构建、不发布、不安装 APK**。用户未要求发布即为要求跳过所有发布步骤。
+
+默认流程（用户未要求发布）：
 
 1. **更新文档**：README（测试数 / 测试文件数等）及确有必要的其他项目文档。
    - **除非用户明确要求，否则不更新、不生成项目总览文档**（见 [第 8 章](#8-项目总览文档规则)）。
@@ -112,11 +114,23 @@ export PATH="$HOME/flutter/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdlin
    git push origin main
    ```
 
-### 仅当用户明确要求发布时，才执行以下发布步骤
+### 当用户明确要求发布时
 
-3. **改版本号**：`pubspec.yaml` 的 `version` + `lib/features/profile/profile_page.dart` 关于页文字同步
+按以下顺序执行，**改版本号必须先于提交推送完成**，使版本号随本次代码改动一次提交，避免推送后再改版本号导致二次提交：
+
+1. **改版本号**：`pubspec.yaml` 的 `version` + `lib/features/profile/profile_page.dart` 关于页文字同步
    - 版本号根据最新 Release 递增，不在本规则中固定具体版本号。
    - **若用户明确要求版本不变**（如「版本号不用改 / 维持 1.2.5」），保持版本号不变并跳过本步。
+
+2. **更新文档**：README（测试数 / 测试文件数等）及确有必要的其他项目文档。
+   - **除非用户明确要求，否则不更新、不生成项目总览文档**（见 [第 8 章](#8-项目总览文档规则)）。
+
+3. **提交推送**（版本号、文档与代码改动一次性提交）：
+   ```bash
+   git add -A
+   git commit -m "<简洁中文提交信息>"
+   git push origin main
+   ```
 
 4. **构建 APK**：
    ```bash
@@ -134,7 +148,7 @@ export PATH="$HOME/flutter/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdlin
    adb install -r build/app/outputs/flutter-apk/app-release.apk
    ```
 
-> **默认终止点：第 2 步提交推送完成后即结束**。除非用户在本次任务中明确说出要「发布 / 构建 / 安装 APK」（或其明确同义词），否则一律不改版本号，也不执行第 4~6 步，更不得询问是否要发布。
+> **默认终止点：提交推送完成后即结束**。除非用户在本次任务中明确说出要「发布 / 构建 / 安装 APK」（或其明确同义词），否则一律不改版本号、不构建、不发布、不安装，更不得询问是否要发布。
 
 ---
 

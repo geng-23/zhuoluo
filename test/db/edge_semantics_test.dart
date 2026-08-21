@@ -1,4 +1,4 @@
-﻿import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -76,6 +76,18 @@ void main() {
 
   Future<void> drain() =>
       Future<void>.delayed(const Duration(milliseconds: 200));
+
+  /// 等待控制器任务列表达到指定数量。重载链（任务+实例+今日完成多次异步查询）
+  /// 在高负载下可能超过固定延时，读旧列表会误报排序失败——轮询而非盲等。
+  Future<void> waitTaskCount(ProviderContainer container, int count) async {
+    var guard = 0;
+    while (
+        container.read(tasksControllerProvider).tasks.length < count &&
+            guard < 200) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      guard++;
+    }
+  }
 
   group('统计口径', () {
     test('完成数只计顶层任务，子任务与重复子任务实例不计入', () async {
@@ -241,6 +253,8 @@ void main() {
         planStart: AppClock.at(today.year, today.month, today.day, 10, 0),
       );
       await drain();
+      // 重载链高负载下可能未完成：轮询等两个任务都进列表再断言
+      await waitTaskCount(container, 2);
       final state = container.read(tasksControllerProvider);
       final ids = state.tasks.map((t) => t.id).toList();
       expect(ids.indexOf(a), lessThan(ids.indexOf(b)),

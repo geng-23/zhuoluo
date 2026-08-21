@@ -78,7 +78,9 @@ void main() {
     expect(native.starts, isNotEmpty, reason: '开始即启动前台服务');
     expect(native.starts.last.running, isTrue);
     expect(native.starts.last.remainingSeconds, 25 * 60);
+    expect(native.starts.last.totalSeconds, 25 * 60, reason: '进度条总时长');
     expect(native.starts.last.endAt, isNotNull, reason: 'chronometer 按结束时刻渲染');
+    expect(native.starts.last.title, isNull, reason: '未关联任务无标题');
   });
 
   test('墙钟推进：tick 后剩余按真实经过时间减少（挂起纠偏）', () async {
@@ -158,12 +160,13 @@ void main() {
     expect(c.state.minutes, 45, reason: '运行中不可改时长');
   });
 
-  test('关联任务设置：空闲态生效，运行中锁定', () async {
+  test('关联任务设置：空闲态生效，运行中锁定；通知带任务标题', () async {
     final taskId = await insertTask(title: '写方案');
     final c = container.read(pomodoroControllerProvider.notifier);
     c.setTaskId(taskId);
     expect(c.state.taskId, taskId);
-    c.start();
+    c.start(taskTitle: '写方案');
+    expect(native.starts.last.title, '写方案', reason: '通知展示关联任务标题');
     c.setTaskId(null);
     expect(c.state.taskId, taskId, reason: '运行中不可改关联任务');
   });

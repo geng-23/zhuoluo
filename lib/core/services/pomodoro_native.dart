@@ -43,13 +43,19 @@ class PomodoroNative {
 
   /// 启动前台服务并发布常驻倒计时通知。
   /// [endAt] 运行态的结束时刻（chronometer 按此渲染倒计时）；暂停态传 null。
+  /// [title] 关联任务标题（无则 null，原生显示"专注中"）。
   Future<void> startForeground({
     required int id,
     DateTime? endAt,
     required bool running,
     required int remainingSeconds,
+    required int totalSeconds,
+    String? title,
   }) {
-    return _invoke('startForeground', _args(endAt, running, remainingSeconds, id: id));
+    return _invoke(
+      'startForeground',
+      _args(endAt, running, remainingSeconds, totalSeconds, title, id: id),
+    );
   }
 
   /// 更新通知内容（不改变前台状态；运行态每 10s 自愈重发）。
@@ -58,8 +64,13 @@ class PomodoroNative {
     DateTime? endAt,
     required bool running,
     required int remainingSeconds,
+    required int totalSeconds,
+    String? title,
   }) {
-    return _invoke('updateForeground', _args(endAt, running, remainingSeconds, id: id));
+    return _invoke(
+      'updateForeground',
+      _args(endAt, running, remainingSeconds, totalSeconds, title, id: id),
+    );
   }
 
   /// 停止服务并移除通知（会话结束）。
@@ -70,7 +81,9 @@ class PomodoroNative {
   Map<String, Object?> _args(
     DateTime? endAt,
     bool running,
-    int remainingSeconds, {
+    int remainingSeconds,
+    int totalSeconds,
+    String? title, {
     required int id,
   }) =>
       {
@@ -78,6 +91,8 @@ class PomodoroNative {
         'endAtMs': endAt?.millisecondsSinceEpoch,
         'running': running,
         'remainingSec': remainingSeconds,
+        'totalSec': totalSeconds,
+        'title': title,
       };
 
   Future<void> _invoke(String method, Map<String, Object?> args) async {

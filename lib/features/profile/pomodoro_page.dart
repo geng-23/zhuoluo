@@ -182,7 +182,7 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
                       vertical: 16,
                     ),
                   ),
-                  onPressed: controller.start,
+                  onPressed: () => controller.start(taskTitle: linked?.title),
                 ),
               ],
               PomodoroState.running => [
@@ -226,7 +226,7 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
                 OutlinedButton.icon(
                   icon: const Icon(Icons.replay),
                   label: const Text('重新开始'),
-                  onPressed: controller.restart,
+                  onPressed: () => controller.restart(taskTitle: linked?.title),
                 ),
                 const SizedBox(width: 12),
                 OutlinedButton.icon(

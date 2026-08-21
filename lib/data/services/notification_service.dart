@@ -498,6 +498,12 @@ class NotificationService {
             priority: Priority.high,
             autoCancel: true,
             category: AndroidNotificationCategory.reminder,
+            // 与倒计时通知同款番茄小图标
+            icon: 'ic_stat_pomodoro',
+            styleInformation: BigTextStyleInformation(
+              '本次专注 $minutes 分钟',
+              contentTitle: '专注完成',
+            ),
           ),
         ),
       );

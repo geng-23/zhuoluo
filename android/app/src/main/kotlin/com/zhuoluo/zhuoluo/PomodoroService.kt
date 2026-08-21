@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -35,30 +36,55 @@ class PomodoroService : Service() {
         const val EXTRA_ID = "notificationId"
         const val EXTRA_END_AT = "endAtMs"
         const val EXTRA_REMAINING = "remainingSec"
+        const val EXTRA_TOTAL = "totalSec"
         const val EXTRA_RUNNING = "running"
+        const val EXTRA_TITLE = "title"
 
         private const val CHANNEL_ID = "pomodoro_countdown_v1"
 
+        /** 番茄主题主色（与 App 主题 seedColor 0xFF4F8EF7 一致） */
+        private const val ACCENT_COLOR = 0xFF4F8EF7.toInt()
+
         /** 启动/更新前台通知（服务已运行时 startService 会再次回调 onStartCommand）。 */
-        fun start(context: Context, id: Int, endAtMs: Long?, running: Boolean, remainingSec: Int) {
+        fun start(
+            context: Context,
+            id: Int,
+            endAtMs: Long?,
+            running: Boolean,
+            remainingSec: Int,
+            totalSec: Int,
+            title: String?,
+        ) {
             val intent = Intent(context, PomodoroService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_ID, id)
                 if (endAtMs != null) putExtra(EXTRA_END_AT, endAtMs)
                 putExtra(EXTRA_REMAINING, remainingSec)
+                putExtra(EXTRA_TOTAL, totalSec)
                 putExtra(EXTRA_RUNNING, running)
+                putExtra(EXTRA_TITLE, title)
             }
             context.startService(intent)
         }
 
         /** 更新通知内容（不改变前台状态）。 */
-        fun update(context: Context, id: Int, endAtMs: Long?, running: Boolean, remainingSec: Int) {
+        fun update(
+            context: Context,
+            id: Int,
+            endAtMs: Long?,
+            running: Boolean,
+            remainingSec: Int,
+            totalSec: Int,
+            title: String?,
+        ) {
             val intent = Intent(context, PomodoroService::class.java).apply {
                 action = ACTION_UPDATE
                 putExtra(EXTRA_ID, id)
                 if (endAtMs != null) putExtra(EXTRA_END_AT, endAtMs)
                 putExtra(EXTRA_REMAINING, remainingSec)
+                putExtra(EXTRA_TOTAL, totalSec)
                 putExtra(EXTRA_RUNNING, running)
+                putExtra(EXTRA_TITLE, title)
             }
             context.startService(intent)
         }
@@ -86,7 +112,9 @@ class PomodoroService : Service() {
                 val endAtMs = if (intent.hasExtra(EXTRA_END_AT)) intent.getLongExtra(EXTRA_END_AT, 0) else null
                 val running = intent.getBooleanExtra(EXTRA_RUNNING, true)
                 val remainingSec = intent.getIntExtra(EXTRA_REMAINING, 0)
-                val notification = buildNotification(id, endAtMs, running, remainingSec)
+                val totalSec = intent.getIntExtra(EXTRA_TOTAL, 0)
+                val title = intent.getStringExtra(EXTRA_TITLE)
+                val notification = buildNotification(endAtMs, running, remainingSec, totalSec, title)
                 if (ACTION_START == intent.action) {
                     // Android 14+ 需显式传入前台服务类型（manifest 已声明 specialUse）；
                     // 更早版本不识别该位，传 0 由系统按 manifest 兜底
@@ -106,22 +134,33 @@ class PomodoroService : Service() {
     }
 
     private fun buildNotification(
-        id: Int,
         endAtMs: Long?,
         running: Boolean,
         remainingSec: Int,
+        totalSec: Int,
+        title: String?,
     ): Notification {
         ensureChannel()
-        val title = "番茄专注"
+        val elapsedSec = (totalSec - remainingSec).coerceAtLeast(0)
+        val taskSuffix = if (title.isNullOrBlank()) "" else " · $title"
         val body = if (running) {
-            "专注中"
+            "专注中$taskSuffix"
         } else {
             "已暂停 · 剩余 ${formatRemaining(remainingSec)}"
         }
+        // 展开态大文本：进度 + 任务上下文
+        val bigText = if (running) {
+            val taskLine = if (title.isNullOrBlank()) "" else "\n任务：$title"
+            "正在专注 ${totalSec / 60} 分钟 · 已专注 ${formatRemaining(elapsedSec)}$taskLine"
+        } else {
+            "已暂停 · 已专注 ${formatRemaining(elapsedSec)}"
+        }
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(title)
+            .setSmallIcon(R.drawable.ic_stat_pomodoro)
+            .setLargeIcon(BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher))
+            .setColor(ACCENT_COLOR)
+            .setContentTitle("番茄专注")
             .setContentText(body)
             .setOngoing(true)
             .setAutoCancel(false)
@@ -129,6 +168,14 @@ class PomodoroService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setShowWhen(false)
+            // 会话进度条（已专注秒数 / 总秒数）
+            .setProgress(if (totalSec > 0) totalSec else 1, elapsedSec, false)
+            // 展开态大文本
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .setBigContentTitle("番茄专注")
+                    .bigText(bigText),
+            )
             // 点通知主体回到 App（会话页面由用户自行导航）
             .setContentIntent(
                 PendingIntent.getActivity(
@@ -146,11 +193,17 @@ class PomodoroService : Service() {
                 .setWhen(endAtMs)
         }
 
-        // 动作按钮：cancelNotification=false —— 点击不撤下通知，仅就地更新
+        // 动作按钮（带图标）：cancelNotification=false —— 点击不撤下通知，仅就地更新
         val actionId = if (running) PomodoroActionReceiver.ACTION_PAUSE else PomodoroActionReceiver.ACTION_RESUME
         val actionLabel = if (running) "暂停" else "继续"
-        builder.addAction(0, actionLabel, actionPendingIntent(actionId))
-        builder.addAction(0, "结束", actionPendingIntent(PomodoroActionReceiver.ACTION_STOP))
+        val actionIcon =
+            if (running) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        builder.addAction(actionIcon, actionLabel, actionPendingIntent(actionId))
+        builder.addAction(
+            R.drawable.ic_action_stop,
+            "结束",
+            actionPendingIntent(PomodoroActionReceiver.ACTION_STOP),
+        )
         return builder.build()
     }
 

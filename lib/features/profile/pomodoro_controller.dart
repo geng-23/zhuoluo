@@ -93,6 +93,9 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
   /// 暂停时冻结的剩余秒数
   int _pausedRemaining = 0;
 
+  /// 关联任务标题（通知展示用；页面开始/重新开始时传入）
+  String? _taskTitle;
+
   StreamSubscription<String>? _actionSub;
   final _finished = StreamController<PomodoroFinishResult>.broadcast();
 
@@ -107,13 +110,14 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
     super.dispose();
   }
 
-  /// 开始计时（仅空闲态有效）
-  void start() {
+  /// 开始计时（仅空闲态有效）。[taskTitle] 关联任务标题（通知展示用）。
+  void start({String? taskTitle}) {
     if (state.state != PomodoroState.idle) return;
     final minutes = state.minutes;
     _elapsedSec = 0;
     _startedAt = AppClock.now();
     _endAt = _startedAt!.add(Duration(minutes: minutes));
+    _taskTitle = taskTitle;
     state = PomodoroStatus(
       state: PomodoroState.running,
       minutes: minutes,
@@ -129,6 +133,8 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
         endAt: _endAt,
         running: true,
         remainingSeconds: minutes * 60,
+        totalSeconds: minutes * 60,
+        title: _taskTitle,
       ),
     );
     _startTicker();
@@ -175,6 +181,8 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
           endAt: endAt,
           running: true,
           remainingSeconds: remaining,
+          totalSeconds: state.minutes * 60,
+          title: _taskTitle,
         ),
       );
     }
@@ -199,6 +207,8 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
         id: NotificationIds.forPomodoro,
         running: false,
         remainingSeconds: _pausedRemaining,
+        totalSeconds: state.minutes * 60,
+        title: _taskTitle,
       ),
     );
   }
@@ -221,18 +231,22 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
         endAt: _endAt,
         running: true,
         remainingSeconds: _pausedRemaining,
+        totalSeconds: state.minutes * 60,
+        title: _taskTitle,
       ),
     );
     _startTicker();
   }
 
-  /// 重新开始：放弃当前进度，从头计时（运行/暂停态有效）
-  void restart() {
+  /// 重新开始：放弃当前进度，从头计时（运行/暂停态有效）。
+  /// [taskTitle] 关联任务标题（通知展示用）。
+  void restart({String? taskTitle}) {
     if (state.state == PomodoroState.idle) return;
     final minutes = state.minutes;
     _elapsedSec = 0;
     _startedAt = AppClock.now();
     _endAt = _startedAt!.add(Duration(minutes: minutes));
+    _taskTitle = taskTitle;
     state = PomodoroStatus(
       state: PomodoroState.running,
       minutes: minutes,
@@ -246,6 +260,8 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
         endAt: _endAt,
         running: true,
         remainingSeconds: minutes * 60,
+        totalSeconds: minutes * 60,
+        title: _taskTitle,
       ),
     );
     _startTicker();

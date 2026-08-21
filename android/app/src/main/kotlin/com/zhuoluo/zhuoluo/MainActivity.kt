@@ -69,6 +69,8 @@ class MainActivity : FlutterActivity() {
                             call.argument<Long>("endAtMs"),
                             call.argument<Boolean>("running") ?: true,
                             call.argument<Int>("remainingSec") ?: 0,
+                            call.argument<Int>("totalSec") ?: 0,
+                            call.argument<String>("title"),
                         )
                         result.success(null)
                     }
@@ -79,6 +81,8 @@ class MainActivity : FlutterActivity() {
                             call.argument<Long>("endAtMs"),
                             call.argument<Boolean>("running") ?: true,
                             call.argument<Int>("remainingSec") ?: 0,
+                            call.argument<Int>("totalSec") ?: 0,
+                            call.argument<String>("title"),
                         )
                         result.success(null)
                     }

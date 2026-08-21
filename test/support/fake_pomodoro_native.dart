@@ -15,11 +15,15 @@ import 'package:zhuoluo/core/services/pomodoro_native.dart';
 /// ```
 class FakePomodoroNative implements PomodoroNative {
   /// 前台服务启动记录（按调用顺序）
-  final List<({int id, DateTime? endAt, bool running, int remainingSeconds})>
+  final List<
+      ({int id, DateTime? endAt, bool running, int remainingSeconds, int totalSeconds, String? title})
+  >
   starts = [];
 
   /// 通知更新记录（按调用顺序）
-  final List<({int id, DateTime? endAt, bool running, int remainingSeconds})>
+  final List<
+      ({int id, DateTime? endAt, bool running, int remainingSeconds, int totalSeconds, String? title})
+  >
   updates = [];
 
   /// 停止服务记录（通知 ID）
@@ -44,12 +48,16 @@ class FakePomodoroNative implements PomodoroNative {
     DateTime? endAt,
     required bool running,
     required int remainingSeconds,
+    required int totalSeconds,
+    String? title,
   }) async {
     starts.add((
       id: id,
       endAt: endAt,
       running: running,
       remainingSeconds: remainingSeconds,
+      totalSeconds: totalSeconds,
+      title: title,
     ));
   }
 
@@ -59,12 +67,16 @@ class FakePomodoroNative implements PomodoroNative {
     DateTime? endAt,
     required bool running,
     required int remainingSeconds,
+    required int totalSeconds,
+    String? title,
   }) async {
     updates.add((
       id: id,
       endAt: endAt,
       running: running,
       remainingSeconds: remainingSeconds,
+      totalSeconds: totalSeconds,
+      title: title,
     ));
   }
 

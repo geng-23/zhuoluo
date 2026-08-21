@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 番茄钟通知小图标：白色番茄剪影（系统按白色渲染状态栏/通知头）。
+     主体圆 + 顶部果蒂五角星，小尺寸下仍可辨识。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 番茄主体（略扁的圆） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,3.2 C6.9,3.2 3.2,7.4 3.2,12 C3.2,16.6 6.9,20.8 12,20.8 C17.1,20.8 20.8,16.6 20.8,12 C20.8,7.4 17.1,3.2 12,3.2 Z" />
+    <!-- 果蒂（五角星） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,0.6 L13.1,3.5 L16.2,3.6 L13.9,5.4 L14.7,8.4 L12,6.7 L9.3,8.4 L10.1,5.4 L7.8,3.6 L10.9,3.5 Z" />
+</vector>

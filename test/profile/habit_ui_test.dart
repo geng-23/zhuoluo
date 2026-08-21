@@ -123,7 +123,7 @@ void main() {
     expect(find.byIcon(Icons.check_circle), findsOneWidget);
   });
 
-  testWidgets('新建习惯：默认图标为 ⭐，可点选其他图标落库', (tester) async {
+  testWidgets('新建习惯：未选图标时提示并禁用创建，点选后创建落库', (tester) async {
     await db.ensureDefaultList();
     await pumpHabitPage(tester);
 
@@ -132,11 +132,25 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('新建习惯'), findsOneWidget);
     expect(find.text('图标'), findsOneWidget);
+    expect(find.text('请点选一个图标'), findsOneWidget,
+        reason: '未选图标时应提示必选');
 
-    // 输入名称并点选图标 📚
+    // 输入名称后仍不选图标——创建按钮保持禁用
     await tester.enterText(find.byType(TextField), '晨跑');
+    await tester.pumpAndSettle();
+    var createBtn = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, '创建'),
+    );
+    expect(createBtn.onPressed, isNull, reason: '未选图标时创建按钮禁用');
+
+    // 点选图标 📚 后创建可用
     await tester.tap(find.text('📚'));
     await tester.pumpAndSettle();
+    expect(find.text('请点选一个图标'), findsNothing, reason: '选图标后提示消失');
+    createBtn = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, '创建'),
+    );
+    expect(createBtn.onPressed, isNotNull, reason: '选图标后创建按钮可用');
     await tester.tap(find.text('创建'));
     await tester.pumpAndSettle();
 
@@ -146,39 +160,106 @@ void main() {
     expect(habits.first.icon, '📚', reason: '点选的图标应落库');
   });
 
-  testWidgets('新建习惯：不点图标时默认 ⭐', (tester) async {
+  testWidgets('新建习惯：不选图标点创建无效（不落库）', (tester) async {
     await db.ensureDefaultList();
     await pumpHabitPage(tester);
 
     await tester.tap(find.byType(FloatingActionButton));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '阅读');
-    await tester.tap(find.text('创建'));
     await tester.pumpAndSettle();
 
-    final habits = await db.getHabits();
-    expect(habits, hasLength(1));
-    expect(habits.first.icon, '⭐', reason: '默认图标为 ⭐');
+    // 不选图标直接点创建——按钮禁用，弹窗不关闭、不落库
+    final createBtn = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, '创建'),
+    );
+    expect(createBtn.onPressed, isNull, reason: '未选图标时创建按钮禁用');
+    await tester.tap(find.text('创建'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(find.text('新建习惯'), findsOneWidget, reason: '弹窗保持打开');
+    expect(await db.getHabits(), isEmpty, reason: '未落库');
   });
 
-  testWidgets('长按编辑图标：选择后落库并刷新列表', (tester) async {
+  testWidgets('长按编辑习惯：可修改名称与图标', (tester) async {
     await seedHabit();
     await pumpHabitPage(tester);
 
-    // 长按习惯行打开操作底栏
+    // 长按习惯行打开操作底栏，点「编辑习惯」
     await tester.longPress(find.text('阅读'));
     await tester.pumpAndSettle();
-    expect(find.text('编辑图标'), findsOneWidget);
-    await tester.tap(find.text('编辑图标'));
+    expect(find.text('编辑习惯'), findsOneWidget);
+    await tester.tap(find.text('编辑习惯'));
     await tester.pumpAndSettle();
 
-    // 选择 🏊 并确定
+    // 修改名称并换图标
+    await tester.enterText(find.byType(TextField), '晨读');
     await tester.tap(find.text('🏊'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('确定'));
     await tester.pumpAndSettle();
 
     final updated = await db.getHabit(seedHabitId);
-    expect(updated!.icon, '🏊', reason: '编辑后的图标应落库');
+    expect(updated!.name, '晨读', reason: '名称应更新');
+    expect(updated.icon, '🏊', reason: '图标应更新');
+  });
+
+  testWidgets('删除习惯：确认后删除，撤销条可恢复习惯与打卡记录', (tester) async {
+    await seedHabit();
+    final today = DateTime.now();
+    await db.checkHabit(
+      seedHabitId,
+      DateTime(today.year, today.month, today.day),
+    );
+    await db.checkHabit(
+      seedHabitId,
+      DateTime(today.year, today.month, today.day - 1),
+    );
+    await pumpHabitPage(tester);
+
+    // 长按 → 删除习惯 → 确认
+    await tester.longPress(find.text('阅读'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除习惯'));
+    await tester.pumpAndSettle();
+    expect(find.text('删除习惯？'), findsOneWidget, reason: '确认弹窗');
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+
+    // 已删除：列表空 + 撤销条
+    expect(find.text('还没有习惯，点 + 添加'), findsOneWidget, reason: '列表已空');
+    expect(find.text('已删除「阅读」'), findsOneWidget, reason: '撤销条提示');
+    expect(await db.getHabits(), isEmpty, reason: 'DB 已删除');
+
+    // 点撤销 → 习惯与 2 条打卡记录完整恢复
+    await tester.tap(find.text('撤销'));
+    await tester.pumpAndSettle();
+    final habits = await db.getHabits();
+    expect(habits, hasLength(1), reason: '撤销后习惯恢复');
+    expect(habits.first.id, seedHabitId, reason: '按原 ID 恢复');
+    final records = await db.getHabitRecords(seedHabitId);
+    expect(records, hasLength(2), reason: '撤销后打卡记录恢复');
+    expect(find.text('阅读'), findsOneWidget, reason: '列表恢复显示');
+  });
+
+  testWidgets('连续打卡天数：连续 3 天显示连续打卡 3 天', (tester) async {
+    await seedHabit();
+    final today = DateTime.now();
+    await db.checkHabit(
+      seedHabitId,
+      DateTime(today.year, today.month, today.day - 2),
+    );
+    await db.checkHabit(
+      seedHabitId,
+      DateTime(today.year, today.month, today.day - 1),
+    );
+    await db.checkHabit(
+      seedHabitId,
+      DateTime(today.year, today.month, today.day),
+    );
+    await pumpHabitPage(tester);
+
+    expect(find.textContaining('连续打卡 3 天'), findsOneWidget,
+        reason: '连续 3 天打卡');
+    expect(find.textContaining('共打卡 3 天'), findsOneWidget);
   });
 }

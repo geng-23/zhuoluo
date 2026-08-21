@@ -1384,6 +1384,38 @@ class AppDatabase extends _$AppDatabase {
         HabitsCompanion(icon: Value(icon)),
       );
 
+  /// 更新习惯名称
+  Future<void> updateHabitName(int id, String name) =>
+      (update(habits)..where((h) => h.id.equals(id))).write(
+        HabitsCompanion(name: Value(name)),
+      );
+
+  /// 删除习惯的撤销恢复：按原 ID 重建习惯及其全部打卡记录（单事务原子）。
+  /// 删除后原 ID 空闲（autoIncrement 不回收但不会冲突），提醒由调用方重排。
+  Future<void> restoreHabit(Habit habit, List<HabitRecord> records) =>
+      transaction(() async {
+        await into(habits).insert(
+          HabitsCompanion(
+            id: Value(habit.id),
+            name: Value(habit.name),
+            icon: Value(habit.icon),
+            frequency: Value(habit.frequency),
+            reminderTime: Value(habit.reminderTime),
+            createdAt: Value(habit.createdAt),
+          ),
+        );
+        for (final r in records) {
+          await into(habitRecords).insert(
+            HabitRecordsCompanion(
+              id: Value(r.id),
+              habitId: Value(r.habitId),
+              date: Value(r.date),
+              completedAt: Value(r.completedAt),
+            ),
+          );
+        }
+      });
+
   Future<bool> isHabitDone(int habitId, DateTime date) async {
     // ：入参可能是 DB 读回值，统一按应用时区解释后取字段
     final a = AppClock.asApp(date);

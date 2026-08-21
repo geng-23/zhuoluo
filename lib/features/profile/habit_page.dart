@@ -9,12 +9,15 @@ import 'package:zhuoluo/data/database/database.dart';
 
 /// 可选的习惯图标（emoji，按习惯场景挑选，新建/编辑共用）
 const _habitIcons = <String>[
-  '⭐', '📚', '🏃', '💪', '🧘', '😴', '💧', '🥗',
+  '📚', '🏃', '💪', '🧘', '😴', '💧', '🥗',
   '🍎', '💊', '🦷', '✍️', '🎨', '🎸', '🎹', '📖',
   '💻', '📱', '💰', '🛒', '🧹', '🚶', '🚴', '🏊',
   '⚽', '🏀', '🎾', '🏸', '🧠', '💡', '🌅', '🌙',
   '☀️', '🐕', '🌱', '🎯', '🚭', '🌊', '🍵', '🥕',
 ];
+
+/// 习惯列表行高（itemExtent 与深链滚动定位共用同一常量）
+const _tileExtent = 112.0;
 
 class HabitPage extends ConsumerStatefulWidget {
   const HabitPage({super.key, this.initialHabitId});
@@ -60,7 +63,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted || !_scroll.hasClients) return;
           _scroll.jumpTo(
-            (idx * 72.0).clamp(0.0, _scroll.position.maxScrollExtent),
+            (idx * _tileExtent).clamp(0.0, _scroll.position.maxScrollExtent),
           );
         });
       }
@@ -83,7 +86,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
             )
           : ListView.builder(
               controller: _scroll,
-              itemExtent: 72,
+              itemExtent: _tileExtent,
               itemCount: _habits.length,
               itemBuilder: (context, index) {
                 final habit = _habits[index];
@@ -92,7 +95,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                   highlight: habit.id == widget.initialHabitId,
                   onRefresh: _load,
                   onDelete: () async {
-                    // 删除习惯前确认（此前直接删除，误触即丢打卡记录）
+                    // 删除习惯前确认（误触即丢打卡记录）
                     final ok = await showDialog<bool>(
                       context: context,
                       builder: (c) => AlertDialog(
@@ -117,14 +120,28 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                     );
                     if (ok != true) return;
                     final db = ref.read(dbProvider);
+                    final scheduler = ref.read(reminderSchedulerProvider);
+                    // 删除前缓存习惯与其全部打卡记录，撤销条可完整恢复
+                    final records = await db.getHabitRecords(habit.id);
                     // 先取消已排的每日提醒，避免删除后仍收到通知
-                    await ref
-                        .read(reminderSchedulerProvider)
-                        .cancelHabitReminder(habit.id);
+                    await scheduler.cancelHabitReminder(habit.id);
                     await db.deleteHabit(habit.id);
                     // 习惯数据变更通知
                     bumpDataVersion(ref);
                     _load();
+                    if (!context.mounted) return;
+                    showAppSnackBar(
+                      context,
+                      '已删除「${habit.name}」',
+                      actionLabel: '撤销',
+                      onAction: () async {
+                        await db.restoreHabit(habit, records);
+                        await scheduler.scheduleHabitReminder(habit);
+                        bumpDataVersion(ref);
+                        _load();
+                      },
+                      icon: Icons.delete_outline,
+                    );
                   },
                 );
               },
@@ -135,7 +152,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
   Future<void> _addHabit() async {
     final controller = TextEditingController();
     var remind = false;
-    var icon = '⭐';
+    String? icon;
     var time = AppClock.at(
       AppClock.now().year,
       AppClock.now().month,
@@ -156,12 +173,31 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                 TextField(
                   controller: controller,
                   autofocus: true,
+                  // 名称输入后刷新对话框，让「创建」按钮的禁用态即时更新
+                  onChanged: (_) => setDialogState(() {}),
                   decoration: const InputDecoration(hintText: '如：阅读、健身、早睡'),
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  '图标',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                Row(
+                  children: [
+                    Text(
+                      '图标',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    if (icon == null) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        '请点选一个图标',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(c).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 6),
                 _HabitIconPicker(
@@ -209,19 +245,32 @@ class _HabitPageState extends ConsumerState<HabitPage> {
               child: const Text('取消'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(
-                c,
-                _HabitDraft(controller.text.trim(), icon, remind ? time : null),
-              ),
+              // 名称与图标均必填：未选图标/名称为空时禁用，避免
+              // 创建出默认星星等"不明所以"的习惯
+              onPressed:
+                  (icon == null || controller.text.trim().isEmpty)
+                  ? null
+                  : () => Navigator.pop(
+                      c,
+                      _HabitDraft(
+                        controller.text.trim(),
+                        icon!,
+                        remind ? time : null,
+                      ),
+                    ),
               child: const Text('创建'),
             ),
           ],
         ),
       ),
     );
-    if (draft != null && draft.name.isNotEmpty) {
+    if (draft != null) {
       final db = ref.read(dbProvider);
-      final id = await db.insertHabit(draft.name, draft.icon, draft.reminderTime);
+      final id = await db.insertHabit(
+        draft.name,
+        draft.icon,
+        draft.reminderTime,
+      );
       // 习惯数据变更通知
       bumpDataVersion(ref);
       if (draft.reminderTime != null) {
@@ -254,11 +303,12 @@ class _HabitDraft {
   _HabitDraft(this.name, this.icon, this.reminderTime);
 }
 
-/// 习惯图标选择网格（新建/编辑共用）：点选高亮（primary 边框 + 底色）
+/// 习惯图标选择网格（新建/编辑共用）：点选高亮（primary 边框 + 底色）；
+/// [selected] 为 null 表示未选择（无高亮，用于新建必选场景）
 class _HabitIconPicker extends StatelessWidget {
   const _HabitIconPicker({required this.selected, required this.onSelected});
 
-  final String selected;
+  final String? selected;
   final ValueChanged<String> onSelected;
 
   @override
@@ -315,6 +365,10 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
   /// 打卡操作进行中标志（双击/连点防抖——toggle 语义下连点
   /// 会变成"打卡+取消"，且并发写入可致重复记录）
   bool _toggling = false;
+  int _streak = 0;
+  int _total = 0;
+  /// 近 7 天（含今天）每天是否已打卡，索引 0=6 天前 … 6=今天
+  final List<bool> _recent7 = List.filled(7, false);
 
   @override
   void initState() {
@@ -324,36 +378,106 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
 
   Future<void> _load() async {
     final db = ref.read(dbProvider);
-    final done = await db.isHabitDone(widget.habit.id, AppClock.now());
-    if (mounted) setState(() => _doneToday = done);
+    final now = AppClock.now();
+    final done = await db.isHabitDone(widget.habit.id, now);
+    final records = await db.getHabitRecords(widget.habit.id);
+    // 已打卡日期集合（日历日归一，DST 安全）
+    final doneDays = <DateTime>{
+      for (final r in records) AppClock.startOfDay(AppClock.asApp(r.date)),
+    };
+    final today = AppClock.startOfDay(now);
+    // 连续打卡：今天已打卡从今天起数，否则从昨天起数
+    var cursor = done ? today : AppClock.addCalendarDays(today, -1);
+    var streak = 0;
+    while (doneDays.contains(cursor)) {
+      streak++;
+      cursor = AppClock.addCalendarDays(cursor, -1);
+    }
+    // 近 7 天打卡情况（索引 0=6 天前 … 6=今天）
+    final recent = List<bool>.filled(7, false);
+    for (var d = 0; d < 7; d++) {
+      recent[6 - d] = doneDays.contains(AppClock.addCalendarDays(today, -d));
+    }
+    if (mounted) {
+      setState(() {
+        _doneToday = done;
+        _streak = streak;
+        _total = records.length;
+        for (var i = 0; i < 7; i++) {
+          _recent7[i] = recent[i];
+        }
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final db = ref.read(dbProvider);
+    final scheme = Theme.of(context).colorScheme;
     final remindText = widget.habit.reminderTime == null
         ? null
         : '每日 ${DateUtilsEx.timeCn(widget.habit.reminderTime!)} 提醒';
     return ListTile(
       tileColor: widget.highlight
-          ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.35)
+          ? scheme.primaryContainer.withValues(alpha: 0.35)
           : null,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: CircleAvatar(
+        radius: 24,
         backgroundColor: _doneToday
-            ? Theme.of(context).colorScheme.primary
-            : null,
-        child: Text(widget.habit.icon),
+            ? scheme.primary
+            : scheme.surfaceContainerHighest,
+        child: Text(widget.habit.icon, style: const TextStyle(fontSize: 22)),
       ),
-      title: Text(widget.habit.name),
-      subtitle: Text(
-        _doneToday
-            ? '今日已打卡${remindText == null ? '' : ' · $remindText'}'
-            : (remindText ?? '今日未打卡'),
+      title: Text(
+        widget.habit.name,
         style: TextStyle(
-          color: _doneToday
-              ? Theme.of(context).colorScheme.primary
-              : Colors.grey,
+          fontWeight: _doneToday ? FontWeight.bold : null,
         ),
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _doneToday ? '今日已打卡' : '今日未打卡',
+            style: TextStyle(
+              fontSize: 12,
+              color: _doneToday ? scheme.primary : Colors.grey,
+            ),
+          ),
+          Text(
+            '连续打卡 $_streak 天 · 共打卡 $_total 天'
+            '${remindText == null ? '' : ' · $remindText'}',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              for (var d = 0; d < 7; d++) ...[
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _recent7[d]
+                        ? scheme.primary
+                        : scheme.surfaceContainerHighest,
+                    shape: BoxShape.circle,
+                    // 最右一格 = 今天，红圈标注
+                    border: d == 6
+                        ? Border.all(color: scheme.error, width: 1)
+                        : null,
+                  ),
+                ),
+                if (d < 6) const SizedBox(width: 4),
+              ],
+              const SizedBox(width: 8),
+              Text(
+                '近7天',
+                style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+              ),
+            ],
+          ),
+        ],
       ),
       trailing: IconButton(
         icon: Icon(
@@ -423,11 +547,11 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.emoji_emotions_outlined),
-              title: const Text('编辑图标'),
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('编辑习惯'),
               onTap: () {
                 Navigator.pop(c);
-                _editIcon();
+                _editHabit();
               },
             ),
             ListTile(
@@ -444,38 +568,65 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
     );
   }
 
-  /// 编辑习惯图标（长按 → 编辑图标，选择后落库）
-  Future<void> _editIcon() async {
+  /// 编辑习惯（长按 → 编辑习惯）：名称 + 图标一个弹窗（仿新建弹窗），
+  /// 有变化的字段才写库
+  Future<void> _editHabit() async {
     final habit = widget.habit;
+    final nameCtrl = TextEditingController(text: habit.name);
     var icon = habit.icon;
-    final picked = await showDialog<String>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (c) => StatefulBuilder(
         builder: (c, setDialogState) => AlertDialog(
-          title: const Text('选择图标'),
+          title: const Text('编辑习惯'),
           content: SingleChildScrollView(
-            child: _HabitIconPicker(
-              selected: icon,
-              onSelected: (v) => setDialogState(() => icon = v),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  autofocus: true,
+                  decoration: const InputDecoration(hintText: '如：阅读、健身、早睡'),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '图标',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 6),
+                _HabitIconPicker(
+                  selected: icon,
+                  onSelected: (v) => setDialogState(() => icon = v),
+                ),
+              ],
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(c),
+              onPressed: () => Navigator.pop(c, false),
               child: const Text('取消'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(c, icon),
+              onPressed: () => Navigator.pop(c, true),
               child: const Text('确定'),
             ),
           ],
         ),
       ),
     );
-    if (picked == null || picked == habit.icon) return;
+    final newName = nameCtrl.text.trim();
+    // 注意：不在 dialog 返回后立即 dispose controller——弹窗退出动画期间
+    // TextField 仍在树中监听，dispose 会触发 "used after being disposed"
+    if (saved != true) return;
     final db = ref.read(dbProvider);
-    await db.updateHabitIcon(habit.id, picked);
-    // 习惯数据变更通知（统计页热力图图标随之刷新）
+    if (newName.isNotEmpty && newName != habit.name) {
+      await db.updateHabitName(habit.id, newName);
+    }
+    if (icon != habit.icon) {
+      await db.updateHabitIcon(habit.id, icon);
+    }
+    // 习惯数据变更通知（统计页热力图随之刷新）
     bumpDataVersion(ref);
     widget.onRefresh();
   }

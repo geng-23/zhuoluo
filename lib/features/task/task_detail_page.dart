@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/theme/task_colors.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
@@ -989,6 +990,8 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         planEnd: Value(planEnd),
       ),
     );
+    // 计划时间修改成功 → 播放移动/落下提示音（与日历拖拽改期同一 drop 音）
+    SoundService.instance.play(SoundKind.drop);
     // 重复任务改计划时间 = 平移系列锚点 → 统一收口清理不再命中
     // 新锚点的旧完成记录/例外（此前平移后旧记录成孤儿参与统计）
     if (t.rrule.isNotEmpty &&
@@ -1672,6 +1675,8 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     final notifier = ref.read(tasksControllerProvider.notifier);
     // 记录例外 ID，撤销时删除该例外（而非新增反向例外）
     final exId = await notifier.editException(t.id, instDay, toDate);
+    // 改期本次成功 → 播放移动/落下提示音（与日历拖拽改期同一 drop 音）
+    SoundService.instance.play(SoundKind.drop);
     _load();
     if (mounted) {
       showAppSnackBar(
@@ -1682,6 +1687,8 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
         actionLabel: '撤销',
         onAction: () async {
           await notifier.undoEditException(t.id, exId);
+          // 撤销改期成功 → 播放恢复音（此前撤销无声）
+          SoundService.instance.play(SoundKind.reopen);
           _load();
         },
         icon: Icons.event_repeat,

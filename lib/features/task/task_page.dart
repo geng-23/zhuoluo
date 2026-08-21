@@ -1,8 +1,9 @@
-﻿import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
+import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
@@ -857,18 +858,28 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     // 重复任务改期（平移系列锚点）统一收口——清理不再匹配新锚点的
     // 旧完成记录/例外（此前直接 updateTaskFields，旧记录成孤儿参与统计）
     var removedCount = 0;
+    RecurringChangeResult? changeResult;
     if (t.rrule.isNotEmpty &&
         !DateUtilsEx.sameDay(t.planStart ?? effectiveStart, effectiveStart)) {
       final db = ref.read(dbProvider);
-      final result = await db.applyRecurringChange(
+      changeResult = await db.applyRecurringChange(
         t.id,
         oldRrule: t.rrule,
         newRrule: t.rrule,
         newStart: effectiveStart,
       );
-      removedCount = result.removedCompletions.length;
-      _lastRescheduleUndo = _RescheduleUndo(t, ps, pe, result);
+      removedCount = changeResult.removedCompletions.length;
     }
+    // 所有改期路径都存撤销快照（此前仅在重复任务锚点吸附时存，
+    // 非重复任务改期后撤销条点击无任何效果）：
+    // - 非重复任务：恢复原 planStart/planEnd
+    // - 重复任务：恢复原锚点 + 被清理的完成记录/例外
+    _lastRescheduleUndo = _RescheduleUndo(
+      t,
+      ps,
+      pe,
+      changeResult ?? const RecurringChangeResult(),
+    );
     await notifier.updateTaskFields(
       t.id,
       TasksCompanion(
@@ -876,6 +887,8 @@ class _TaskPageState extends ConsumerState<TaskPage> {
         planEnd: Value<DateTime?>(newEnd),
       ),
     );
+    // 改期成功 → 播放移动/落下提示音（与日历拖拽/详情页改期同一 drop 音）
+    SoundService.instance.play(SoundKind.drop);
     if (mounted) {
       // 吸附发生且有清理时合并提示（避免两条 Snackbar 互相覆盖）
       final adjusted = !DateUtilsEx.sameDay(newStart, effectiveStart);
@@ -908,6 +921,8 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     if (u == null) return;
     final db = ref.read(dbProvider);
     final notifier = ref.read(tasksControllerProvider.notifier);
+    // 撤销改期成功 → 播放恢复音（此前撤销无声）
+    SoundService.instance.play(SoundKind.reopen);
     await notifier.updateTaskFields(
       u.task.id,
       TasksCompanion(
@@ -976,11 +991,16 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     final notifier = ref.read(tasksControllerProvider.notifier);
     // 记录例外 ID，撤销时删除该例外（而非新增反向例外）
     final exId = await notifier.editException(t.id, instDay, toDate);
+    // 改期本次成功 → 播放移动/落下提示音（与日历拖拽改期同一 drop 音）
+    SoundService.instance.play(SoundKind.drop);
     if (mounted) {
       _showUndo(
         '已改期到 ${DateUtilsEx.dateCn(toDate)} ${DateUtilsEx.timeCn(toDate)}',
-        // 撤销：删除改期例外，恢复到原日期
-        () => notifier.undoEditException(t.id, exId),
+        // 撤销：删除改期例外，恢复到原日期（成功后播恢复音）
+        () async {
+          await notifier.undoEditException(t.id, exId);
+          SoundService.instance.play(SoundKind.reopen);
+        },
         icon: Icons.event_repeat,
       );
     }

@@ -56,3 +56,11 @@ devtools_options.yaml
 # 隐私文件
 AGENTS.md
 
+# dsh 会话缓存与工具产物（不入库）
+# .dsh_cache  可复用缓存（Flutter SDK 副本 / Gradle 缓存 / pub-cache），保留不删
+# .dsh_tmp    一次性产物（截图、UI dump、临时 sqlite），运行完成后清理
+# .dsh-vision-router  视觉工具产物（自动重建）
+.dsh_cache/
+.dsh_tmp/
+.dsh-vision-router/
+

@@ -23,9 +23,15 @@ void main() {
 
   setUp(() {
     db = AppDatabase.forTesting(NativeDatabase.memory());
+    // 冻结"今天"到 2026-08-18（夹具周的周二）：
+    // 第三用例夹具为"本周一 8-17 改期到本周三 8-19"，nextInstanceFor 只返回
+    // ≥ 今天的实例——真实时钟越过 8-19 后该用例必失败（此前随系统时钟前进
+    // 8-20+ 后持续红）；冻结后与真实日期解耦，永久稳定。
+    AppClock.setNow(DateTime(2026, 8, 18, 10, 0));
   });
 
   tearDown(() async {
+    AppClock.setNow(null);
     await db.close();
   });
 

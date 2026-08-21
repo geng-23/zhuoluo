@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.MediaStore
 import android.provider.Settings
+import android.view.inputmethod.InputMethodManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
@@ -237,6 +238,41 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+        // 键盘避让桥：Dart→原生查询当前软键盘可见高度（物理像素）。
+        // 小米/HyperOS 等 ROM 不把 IME insets 派发给应用窗口（Flutter 侧
+        // MediaQuery.viewInsets 恒为 0），弹层无法据此抬升内容；这里在
+        // 原生侧直接取键盘高度，不依赖窗口是否 resize。
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "zhuoluo/ime",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "imeHeight" -> {
+                    result.success(queryImeHeight())
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /** 当前软键盘可见高度（物理像素）；无键盘返回 0。 */
+    private fun queryImeHeight(): Int {
+        // API 30+：标准窗口 insets 的 IME 高度（多数 ROM 派发；此 ROM 不派发则为 0）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val ime = window.decorView.rootWindowInsets
+                ?.getInsets(android.view.WindowInsets.Type.ime())
+                ?.bottom
+            if (ime != null && ime > 0) return ime
+        }
+        // 兜底：getInputMethodWindowVisibleHeight（公开 API，较新 SDK stub 已移除，
+        // 用反射调用——返回输入法窗口真实可见高度，不依赖 insets 派发）
+        return try {
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            val m = InputMethodManager::class.java.getMethod("getInputMethodWindowVisibleHeight")
+            m.invoke(imm) as Int
+        } catch (_: Exception) {
+            0
         }
     }
 

@@ -81,7 +81,7 @@ class _RepeatRuleSheetState extends State<RepeatRuleSheet> {
 
   @override
   Widget build(BuildContext context) {
-    // HCI-7：键盘避让（viewInsets 动画内边距）+ 可滚动 + 最大高度限制，
+    // 键盘避让（viewInsets 动画内边距）+ 可滚动 + 最大高度限制，
     // 聚焦"每 N 天/月"或"共 N 次"输入框时确认按钮不被键盘遮挡
     return AnimatedPadding(
       duration: const Duration(milliseconds: 150),

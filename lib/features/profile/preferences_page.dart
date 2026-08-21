@@ -1,4 +1,9 @@
+import 'dart:async';
+import 'dart:io' show Platform;
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
@@ -299,10 +304,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
       ),
     );
     if (choice == null) return; // 取消
-    await settings.set(
-      SettingsController.keyTrashRetentionDays,
-      '$choice',
-    );
+    await settings.set(SettingsController.keyTrashRetentionDays, '$choice');
     if (mounted) await _load();
   }
 }
@@ -360,14 +362,67 @@ class _TimezonePickerSheetState extends State<_TimezonePickerSheet> {
   String _query = '';
   List<String> _all = const [];
 
+  /// 键盘避让（原生桥）：部分 ROM（小米/HyperOS 等）不把 IME insets 派发给
+  /// 应用窗口，Flutter 的 MediaQuery.viewInsets 恒为 0，弹层无法据此抬升。
+  /// 聚焦搜索框期间轮询 MainActivity 的 zhuoluo/ime 通道取真实键盘高度
+  /// （物理像素），与 viewInsets 取大作为弹层底部内边距。
+  static const _imeChannel = MethodChannel('zhuoluo/ime');
+  final _searchFocus = FocusNode();
+  Timer? _imePoll;
+  double _imeHeight = 0; // 逻辑像素
+
   @override
   void initState() {
     super.initState();
+    _searchFocus.addListener(_onSearchFocusChanged);
     // main 启动链已初始化；此处兜底（独立运行/测试环境）
     try {
       tzdata.initializeTimeZones();
     } catch (_) {}
     _all = tz.timeZoneDatabase.locations.keys.toList()..sort();
+  }
+
+  void _onSearchFocusChanged() {
+    if (_searchFocus.hasFocus) {
+      _startImePoll();
+    } else {
+      _stopImePoll();
+      if (_imeHeight != 0) setState(() => _imeHeight = 0);
+    }
+  }
+
+  void _startImePoll() {
+    _imePoll?.cancel();
+    _imeHeight = 0;
+    // 仅 Android 需要原生桥；其余平台（含测试宿主）viewInsets 即真实值
+    if (!Platform.isAndroid) return;
+    _imePoll = Timer.periodic(const Duration(milliseconds: 200), (_) async {
+      final h = await _queryImeHeight();
+      if (!mounted || !_searchFocus.hasFocus) return;
+      if (h != _imeHeight) setState(() => _imeHeight = h);
+    });
+  }
+
+  void _stopImePoll() {
+    _imePoll?.cancel();
+    _imePoll = null;
+  }
+
+  Future<double> _queryImeHeight() async {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    try {
+      final px = await _imeChannel.invokeMethod<int>('imeHeight') ?? 0;
+      return px / dpr;
+    } catch (_) {
+      return 0; // 通道不可用（如测试环境）时回落 viewInsets 路径
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopImePoll();
+    _searchFocus.dispose();
+    super.dispose();
   }
 
   @override
@@ -381,59 +436,68 @@ class _TimezonePickerSheetState extends State<_TimezonePickerSheet> {
     // 无 Flexible）——内容多时在弹层 maxHeight（85% 屏高）内滚动，
     // 内容少时弹层收缩到内容高度；SafeArea 保留顶部安全区，搜索框不再
     // 被状态栏遮挡；分组标题标明"常用时区"，避免用户误以为时区只有这些。
-    return SafeArea(
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: TextField(
-                autofocus: false,
-                decoration: InputDecoration(
-                  hintText: '搜索时区（如 Asia/Shanghai、Beijing）',
-                  prefixIcon: const Icon(Icons.search),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+      // 键盘避让——搜索时软键盘弹起，弹层随键盘高度抬升，结果列表不被
+      // 键盘遮挡、最后一项可滚入可视区（与 repeat_rule_sheet 同模式）。
+      // viewInsets 与原生桥实测键盘高度取大：viewInsets 为准的设备用它；
+      // 不派发 insets 的 ROM（小米/HyperOS 等）用 [_imeHeight]。
+      padding: EdgeInsets.only(
+        bottom: math.max(MediaQuery.viewInsetsOf(context).bottom, _imeHeight),
+      ),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: TextField(
+                  autofocus: false,
+                  focusNode: _searchFocus,
+                  decoration: InputDecoration(
+                    hintText: '搜索时区（如 Asia/Shanghai、Beijing）',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    isDense: true,
                   ),
-                  isDense: true,
+                  onChanged: (v) => setState(() => _query = v),
                 ),
-                onChanged: (v) => setState(() => _query = v),
               ),
-            ),
-            ListView(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                if (!searching)
-                  ListTile(
-                    title: const Text('跟随系统时区'),
-                    subtitle: const Text('与手机系统时区一致（默认）'),
-                    trailing: widget.current == null
-                        ? const Icon(Icons.check)
-                        : null,
-                    onTap: () => Navigator.pop(context, ''),
-                  ),
-                if (!searching)
-                  _GroupLabel(
-                    '常用时区（共 ${_commonZones.length} 个，支持搜索全部）',
-                  ),
-                if (searching) const _GroupLabel('搜索结果'),
-                for (final z in filtered)
-                  ListTile(
-                    title: Text(z),
-                    trailing: widget.current == z ? const Icon(Icons.check) : null,
-                    onTap: () => Navigator.pop(context, z),
-                  ),
-                if (filtered.isEmpty)
-                  const ListTile(
-                    title: Text('未找到匹配的时区'),
-                    enabled: false,
-                  ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ],
+              ListView(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  if (!searching)
+                    ListTile(
+                      title: const Text('跟随系统时区'),
+                      subtitle: const Text('与手机系统时区一致（默认）'),
+                      trailing: widget.current == null
+                          ? const Icon(Icons.check)
+                          : null,
+                      onTap: () => Navigator.pop(context, ''),
+                    ),
+                  if (!searching)
+                    _GroupLabel('常用时区（共 ${_commonZones.length} 个，支持搜索全部）'),
+                  if (searching) const _GroupLabel('搜索结果'),
+                  for (final z in filtered)
+                    ListTile(
+                      title: Text(z),
+                      trailing: widget.current == z
+                          ? const Icon(Icons.check)
+                          : null,
+                      onTap: () => Navigator.pop(context, z),
+                    ),
+                  if (filtered.isEmpty)
+                    const ListTile(title: Text('未找到匹配的时区'), enabled: false),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

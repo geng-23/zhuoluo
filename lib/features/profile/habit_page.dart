@@ -200,7 +200,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                _HabitIconPicker(
+                _HabitIconField(
                   selected: icon,
                   onSelected: (v) => setDialogState(() => icon = v),
                 ),
@@ -303,10 +303,65 @@ class _HabitDraft {
   _HabitDraft(this.name, this.icon, this.reminderTime);
 }
 
-/// 习惯图标选择网格（新建/编辑共用）：点选高亮（primary 边框 + 底色）；
-/// [selected] 为 null 表示未选择（无高亮，用于新建必选场景）
-class _HabitIconPicker extends StatelessWidget {
-  const _HabitIconPicker({required this.selected, required this.onSelected});
+/// 图标选择弹窗（从表单点击进入）：网格点选即返回所选，取消/点外部关闭
+Future<String?> showHabitIconPicker(
+  BuildContext context, {
+  String? selected,
+}) {
+  return showDialog<String>(
+    context: context,
+    builder: (c) {
+      final scheme = Theme.of(c).colorScheme;
+      return AlertDialog(
+        title: const Text('选择图标'),
+        content: SizedBox(
+          width: 320,
+          height: 330,
+          child: GridView.builder(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 6,
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 10,
+            ),
+            itemCount: _habitIcons.length,
+            itemBuilder: (context, i) {
+              final ic = _habitIcons[i];
+              final isSel = ic == selected;
+              return InkWell(
+                borderRadius: BorderRadius.circular(28),
+                onTap: () => Navigator.pop(c, ic),
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isSel
+                        ? scheme.primaryContainer
+                        : scheme.surfaceContainerHighest,
+                    shape: BoxShape.circle,
+                    border: isSel
+                        ? Border.all(color: scheme.primary, width: 2)
+                        : null,
+                  ),
+                  child: Text(ic, style: const TextStyle(fontSize: 26)),
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('取消'),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+/// 表单内的紧凑图标选择入口：点击弹出独立选择弹窗，
+/// 避免把整个图标网格挤在新建/编辑表单里
+class _HabitIconField extends StatelessWidget {
+  const _HabitIconField({required this.selected, required this.onSelected});
 
   final String? selected;
   final ValueChanged<String> onSelected;
@@ -314,30 +369,41 @@ class _HabitIconPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final ic in _habitIcons)
-          GestureDetector(
-            onTap: () => onSelected(ic),
-            child: Container(
-              width: 40,
-              height: 40,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: selected == ic
-                    ? scheme.primaryContainer
-                    : scheme.surfaceContainerHighest,
-                shape: BoxShape.circle,
-                border: selected == ic
-                    ? Border.all(color: scheme.primary, width: 1.5)
-                    : null,
-              ),
-              child: Text(ic, style: const TextStyle(fontSize: 20)),
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () async {
+        final picked = await showHabitIconPicker(context, selected: selected);
+        if (picked != null) onSelected(picked);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: scheme.surface,
+              child: selected == null
+                  ? Icon(
+                      Icons.emoji_emotions_outlined,
+                      size: 18,
+                      color: Colors.grey.shade500,
+                    )
+                  : Text(selected!, style: const TextStyle(fontSize: 18)),
             ),
-          ),
-      ],
+            const SizedBox(width: 10),
+            Text(
+              selected == null ? '选择图标' : '更换图标',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            ),
+            const Spacer(),
+            Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade500),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -595,7 +661,7 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 6),
-                _HabitIconPicker(
+                _HabitIconField(
                   selected: icon,
                   onSelected: (v) => setDialogState(() => icon = v),
                 ),

@@ -143,7 +143,11 @@ void main() {
     );
     expect(createBtn.onPressed, isNull, reason: '未选图标时创建按钮禁用');
 
-    // 点选图标 📚 后创建可用
+    // 点开独立图标选择弹窗（入口「选择图标」），点选 📚 后返回
+    await tester.tap(find.text('选择图标'));
+    await tester.pumpAndSettle();
+    expect(find.text('选择图标'), findsNWidgets(2),
+        reason: '弹窗标题 + 表单入口同时存在');
     await tester.tap(find.text('📚'));
     await tester.pumpAndSettle();
     expect(find.text('请点选一个图标'), findsNothing, reason: '选图标后提示消失');
@@ -191,8 +195,10 @@ void main() {
     await tester.tap(find.text('编辑习惯'));
     await tester.pumpAndSettle();
 
-    // 修改名称并换图标
+    // 修改名称，并通过「更换图标」入口在独立弹窗里换图标
     await tester.enterText(find.byType(TextField), '晨读');
+    await tester.tap(find.text('更换图标'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('🏊'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('确定'));

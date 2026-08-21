@@ -343,7 +343,7 @@ class _CompletionCard extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              '说明：完成数与计划数均按任务所属日统计（计划开始日、截止日或重复实例日，跨天只计开始日）；无计划时间的任务与子任务不计入',
+              '说明：完成数与计划数均按任务所属日统计，无计划时间的任务与子任务不计入',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 11,
@@ -766,7 +766,7 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '${now.year} 年完成热力图（GitHub 风格）',
+              '${now.year} 年完成热力图',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: Colors.grey.shade700,

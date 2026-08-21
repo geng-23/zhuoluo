@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
+import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 
@@ -47,6 +48,27 @@ class _TaskSlice {
   final Color color;
 }
 
+/// 明细聚合组：同日 × 同任务 的记录合并（不再逐条罗列每次会话）。
+/// 多选删除的最小粒度 = 一个聚合组（删除其覆盖的全部记录）。
+class _RecordGroup {
+  _RecordGroup({
+    required this.day,
+    required this.taskId,
+    required this.records,
+    required this.title,
+  });
+
+  final DateTime day;
+  final int? taskId;
+  final List<PomodoroRecord> records;
+  final String title;
+
+  int get totalMinutes => records.fold(0, (a, r) => a + r.durationMinutes);
+
+  /// 选中键：日 + 任务 唯一
+  String get key => '${day.millisecondsSinceEpoch}|$taskId';
+}
+
 /// 环形图固定配色（明暗主题均可区分，前 6 + 「其他」循环取用）
 const _slicePalette = <Color>[
   Color(0xFFE57373),
@@ -61,8 +83,9 @@ const _slicePalette = <Color>[
 /// 番茄专注详情页。
 ///
 /// 从统计页「专注时长」卡片进入：展示选中区间（周/月/年/全部）的
-/// 总时长/次数/平均每日汇总、每日或每月专注时长柱状图、按任务占比的
-/// 环形图与排行，以及「几月几号在什么任务上专注了几时几分」的明细列表。
+/// 总时长/次数/平均每日汇总、每日/每周/每月专注时长柱状图（全部档不显示）、
+/// 按任务占比的环形图与排行，以及按「日 × 任务」聚合的明细列表
+/// （长按进入多选可批量删除，带撤销）。
 ///
 /// 数据口径与统计页一致：completedAt 按应用时区归日/归月（[AppClock.asApp]）；
 /// `durationMinutes == 0` 的立即结束记录不计次数、不进明细（对求和天然无影响）。
@@ -76,9 +99,14 @@ class PomodoroStatsPage extends ConsumerStatefulWidget {
 class _PomodoroStatsPageState extends ConsumerState<PomodoroStatsPage> {
   String _range = 'month'; // week / month / year / all
   List<PomodoroRecord> _records = [];
+  List<_RecordGroup> _groups = [];
   Map<int, String> _taskTitles = {};
   int _dayCount = 1; // 平均每日的分母（区间日历天数）
   bool _loading = true;
+
+  /// 多选删除选中态：_RecordGroup.key 集合；非空即进入选中模式
+  /// （AppBar 切换为全选/删除/关闭）
+  final Set<String> _selected = {};
 
   /// _load 请求序号——丢弃过期结果（快速切换周/月/年/全部时
   /// 旧请求不得覆盖新选择）
@@ -144,11 +172,15 @@ class _PomodoroStatsPageState extends ConsumerState<PomodoroStatsPage> {
       // from 非空时 to 必非空（_bounds 成对返回）
       dayCount = AppClock.daysBetween(from, to!) + 1;
     }
+    final titles = {for (final t in tasks) t.id: t.title};
     if (mounted && seq == _loadSeq) {
       setState(() {
         _records = visible;
-        _taskTitles = {for (final t in tasks) t.id: t.title};
+        _taskTitles = titles;
+        _groups = _buildGroups(visible, titles);
         _dayCount = dayCount;
+        // 数据变化（删除/撤销等）后重载：清空选中，避免引用过期组
+        _selected.clear();
         _loading = false;
       });
     }
@@ -160,7 +192,7 @@ class _PomodoroStatsPageState extends ConsumerState<PomodoroStatsPage> {
     return _taskTitles[taskId] ?? '已删除任务';
   }
 
-  /// 按任务聚合分钟数（降序；前 6 名 + 「其他」）
+  /// 按任务聚合分钟数（降序；前 4 名 + 「其他」，共 5 行）
   List<_TaskSlice> _buildTaskSlices() {
     final byLabel = <String, int>{};
     for (final r in _records) {
@@ -171,7 +203,7 @@ class _PomodoroStatsPageState extends ConsumerState<PomodoroStatsPage> {
     final sorted = byLabel.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
     final slices = <_TaskSlice>[];
-    const top = 6;
+    const top = 4;
     for (var i = 0; i < sorted.length && i < top; i++) {
       slices.add(
         _TaskSlice(
@@ -230,17 +262,35 @@ class _PomodoroStatsPageState extends ConsumerState<PomodoroStatsPage> {
             ),
         ];
       case 'month':
-        final days = DateUtilsEx.daysInMonth(now);
+        // 周一起始的自然周（与统计页完成率月视图同口径：月初/月末
+        // 不足 7 天的小周独立成桶，标签如 "8/17-8/23"；跨月周求和只含
+        // 窗口内日期——记录已按当月过滤，逐日 map 无窗口外键）
         final byDay = _sumByDay(_records);
-        return [
-          for (var d = 1; d <= days; d++)
+        final monthStart = AppClock.at(now.year, now.month, 1);
+        final lastOfMonth = AppClock.at(
+          now.year,
+          now.month,
+          DateUtilsEx.daysInMonth(monthStart),
+        );
+        var weekStart = DateUtilsEx.mondayOf(monthStart);
+        final buckets = <_BarBucket>[];
+        while (AppClock.daysBetween(weekStart, lastOfMonth) >= 0) {
+          final weekEnd = AppClock.addCalendarDays(weekStart, 6);
+          var sum = 0;
+          for (var i = 0; i < 7; i++) {
+            sum += byDay[AppClock.addCalendarDays(weekStart, i)] ?? 0;
+          }
+          buckets.add(
             _BarBucket(
-              label: '$d',
-              minutes: byDay[AppClock.at(now.year, now.month, d)] ?? 0,
-              // 稀疏标注避免 31 根柱标签拥挤
-              showLabel: d == 1 || d % 5 == 0 || d == days,
+              label:
+                  '${weekStart.month}/${weekStart.day}-${weekEnd.month}/${weekEnd.day}',
+              minutes: sum,
+              showLabel: true,
             ),
-        ];
+          );
+          weekStart = AppClock.addCalendarDays(weekStart, 7);
+        }
+        return buckets;
       case 'year':
         final byMonth = _sumByMonth(_records);
         return [
@@ -289,42 +339,163 @@ class _PomodoroStatsPageState extends ConsumerState<PomodoroStatsPage> {
     }
   }
 
-  /// 明细按日分组（记录已按 completedAt 倒序，组内同样倒序）
-  Map<DateTime, List<PomodoroRecord>> _groupByDay() {
-    final groups = <DateTime, List<PomodoroRecord>>{};
-    for (final r in _records) {
+  /// 明细聚合：按「日 × 任务」分组（记录已按 completedAt 倒序）。
+  /// 同一天同一任务的多次会话合并为一组（次数 + 合计时长），
+  /// 不再逐条罗列每次会话。
+  List<_RecordGroup> _buildGroups(
+    List<PomodoroRecord> records,
+    Map<int, String> titles,
+  ) {
+    String titleOf(int? taskId) {
+      if (taskId == null) return '自由专注';
+      return titles[taskId] ?? '已删除任务';
+    }
+
+    final groups = <String, _RecordGroup>{};
+    for (final r in records) {
       final a = AppClock.asApp(r.completedAt);
       final d = AppClock.at(a.year, a.month, a.day);
-      groups.putIfAbsent(d, () => []).add(r);
+      final key = '${d.millisecondsSinceEpoch}|${r.taskId}';
+      final g = groups[key] ??
+          _RecordGroup(day: d, taskId: r.taskId, records: [], title: titleOf(r.taskId));
+      g.records.add(r);
+      groups[key] = g;
     }
-    return groups;
+    final list = groups.values.toList()
+      // 日降序（同日记录已倒序），组内再按时长降序
+      ..sort((a, b) {
+        final byDay = b.day.compareTo(a.day);
+        return byDay != 0 ? byDay : b.totalMinutes.compareTo(a.totalMinutes);
+      });
+    return list;
+  }
+
+  // ---------- 多选删除 ----------
+
+  bool get _selecting => _selected.isNotEmpty;
+
+  /// 长按/点选：切换某聚合组选中态（进入选中模式）
+  void _toggleGroup(_RecordGroup g) {
+    setState(() {
+      if (!_selected.remove(g.key)) _selected.add(g.key);
+    });
+  }
+
+  /// 全选 / 取消全选（以当前区间全部聚合组为全集）
+  void _toggleSelectAll() {
+    setState(() {
+      if (_selected.length == _groups.length) {
+        _selected.clear();
+      } else {
+        _selected
+          ..clear()
+          ..addAll(_groups.map((g) => g.key));
+      }
+    });
+  }
+
+  void _exitSelection() => setState(_selected.clear);
+
+  /// 选中组覆盖的全部记录
+  List<PomodoroRecord> _selectedRecords() => [
+    for (final g in _groups)
+      if (_selected.contains(g.key)) ...g.records,
+  ];
+
+  Future<void> _confirmDeleteSelected() async {
+    final records = _selectedRecords();
+    final count = records.length;
+    if (count == 0) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('删除所选专注记录？'),
+        content: Text('将删除 $count 条专注记录，删除后可撤销'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: Text(
+              '删除',
+              style: TextStyle(color: Theme.of(c).colorScheme.error),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    _exitSelection();
+    final db = ref.read(dbProvider);
+    await db.deletePomodoroByIds(records.map((r) => r.id).toList());
+    // 删除后刷新本页与统计页
+    ref.read(dataVersionProvider.notifier).state++;
+    if (!mounted) return;
+    showAppSnackBar(
+      context,
+      '已删除 $count 条专注记录',
+      actionLabel: '撤销',
+      onAction: () async {
+        // 按原 id 恢复（insertOrReplace）；再次 bump 触发刷新
+        for (final r in records) {
+          await db.insertPomodoroRaw(r.toCompanion(false));
+        }
+        ref.read(dataVersionProvider.notifier).state++;
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    // 选中模式：AppBar 切换为 已选 N 项 + 全选/删除/关闭
+    final selecting = _selecting;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('专注详情'),
+        title: Text(selecting ? '已选 ${_selected.length} 项' : '专注详情'),
         actions: [
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'week', label: Text('周')),
-              ButtonSegment(value: 'month', label: Text('月')),
-              ButtonSegment(value: 'year', label: Text('年')),
-              ButtonSegment(value: 'all', label: Text('全部')),
-            ],
-            selected: {_range},
-            onSelectionChanged: (s) {
-              setState(() {
-                _range = s.first;
-                _loading = true;
-              });
-              _load();
-            },
-            showSelectedIcon: false,
-            style: const ButtonStyle(visualDensity: VisualDensity.compact),
-          ),
-          const SizedBox(width: 8),
+          if (selecting) ...[
+            IconButton(
+              icon: Icon(
+                _selected.length == _groups.length
+                    ? Icons.deselect
+                    : Icons.select_all,
+              ),
+              tooltip: '全选',
+              onPressed: _toggleSelectAll,
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: '删除所选',
+              onPressed: _confirmDeleteSelected,
+            ),
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: '取消',
+              onPressed: _exitSelection,
+            ),
+          ] else ...[
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'week', label: Text('周')),
+                ButtonSegment(value: 'month', label: Text('月')),
+                ButtonSegment(value: 'year', label: Text('年')),
+                ButtonSegment(value: 'all', label: Text('全部')),
+              ],
+              selected: {_range},
+              onSelectionChanged: (s) {
+                setState(() {
+                  _range = s.first;
+                  _loading = true;
+                });
+                _load();
+              },
+              showSelectedIcon: false,
+              style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            ),
+            const SizedBox(width: 8),
+          ],
         ],
       ),
       body: _loading
@@ -345,15 +516,34 @@ class _PomodoroStatsPageState extends ConsumerState<PomodoroStatsPage> {
                   count: _records.length,
                   dayCount: _dayCount,
                 ),
-                const SizedBox(height: 16),
-                _BarChartCard(
-                  title: _range == 'year' || _range == 'all' ? '每月专注时长' : '每日专注时长',
-                  buckets: _buildBuckets(AppClock.now()),
-                ),
+                // 全部档不显示柱状图（历史跨度大，月柱信息价值低）
+                if (_range != 'all') ...[
+                  const SizedBox(height: 16),
+                  _BarChartCard(
+                    title: switch (_range) {
+                      'week' => '每日专注时长',
+                      'month' => '每周专注时长',
+                      _ => '每月专注时长',
+                    },
+                    // 各档固定柱宽：周 7 根、月 ≤6 周桶、年 12 根
+                    barWidth: switch (_range) {
+                      'week' => 20,
+                      'month' => 26,
+                      _ => 16,
+                    },
+                    buckets: _buildBuckets(AppClock.now()),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 _TaskDistributionCard(slices: _buildTaskSlices()),
                 const SizedBox(height: 16),
-                _RecordListCard(groups: _groupByDay(), titles: _titleOf),
+                _RecordListCard(
+                  groups: _groups,
+                  selected: _selected,
+                  selecting: selecting,
+                  onToggle: _toggleGroup,
+                  onLongPress: _toggleGroup,
+                ),
               ],
             ),
     );
@@ -464,12 +654,17 @@ class _SummaryTile extends StatelessWidget {
   }
 }
 
-/// 专注时长柱状图卡片（每日/每月随档位变化）
+/// 专注时长柱状图卡片（每日/每周/每月随档位变化，柱宽按档位固定）
 class _BarChartCard extends StatelessWidget {
-  const _BarChartCard({required this.title, required this.buckets});
+  const _BarChartCard({
+    required this.title,
+    required this.buckets,
+    required this.barWidth,
+  });
 
   final String title;
   final List<_BarBucket> buckets;
+  final double barWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -487,7 +682,7 @@ class _BarChartCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            _FocusBarChart(buckets: buckets),
+            _FocusBarChart(buckets: buckets, barWidth: barWidth),
           ],
         ),
       ),
@@ -495,11 +690,20 @@ class _BarChartCard extends StatelessWidget {
   }
 }
 
-/// 纯 Container 柱状图（延续统计页无图表库的手绘风格）
+/// 纯 Container 柱状图（延续统计页无图表库的手绘风格）。
+///
+/// - 柱宽按档位固定（[barWidth]），单元格由 Expanded 均分整行宽度，
+///   柱在单元格内水平居中——行宽恒定、任何屏宽/字号都不会横向溢出，
+///   相邻柱间距随屏宽自适应。
+/// - 柱高按相对值：区间最大值满高，其余按 minutes/maxV 等比缩放。
+/// - 柱顶数值固定在 16px 槽内（FittedBox 缩放 + maxLines:1）：窄柱
+///   （如年档 12 根）下文本不换行、不撑高溢出。
+/// - 标签行与柱区同为等宽 Expanded 单元格，柱与标签严格对齐。
 class _FocusBarChart extends StatelessWidget {
-  const _FocusBarChart({required this.buckets});
+  const _FocusBarChart({required this.buckets, required this.barWidth});
 
   final List<_BarBucket> buckets;
+  final double barWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -509,33 +713,40 @@ class _FocusBarChart extends StatelessWidget {
         .clamp(1, 0x7fffffff)
         .toInt();
     const chartHeight = 110.0;
-    // 桶少（周/年/全部月柱）时柱顶显示时长；桶多（月档每日柱）时不显示
-    // 避免 31 根柱的数值文字互相重叠
+    // 柱顶数值固定 16px 槽（FittedBox 缩放）：窄柱下文本不换行
+    const valueSlot = 16.0;
     final showValues = buckets.length <= 12;
+    final labelStyle = TextStyle(fontSize: 9, color: Colors.grey.shade600);
     return Column(
       children: [
         SizedBox(
-          height: chartHeight + (showValues ? 18 : 4),
+          height: chartHeight + valueSlot + 2,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               for (final b in buckets)
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 1.5),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        if (showValues && b.minutes > 0)
-                          Text(
-                            _shortFocusMinutes(b.minutes),
-                            style: TextStyle(
-                              fontSize: 9,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                        const SizedBox(height: 2),
-                        Container(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      SizedBox(
+                        height: valueSlot,
+                        child: showValues && b.minutes > 0
+                            ? FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  _shortFocusMinutes(b.minutes),
+                                  maxLines: 1,
+                                  style: labelStyle,
+                                ),
+                              )
+                            : null,
+                      ),
+                      const SizedBox(height: 2),
+                      // 固定柱宽、单元格内居中；高度按相对值（最大值满高）
+                      Center(
+                        child: Container(
+                          width: barWidth,
                           height: (b.minutes / maxV * chartHeight)
                               .clamp(0.0, chartHeight)
                               .toDouble(),
@@ -548,8 +759,8 @@ class _FocusBarChart extends StatelessWidget {
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
             ],
@@ -563,10 +774,9 @@ class _FocusBarChart extends StatelessWidget {
                 child: Text(
                   b.showLabel ? b.label : '',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 9,
-                    color: Colors.grey.shade600,
-                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: labelStyle,
                 ),
               ),
           ],
@@ -761,12 +971,22 @@ class _SliceLegendRow extends StatelessWidget {
   }
 }
 
-/// 记录明细卡：按日分组（日期 + 当日合计 + 每条任务/时段/时长）
+/// 记录明细卡：按「日 × 任务」聚合分组（日期头 + 当日合计 + 每任务
+/// 一行：N 次 / 合计时长）。长按或选中态点击进入多选删除。
 class _RecordListCard extends StatelessWidget {
-  const _RecordListCard({required this.groups, required this.titles});
+  const _RecordListCard({
+    required this.groups,
+    required this.selected,
+    required this.selecting,
+    required this.onToggle,
+    required this.onLongPress,
+  });
 
-  final Map<DateTime, List<PomodoroRecord>> groups;
-  final String Function(int?) titles;
+  final List<_RecordGroup> groups;
+  final Set<String> selected;
+  final bool selecting;
+  final void Function(_RecordGroup) onToggle;
+  final void Function(_RecordGroup) onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -790,17 +1010,34 @@ class _RecordListCard extends StatelessWidget {
                 child: Text('该时段无专注记录', style: TextStyle(color: Colors.grey)),
               )
             else
-              for (final g in groups.entries) ...[
-                _DayHeader(
-                  day: g.key,
-                  total: g.value.fold<int>(0, (a, r) => a + r.durationMinutes),
+              for (var i = 0; i < groups.length; i++) ...[
+                if (i == 0 || !DateUtilsEx.sameDay(groups[i - 1].day, groups[i].day))
+                  // 日分组头（同日仅一个，跨日才渲染）
+                  _DayHeader(
+                    day: groups[i].day,
+                    total: _dayTotal(groups, groups[i].day),
+                  ),
+                _RecordGroupTile(
+                  group: groups[i],
+                  selected: selected.contains(groups[i].key),
+                  selecting: selecting,
+                  onTap: selecting ? () => onToggle(groups[i]) : null,
+                  onLongPress: () => onLongPress(groups[i]),
                 ),
-                for (final r in g.value) _RecordTile(record: r, title: titles(r.taskId)),
               ],
           ],
         ),
       ),
     );
+  }
+
+  int _dayTotal(List<_RecordGroup> groups, DateTime day) {
+    var sum = 0;
+    for (final g in groups) {
+      if (!DateUtilsEx.sameDay(g.day, day)) continue;
+      sum += g.totalMinutes;
+    }
+    return sum;
   }
 }
 
@@ -832,36 +1069,57 @@ class _DayHeader extends StatelessWidget {
   }
 }
 
-/// 单条记录：任务名 + 起止时间段 + 时长
-class _RecordTile extends StatelessWidget {
-  const _RecordTile({required this.record, required this.title});
+/// 聚合组行：任务名 + N 次 + 合计时长；长按进入多选、选中态点击切换勾选
+class _RecordGroupTile extends StatelessWidget {
+  const _RecordGroupTile({
+    required this.group,
+    required this.selected,
+    required this.selecting,
+    required this.onTap,
+    required this.onLongPress,
+  });
 
-  final PomodoroRecord record;
-  final String title;
+  final _RecordGroup group;
+  final bool selected;
+  final bool selecting;
+  final VoidCallback? onTap;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
-    final linked = record.taskId != null;
+    final linked = group.taskId != null;
     return ListTile(
       dense: true,
       contentPadding: EdgeInsets.zero,
-      leading: Icon(
-        linked ? Icons.check_circle_outline : Icons.timer_outlined,
-        size: 20,
-        color: Colors.grey.shade500,
-      ),
+      onTap: onTap,
+      onLongPress: onLongPress,
+      selected: selected,
+      // 选中态显示勾选框（与任务页多选一致）；非选中态显示任务/自由图标
+      leading: selecting
+          ? Icon(
+              selected ? Icons.check_box : Icons.check_box_outline_blank,
+              size: 20,
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.grey.shade500,
+            )
+          : Icon(
+              linked ? Icons.check_circle_outline : Icons.timer_outlined,
+              size: 20,
+              color: Colors.grey.shade500,
+            ),
       title: Text(
-        title,
+        group.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 14),
       ),
       subtitle: Text(
-        '${DateUtilsEx.timeCn(record.startedAt)}–${DateUtilsEx.timeCn(record.completedAt)}',
+        '${group.records.length} 次',
         style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
       ),
       trailing: Text(
-        formatFocusMinutes(record.durationMinutes),
+        formatFocusMinutes(group.totalMinutes),
         style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
     );

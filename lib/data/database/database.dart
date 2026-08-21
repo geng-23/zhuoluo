@@ -1451,6 +1451,13 @@ class AppDatabase extends _$AppDatabase {
     return q.get();
   }
 
+  /// 按 id 批量删除专注记录（专注详情页多选删除；撤销由调用方
+  /// 用 insertPomodoroRaw + toCompanion 按原 id 恢复）
+  Future<void> deletePomodoroByIds(List<int> ids) async {
+    if (ids.isEmpty) return;
+    await (delete(pomodoroRecords)..where((p) => p.id.isIn(ids))).go();
+  }
+
   // ---------- 设置 ----------
   Future<String?> getSetting(String key) async {
     final row = await (select(

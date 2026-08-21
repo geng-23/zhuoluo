@@ -4,13 +4,7 @@
 *.pyc
 *.swp
 .DS_Store
-.atom/
-.build/
-.buildlog/
-.history
 .svn/
-.swiftpm/
-migrate_working_dir/
 
 # IntelliJ related
 *.iml
@@ -25,24 +19,15 @@ migrate_working_dir/
 
 # Flutter/Dart/Pub related
 **/doc/api/
-**/ios/Flutter/.last_build_id
 .dart_tool/
 .flutter-plugins-dependencies
-.pub-cache/
-.pub/
 /build/
-/coverage/
 
 # Symbolication related
 app.*.symbols
 
 # Obfuscation related
 app.*.map.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
 
 # 发布签名密钥与凭据（不入库）
 /android/key.properties
@@ -69,9 +54,5 @@ android/.gradle/
 devtools_options.yaml
 
 # 隐私文件
-opencode.jsonc
 AGENTS.md
-
-# dsh 会话与 Flutter 本机缓存（不入库）
-.dsh-home/
 

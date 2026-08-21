@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/features/calendar/calendar_page.dart';
 import 'package:zhuoluo/features/profile/habit_page.dart';
+import 'package:zhuoluo/features/profile/pomodoro_page.dart';
 import 'package:zhuoluo/features/profile/profile_page.dart';
 import 'package:zhuoluo/features/profile/quadrant_page.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
@@ -89,6 +90,11 @@ class _HomeShellState extends ConsumerState<HomeShell>
         MaterialPageRoute(
           builder: (_) => HabitPage(initialHabitId: id),
         ),
+      );
+    } else if (payload == 'pomodoro') {
+      // 番茄钟通知（倒计时/完成提醒）点击 → 回到番茄专注页
+      nav.push(
+        MaterialPageRoute(builder: (_) => const PomodoroPage()),
       );
     }
   }

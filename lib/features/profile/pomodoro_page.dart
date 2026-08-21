@@ -3,15 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
-import 'package:zhuoluo/core/services/haptics_service.dart';
-import 'package:zhuoluo/core/services/sound_service.dart';
-import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
+import 'package:zhuoluo/features/profile/pomodoro_controller.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 
-/// 番茄钟状态：未开始 / 计时中 / 已暂停
-enum _PomodoroState { idle, running, paused }
-
+/// 番茄专注页（薄壳：计时状态由进程级 [pomodoroControllerProvider] 持有，
+/// 返回页面/切后台计时不中断；计时期间通知栏常驻倒计时与控制按钮）
 class PomodoroPage extends ConsumerStatefulWidget {
   const PomodoroPage({super.key});
 
@@ -20,103 +17,39 @@ class PomodoroPage extends ConsumerStatefulWidget {
 }
 
 class _PomodoroPageState extends ConsumerState<PomodoroPage> {
-  int _minutes = 25;
-  _PomodoroState _state = _PomodoroState.idle;
-  int _remaining = 25 * 60;
-  int? _taskId;
-  Timer? _timer;
+  /// 专注结束提示订阅：仅本页订阅弹 SnackBar（页面销毁后计时照常，
+  /// 反馈由通知栏完成通知承担）
+  StreamSubscription<PomodoroFinishResult>? _finishSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _finishSub = ref
+        .read(pomodoroControllerProvider.notifier)
+        .finished
+        .listen(_onFinished);
+  }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    // 只取消提示订阅；计时器由控制器持有，返回页面不中断
+    _finishSub?.cancel();
     super.dispose();
   }
 
-  void _start() {
-    setState(() {
-      _state = _PomodoroState.running;
-      _remaining = _minutes * 60;
-    });
-    SoundService.instance.play(SoundKind.add);
-    _startTimer();
-  }
-
-  void _startTimer() {
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) return;
-      setState(() {
-        _remaining--;
-        if (_remaining <= 0) {
-          _finish();
-        }
-      });
-    });
-  }
-
-  void _pause() {
-    _timer?.cancel();
-    setState(() => _state = _PomodoroState.paused);
-    SoundService.instance.play(SoundKind.pomodoroPause);
-  }
-
-  void _resume() {
-    setState(() => _state = _PomodoroState.running);
-    SoundService.instance.play(SoundKind.pomodoroResume);
-    _startTimer();
-  }
-
-  /// 放弃当前进度，从头计时
-  void _restart() {
-    _timer?.cancel();
-    setState(() {
-      _state = _PomodoroState.running;
-      _remaining = _minutes * 60;
-    });
-    SoundService.instance.play(SoundKind.add);
-    _startTimer();
-  }
-
-  /// 结束（含提前结束）：记录实际专注时长
-  Future<void> _finish() async {
-    _timer?.cancel();
-    final elapsedSec = _minutes * 60 - _remaining;
-    // 立即结束（elapsedSec <= 0）记录 0 分钟
-    // （此前会把完整 15/25/45 分钟记进统计）
-    final elapsedMin = elapsedSec <= 0
-        ? 0
-        : (elapsedSec / 60).ceil().clamp(1, _minutes);
-    setState(() {
-      _state = _PomodoroState.idle;
-      // 恢复显示待开始时长（而非 00:00）
-      _remaining = _minutes * 60;
-    });
-    // 数据库保存成功后再显示成功反馈
-    // 捕获外键异常（关联任务被删除时 insertPomodoro 抛错，此前无反馈）
-    try {
-      await ref.read(dbProvider).insertPomodoro(
-        _taskId,
-        elapsedMin,
-        AppClock.now().subtract(Duration(minutes: elapsedMin)),
-      );
-      // 番茄记录写库后通知统计等依赖方
-      bumpDataVersion(ref);
-    } catch (e) {
-      debugPrint('番茄记录保存失败: $e');
-      if (!mounted) return;
+  void _onFinished(PomodoroFinishResult result) {
+    if (!mounted) return;
+    if (result.error != null) {
       showAppSnackBar(
         context,
-        '专注记录保存失败：${_taskId != null ? '关联任务可能已删除' : e}',
+        '专注记录保存失败：${result.error}',
         icon: Icons.error_outline,
       );
       return;
     }
-    if (!mounted) return;
-    SoundService.instance.play(SoundKind.complete);
-    Haptics.medium();
     showAppSnackBar(
       context,
-      elapsedMin == 0 ? '专注已结束' : '专注完成（$elapsedMin 分钟）',
+      result.minutes == 0 ? '专注已结束' : '专注完成（${result.minutes} 分钟）',
       icon: Icons.timer_outlined,
     );
   }
@@ -124,6 +57,9 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
   Future<void> _pickTask() async {
     // 关联任务改为全量未完成任务（此前 take(30) 且依赖当前视图——
     // "今天"视图下无法关联未来的计划任务）
+    final controller = ref.read(pomodoroControllerProvider.notifier);
+    // 当前状态（直接读 provider 取快照，避免触碰 StateNotifier 保护成员）
+    final currentTaskId = ref.read(pomodoroControllerProvider).taskId;
     final db = ref.read(dbProvider);
     final tasks = await db.getAllUncompleted();
     if (!mounted) return;
@@ -143,10 +79,10 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
             ),
             ListTile(
               leading: Icon(
-                _taskId == null
+                currentTaskId == null
                     ? Icons.check_circle
                     : Icons.radio_button_unchecked,
-                color: _taskId == null
+                color: currentTaskId == null
                     ? Theme.of(c).colorScheme.primary
                     : Colors.grey.shade400,
               ),
@@ -162,10 +98,10 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
                     ListTile(
                       dense: true,
                       leading: Icon(
-                        _taskId == t.id
+                        currentTaskId == t.id
                             ? Icons.check_circle
                             : Icons.radio_button_unchecked,
-                        color: _taskId == t.id
+                        color: currentTaskId == t.id
                             ? Theme.of(c).colorScheme.primary
                             : Colors.grey.shade400,
                       ),
@@ -184,26 +120,29 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
       ),
     );
     if (selected != null) {
-      setState(() => _taskId = selected == -1 ? null : selected);
+      controller.setTaskId(selected == -1 ? null : selected);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final mm = (_remaining ~/ 60).toString().padLeft(2, '0');
-    final ss = (_remaining % 60).toString().padLeft(2, '0');
+    // watch 整个状态：每次 tick 的 notifyListeners 都会触发重建
+    final status = ref.watch(pomodoroControllerProvider);
+    final mm = (status.remainingSeconds ~/ 60).toString().padLeft(2, '0');
+    final ss = (status.remainingSeconds % 60).toString().padLeft(2, '0');
     final tasks = ref.watch(tasksControllerProvider).tasks;
-    final linked = _taskId == null
+    final linked = status.taskId == null
         ? null
-        : tasks.where((t) => t.id == _taskId).firstOrNull;
-    final canEdit = _state == _PomodoroState.idle;
+        : tasks.where((t) => t.id == status.taskId).firstOrNull;
+    final canEdit = status.state == PomodoroState.idle;
+    final controller = ref.read(pomodoroControllerProvider.notifier);
     return Scaffold(
       appBar: AppBar(title: const Text('番茄专注')),
       body: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
-            '$_minutes 分钟',
+            '${status.minutes} 分钟',
             style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
           ),
           const SizedBox(height: 16),
@@ -220,14 +159,9 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
                   padding: const EdgeInsets.symmetric(horizontal: 4),
                   child: ChoiceChip(
                     label: Text('$m 分'),
-                    selected: _minutes == m,
+                    selected: status.minutes == m,
                     onSelected: canEdit
-                        ? (v) => setState(() {
-                              _minutes = m;
-                              // C3-2：空闲态切换时长同步倒计时显示
-                              // （此前选"45 分"大数字仍显示 25:00）
-                              _remaining = m * 60;
-                            })
+                        ? (v) => controller.setMinutes(m)
                         : null,
                   ),
                 ),
@@ -237,8 +171,8 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
           // 按状态显示操作按钮
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: switch (_state) {
-              _PomodoroState.idle => [
+            children: switch (status.state) {
+              PomodoroState.idle => [
                 FilledButton.icon(
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('开始'),
@@ -248,10 +182,10 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
                       vertical: 16,
                     ),
                   ),
-                  onPressed: _start,
+                  onPressed: controller.start,
                 ),
               ],
-              _PomodoroState.running => [
+              PomodoroState.running => [
                 FilledButton.icon(
                   icon: const Icon(Icons.pause),
                   label: const Text('暂停'),
@@ -261,7 +195,7 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
                       vertical: 16,
                     ),
                   ),
-                  onPressed: _pause,
+                  onPressed: controller.pause,
                 ),
                 const SizedBox(width: 12),
                 OutlinedButton.icon(
@@ -273,10 +207,10 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
                       vertical: 16,
                     ),
                   ),
-                  onPressed: _finish,
+                  onPressed: controller.finish,
                 ),
               ],
-              _PomodoroState.paused => [
+              PomodoroState.paused => [
                 FilledButton.icon(
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('继续'),
@@ -286,19 +220,19 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
                       vertical: 16,
                     ),
                   ),
-                  onPressed: _resume,
+                  onPressed: controller.resume,
                 ),
                 const SizedBox(width: 12),
                 OutlinedButton.icon(
                   icon: const Icon(Icons.replay),
                   label: const Text('重新开始'),
-                  onPressed: _restart,
+                  onPressed: controller.restart,
                 ),
                 const SizedBox(width: 12),
                 OutlinedButton.icon(
                   icon: const Icon(Icons.check),
                   label: const Text('结束'),
-                  onPressed: _finish,
+                  onPressed: controller.finish,
                 ),
               ],
             },

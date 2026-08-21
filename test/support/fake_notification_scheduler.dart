@@ -20,6 +20,12 @@ class FakeNotificationScheduler implements NotificationScheduler {
   /// 取消全部次数
   int cancelAllCount = 0;
 
+  /// 番茄钟倒计时通知记录（按调用顺序）
+  final List<({int remainingSeconds, bool running})> countdownShows = [];
+
+  /// 番茄钟完成提醒记录（专注分钟数）
+  final List<int> finishedShows = [];
+
   /// 调度是否失败（默认 false；测试可置 true 模拟权限拒绝/平台错误）
   bool failSchedules = false;
 
@@ -58,6 +64,19 @@ class FakeNotificationScheduler implements NotificationScheduler {
     cancelAllCount++;
   }
 
+  @override
+  Future<void> showPomodoroCountdown({
+    required int remainingSeconds,
+    required bool running,
+  }) async {
+    countdownShows.add((remainingSeconds: remainingSeconds, running: running));
+  }
+
+  @override
+  Future<void> showPomodoroFinished({required int minutes}) async {
+    finishedShows.add(minutes);
+  }
+
   /// 按通知 ID 筛选的调度记录
   List<({int id, String title, String body, DateTime when, String? payload, String channel})>
       byId(int id) => scheduled.where((s) => s.id == id).toList();
@@ -66,5 +85,7 @@ class FakeNotificationScheduler implements NotificationScheduler {
     scheduled.clear();
     cancelled.clear();
     cancelAllCount = 0;
+    countdownShows.clear();
+    finishedShows.clear();
   }
 }

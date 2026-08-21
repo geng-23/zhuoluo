@@ -36,6 +36,9 @@ class _TaskPageState extends ConsumerState<TaskPage> {
   /// 搜索模式（AppBar 内嵌搜索框）
   bool _searchMode = false;
   final _searchController = TextEditingController();
+  /// 列表底部 FAB 避让高度：约两个任务条高度（任务条约 54-70px），
+  /// 保证任务数量超一屏时最后一个任务可滚动到右下角"添加"按钮上方完整可见。
+  static const double _listBottomClearance = 120;
 
   @override
   void initState() {
@@ -432,7 +435,11 @@ class _TaskPageState extends ConsumerState<TaskPage> {
             },
             child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(vertical: 4),
+              // 底部预留 FAB 避让空白，防止右下角"添加"按钮遮挡最后一项任务
+              padding: EdgeInsets.only(
+                top: 4,
+                bottom: _listBottomClearance,
+              ),
               itemCount: visible.length,
               itemBuilder: (context, index) {
                 final t = visible[index];

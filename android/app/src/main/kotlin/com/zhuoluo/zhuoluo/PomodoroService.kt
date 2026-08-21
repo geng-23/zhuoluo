@@ -8,7 +8,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.graphics.BitmapFactory
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -18,9 +19,9 @@ import androidx.core.app.ServiceCompat
  * 番茄钟前台服务。
  *
  * 职责：番茄专注会话期间保持进程存活（返回桌面/切后台计时不中断），并托管
- * 常驻倒计时通知。倒计时读秒由系统 chronometer 按结束时刻渲染（SystemUI 原生
- * 走秒，与 App 进程是否被冻结无关）；通知动作（暂停/继续/结束）经
- * [PomodoroActionReceiver] 转发回 Dart 主隔离区。
+ * 常驻倒计时通知。倒计时由 Dart 每秒推送剩余秒数，正文实时显示"剩余 MM:SS"
+ *（chronometer 在部分 ROM 不渲染，故采用文本每秒更新，全设备一致）；
+ * 通知动作（暂停/继续/结束）经 [PomodoroActionReceiver] 转发回 Dart 主隔离区。
  *
  * 生命周期：会话开始（start）→ 状态变更（update）→ 结束（stop）。
  * 停止时移除通知；进程/服务被杀时系统自动移除通知（无残留冻结倒计时）。
@@ -34,7 +35,6 @@ class PomodoroService : Service() {
         const val ACTION_UPDATE = "com.zhuoluo.zhuoluo.PomodoroService.UPDATE"
         const val ACTION_STOP = "com.zhuoluo.zhuoluo.PomodoroService.STOP"
         const val EXTRA_ID = "notificationId"
-        const val EXTRA_END_AT = "endAtMs"
         const val EXTRA_REMAINING = "remainingSec"
         const val EXTRA_TOTAL = "totalSec"
         const val EXTRA_RUNNING = "running"
@@ -49,7 +49,6 @@ class PomodoroService : Service() {
         fun start(
             context: Context,
             id: Int,
-            endAtMs: Long?,
             running: Boolean,
             remainingSec: Int,
             totalSec: Int,
@@ -58,7 +57,6 @@ class PomodoroService : Service() {
             val intent = Intent(context, PomodoroService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_ID, id)
-                if (endAtMs != null) putExtra(EXTRA_END_AT, endAtMs)
                 putExtra(EXTRA_REMAINING, remainingSec)
                 putExtra(EXTRA_TOTAL, totalSec)
                 putExtra(EXTRA_RUNNING, running)
@@ -71,7 +69,6 @@ class PomodoroService : Service() {
         fun update(
             context: Context,
             id: Int,
-            endAtMs: Long?,
             running: Boolean,
             remainingSec: Int,
             totalSec: Int,
@@ -80,7 +77,6 @@ class PomodoroService : Service() {
             val intent = Intent(context, PomodoroService::class.java).apply {
                 action = ACTION_UPDATE
                 putExtra(EXTRA_ID, id)
-                if (endAtMs != null) putExtra(EXTRA_END_AT, endAtMs)
                 putExtra(EXTRA_REMAINING, remainingSec)
                 putExtra(EXTRA_TOTAL, totalSec)
                 putExtra(EXTRA_RUNNING, running)
@@ -109,12 +105,11 @@ class PomodoroService : Service() {
             }
             ACTION_START, ACTION_UPDATE -> {
                 val id = intent.getIntExtra(EXTRA_ID, 0)
-                val endAtMs = if (intent.hasExtra(EXTRA_END_AT)) intent.getLongExtra(EXTRA_END_AT, 0) else null
                 val running = intent.getBooleanExtra(EXTRA_RUNNING, true)
                 val remainingSec = intent.getIntExtra(EXTRA_REMAINING, 0)
                 val totalSec = intent.getIntExtra(EXTRA_TOTAL, 0)
                 val title = intent.getStringExtra(EXTRA_TITLE)
-                val notification = buildNotification(endAtMs, running, remainingSec, totalSec, title)
+                val notification = buildNotification(running, remainingSec, totalSec, title)
                 if (ACTION_START == intent.action) {
                     // Android 14+ 需显式传入前台服务类型（manifest 已声明 specialUse）；
                     // 更早版本不识别该位，传 0 由系统按 manifest 兜底
@@ -134,7 +129,6 @@ class PomodoroService : Service() {
     }
 
     private fun buildNotification(
-        endAtMs: Long?,
         running: Boolean,
         remainingSec: Int,
         totalSec: Int,
@@ -142,12 +136,15 @@ class PomodoroService : Service() {
     ): Notification {
         ensureChannel()
         val elapsedSec = (totalSec - remainingSec).coerceAtLeast(0)
-        val taskSuffix = if (title.isNullOrBlank()) "" else " · $title"
+        // 正文实时倒计时（Dart 每秒推送剩余秒数；chronometer 部分 ROM 不渲染，
+        // 故用文本每秒更新，全设备一致）
         val body = if (running) {
-            "专注中$taskSuffix"
+            "剩余 ${formatRemaining(remainingSec)}"
         } else {
             "已暂停 · 剩余 ${formatRemaining(remainingSec)}"
         }
+        // 标题带任务上下文：番茄专注 / 番茄专注 · 写方案
+        val contentTitle = if (title.isNullOrBlank()) "番茄专注" else "番茄专注 · $title"
         // 展开态大文本：进度 + 任务上下文
         val bigText = if (running) {
             val taskLine = if (title.isNullOrBlank()) "" else "\n任务：$title"
@@ -158,9 +155,9 @@ class PomodoroService : Service() {
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_pomodoro)
-            .setLargeIcon(BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher))
+            .setLargeIcon(drawableToBitmap(R.drawable.ic_tomato_large, 128))
             .setColor(ACCENT_COLOR)
-            .setContentTitle("番茄专注")
+            .setContentTitle(contentTitle)
             .setContentText(body)
             .setOngoing(true)
             .setAutoCancel(false)
@@ -173,25 +170,22 @@ class PomodoroService : Service() {
             // 展开态大文本
             .setStyle(
                 NotificationCompat.BigTextStyle()
-                    .setBigContentTitle("番茄专注")
+                    .setBigContentTitle(contentTitle)
                     .bigText(bigText),
             )
-            // 点通知主体回到 App（会话页面由用户自行导航）
+            // 点通知主体 → 打开 App 并直达番茄专注页
             .setContentIntent(
                 PendingIntent.getActivity(
                     this,
                     0,
-                    Intent(this, MainActivity::class.java),
+                    Intent(this, MainActivity::class.java)
+                        .putExtra(MainActivity.EXTRA_OPEN_POMODORO, true)
+                        .addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                        ),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 ),
             )
-
-        if (running && endAtMs != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            // 系统 chronometer 倒计时：从结束时刻原生渲染读秒，进程冻结也精确
-            builder.setUsesChronometer(true)
-                .setChronometerCountDown(true)
-                .setWhen(endAtMs)
-        }
 
         // 动作按钮（带图标）：cancelNotification=false —— 点击不撤下通知，仅就地更新
         val actionId = if (running) PomodoroActionReceiver.ACTION_PAUSE else PomodoroActionReceiver.ACTION_RESUME
@@ -205,6 +199,16 @@ class PomodoroService : Service() {
             actionPendingIntent(PomodoroActionReceiver.ACTION_STOP),
         )
         return builder.build()
+    }
+
+    /** VectorDrawable → ARGB 位图（大图标用；API 21+ 支持 VectorDrawable 绘制） */
+    private fun drawableToBitmap(resId: Int, size: Int): Bitmap {
+        val drawable = androidx.core.content.ContextCompat.getDrawable(this, resId)!!
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, size, size)
+        drawable.draw(canvas)
+        return bitmap
     }
 
     private fun actionPendingIntent(actionId: String): PendingIntent =

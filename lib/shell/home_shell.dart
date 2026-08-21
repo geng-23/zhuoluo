@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/services/pomodoro_native.dart';
 import 'package:zhuoluo/features/calendar/calendar_page.dart';
 import 'package:zhuoluo/features/profile/habit_page.dart';
 import 'package:zhuoluo/features/profile/pomodoro_page.dart';
@@ -27,6 +28,8 @@ class _HomeShellState extends ConsumerState<HomeShell>
   /// 冷启动首个 resumed 无前置 paused，不重复触发（main() 已触发过）。
   bool _wasBackgrounded = false;
   StreamSubscription<String?>? _tapSub;
+  /// 番茄钟通知主体点击订阅（原生桥事件 → 打开番茄专注页）
+  StreamSubscription<void>? _pomodoroOpenSub;
   /// A1：懒加载页面缓存——仅首次访问时创建，之后保留 State
   /// （IndexedStack 保留状态的前提是子树不因 key 变化重建）
   final List<Widget?> _pages = List<Widget?>.filled(4, null);
@@ -62,6 +65,17 @@ class _HomeShellState extends ConsumerState<HomeShell>
       if (payload == null || !mounted) return;
       _handlePayload(payload);
     });
+    // 番茄钟通知主体点击 → 打开番茄专注页（原生桥事件，进程级引擎下
+    // 引擎常驻，本订阅在 Activity 重建后依然有效）
+    _pomodoroOpenSub = ref
+        .read(pomodoroNativeProvider)
+        .opens
+        .listen((_) {
+          if (!mounted) return;
+          Navigator.of(context, rootNavigator: true).push(
+            MaterialPageRoute(builder: (_) => const PomodoroPage()),
+          );
+        });
     // 冷启动深链——进程被杀后点通知启动 App，payload 不经 onTap 回调，
     // 需消费 init 时捕获的启动 payload（进程级引擎下 init 可能漏捕，
     // 首次挂载异步补读一次，无竞态）
@@ -110,6 +124,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
     WidgetsBinding.instance.removeObserver(this);
     // C3：取消通知点击订阅，避免状态销毁后回调
     _tapSub?.cancel();
+    _pomodoroOpenSub?.cancel();
     super.dispose();
   }
 

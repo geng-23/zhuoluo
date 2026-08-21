@@ -130,7 +130,6 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
     unawaited(
       _native().startForeground(
         id: NotificationIds.forPomodoro,
-        endAt: _endAt,
         running: true,
         remainingSeconds: minutes * 60,
         totalSeconds: minutes * 60,
@@ -156,9 +155,8 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
-  /// 每秒 tick：墙钟重算剩余；归零结束；否则刷新状态。
-  /// 通知读秒由系统 chronometer 原生渲染，无需每秒重发——仅每 10s
-  /// 自愈重发一次（防厂商系统丢通知；endAt 不变，chronometer 不受影响）。
+  /// 每秒 tick：墙钟重算剩余；归零结束；否则刷新状态并每秒推送
+  /// 通知正文实时倒计时（chronometer 部分 ROM 不渲染，文本更新全设备一致）。
   void _tick() {
     if (state.state != PomodoroState.running) return;
     final endAt = _endAt;
@@ -174,18 +172,17 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
       remainingSeconds: remaining,
       taskId: state.taskId,
     );
-    if (remaining % 10 == 0) {
-      unawaited(
-        _native().updateForeground(
-          id: NotificationIds.forPomodoro,
-          endAt: endAt,
-          running: true,
-          remainingSeconds: remaining,
-          totalSeconds: state.minutes * 60,
-          title: _taskTitle,
-        ),
-      );
-    }
+    // 每秒推送剩余秒数：通知正文实时倒计时（部分 ROM 不渲染 chronometer，
+    // 文本更新全设备一致；onlyAlertOnce 保证不响铃）
+    unawaited(
+      _native().updateForeground(
+        id: NotificationIds.forPomodoro,
+        running: true,
+        remainingSeconds: remaining,
+        totalSeconds: state.minutes * 60,
+        title: _taskTitle,
+      ),
+    );
   }
 
   /// 暂停（仅运行态有效）
@@ -228,7 +225,6 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
     unawaited(
       _native().updateForeground(
         id: NotificationIds.forPomodoro,
-        endAt: _endAt,
         running: true,
         remainingSeconds: _pausedRemaining,
         totalSeconds: state.minutes * 60,
@@ -257,7 +253,6 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
     unawaited(
       _native().startForeground(
         id: NotificationIds.forPomodoro,
-        endAt: _endAt,
         running: true,
         remainingSeconds: minutes * 60,
         totalSeconds: minutes * 60,

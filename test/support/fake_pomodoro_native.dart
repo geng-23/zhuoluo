@@ -15,15 +15,11 @@ import 'package:zhuoluo/core/services/pomodoro_native.dart';
 /// ```
 class FakePomodoroNative implements PomodoroNative {
   /// 前台服务启动记录（按调用顺序）
-  final List<
-      ({int id, DateTime? endAt, bool running, int remainingSeconds, int totalSeconds, String? title})
-  >
+  final List<({int id, bool running, int remainingSeconds, int totalSeconds, String? title})>
   starts = [];
 
   /// 通知更新记录（按调用顺序）
-  final List<
-      ({int id, DateTime? endAt, bool running, int remainingSeconds, int totalSeconds, String? title})
-  >
+  final List<({int id, bool running, int remainingSeconds, int totalSeconds, String? title})>
   updates = [];
 
   /// 停止服务记录（通知 ID）
@@ -33,9 +29,13 @@ class FakePomodoroNative implements PomodoroNative {
   int initCount = 0;
 
   final _actions = StreamController<String>.broadcast();
+  final _opens = StreamController<void>.broadcast();
 
   @override
   Stream<String> get actions => _actions.stream;
+
+  @override
+  Stream<void> get opens => _opens.stream;
 
   @override
   void init() {
@@ -45,7 +45,6 @@ class FakePomodoroNative implements PomodoroNative {
   @override
   Future<void> startForeground({
     required int id,
-    DateTime? endAt,
     required bool running,
     required int remainingSeconds,
     required int totalSeconds,
@@ -53,7 +52,6 @@ class FakePomodoroNative implements PomodoroNative {
   }) async {
     starts.add((
       id: id,
-      endAt: endAt,
       running: running,
       remainingSeconds: remainingSeconds,
       totalSeconds: totalSeconds,
@@ -64,7 +62,6 @@ class FakePomodoroNative implements PomodoroNative {
   @override
   Future<void> updateForeground({
     required int id,
-    DateTime? endAt,
     required bool running,
     required int remainingSeconds,
     required int totalSeconds,
@@ -72,7 +69,6 @@ class FakePomodoroNative implements PomodoroNative {
   }) async {
     updates.add((
       id: id,
-      endAt: endAt,
       running: running,
       remainingSeconds: remainingSeconds,
       totalSeconds: totalSeconds,
@@ -88,6 +84,11 @@ class FakePomodoroNative implements PomodoroNative {
   /// 模拟一次通知动作点击（注入原生→Dart 动作事件）
   void simulateAction(String actionId) {
     _actions.add(actionId);
+  }
+
+  /// 模拟一次通知主体点击（注入原生→Dart 打开事件）
+  void emitOpen() {
+    _opens.add(null);
   }
 
   void clear() {

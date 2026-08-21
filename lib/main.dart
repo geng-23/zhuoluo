@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
+import 'package:zhuoluo/core/services/pomodoro_native.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
@@ -13,8 +14,10 @@ Future<void> main() async {
   final container = ProviderContainer();
   // runApp 前仅执行首屏必需且轻量的初始化：
   // 1. 通知初始化：时区数据 + 插件 + 渠道 + 冷启动深链捕获（HomeShell 同步消费）
-  // 2. 默认清单：首次查询触发 DB 惰性打开与迁移（任务页依赖默认清单存在）
+  // 2. 番茄钟原生桥：注册原生→Dart 通道（冷启动即就绪，通知点击/动作可送达）
+  // 3. 默认清单：首次查询触发 DB 惰性打开与迁移（任务页依赖默认清单存在）
   await container.read(notificationServiceProvider).init();
+  container.read(pomodoroNativeProvider).init();
   await container.read(dbProvider).ensureDefaultList();
   // 轻量设置并行读取，runApp 前应用（主题/时区影响首帧渲染，音效/震动影响交互反馈）
   final settings = container.read(settingsProvider);

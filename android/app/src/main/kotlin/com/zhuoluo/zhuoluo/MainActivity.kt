@@ -26,8 +26,41 @@ class MainActivity : FlutterActivity() {
         @JvmStatic
         var pomodoroChannel: MethodChannel? = null
 
+        /** 通知点击"打开番茄页"意图 extra（PomodoroService contentIntent 携带） */
+        const val EXTRA_OPEN_POMODORO = "com.zhuoluo.zhuoluo.pomodoro.open"
+
         /** 进程级引擎缓存 ID */
         private const val ENGINE_ID = "zhuoluo_engine"
+    }
+
+    /** 待转发的"打开番茄页"标志（onCreate/onNewIntent 置位，onResume 转发后清除） */
+    private var pendingOpenPomodoro = false
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (intent?.getBooleanExtra(EXTRA_OPEN_POMODORO, false) == true) {
+            pendingOpenPomodoro = true
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_POMODORO, false)) {
+            pendingOpenPomodoro = true
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Dart 主隔离区在首帧前已就绪（main 提前 init 桥），此处转发可达
+        if (pendingOpenPomodoro) {
+            pendingOpenPomodoro = false
+            try {
+                pomodoroChannel?.invokeMethod("openPomodoro", null, null)
+            } catch (_: Exception) {
+                // 通道不可用时静默（App 已打开，用户可自行导航）
+            }
+        }
     }
 
     /**
@@ -66,7 +99,6 @@ class MainActivity : FlutterActivity() {
                         PomodoroService.start(
                             this,
                             call.argument<Int>("id") ?: 0,
-                            call.argument<Long>("endAtMs"),
                             call.argument<Boolean>("running") ?: true,
                             call.argument<Int>("remainingSec") ?: 0,
                             call.argument<Int>("totalSec") ?: 0,
@@ -78,7 +110,6 @@ class MainActivity : FlutterActivity() {
                         PomodoroService.update(
                             this,
                             call.argument<Int>("id") ?: 0,
-                            call.argument<Long>("endAtMs"),
                             call.argument<Boolean>("running") ?: true,
                             call.argument<Int>("remainingSec") ?: 0,
                             call.argument<Int>("totalSec") ?: 0,

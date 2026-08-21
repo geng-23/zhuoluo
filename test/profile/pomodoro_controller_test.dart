@@ -79,7 +79,6 @@ void main() {
     expect(native.starts.last.running, isTrue);
     expect(native.starts.last.remainingSeconds, 25 * 60);
     expect(native.starts.last.totalSeconds, 25 * 60, reason: '进度条总时长');
-    expect(native.starts.last.endAt, isNotNull, reason: 'chronometer 按结束时刻渲染');
     expect(native.starts.last.title, isNull, reason: '未关联任务无标题');
   });
 
@@ -91,6 +90,8 @@ void main() {
     AppClock.setNow(t0.add(const Duration(seconds: 90)));
     c.debugTick();
     expect(c.state.remainingSeconds, 25 * 60 - 90);
+    expect(native.updates.last.remainingSeconds, 25 * 60 - 90,
+        reason: '每秒推送通知正文实时倒计时');
     // 挂起恢复后一次 tick 直接补上全部经过时间（不依赖每秒累积）
     AppClock.setNow(t0.add(const Duration(minutes: 3)));
     c.debugTick();
@@ -110,7 +111,6 @@ void main() {
     expect(c.state.remainingSeconds, frozen);
     expect(native.updates, isNotEmpty, reason: '暂停态更新通知');
     expect(native.updates.last.running, isFalse, reason: '暂停态通知显示继续按钮');
-    expect(native.updates.last.endAt, isNull, reason: '暂停态关闭 chronometer');
     // 暂停后 tick 不推进剩余
     AppClock.setNow(t0.add(const Duration(seconds: 120)));
     c.debugTick();
@@ -131,7 +131,6 @@ void main() {
     expect(c.state.state, PomodoroState.running);
     expect(c.state.remainingSeconds, frozen, reason: '继续从暂停冻结值起步');
     expect(native.updates.last.running, isTrue);
-    expect(native.updates.last.endAt, isNotNull, reason: '继续后恢复 chronometer');
     AppClock.setNow(t0.add(const Duration(seconds: 150)));
     c.debugTick();
     expect(c.state.remainingSeconds, frozen - 30);

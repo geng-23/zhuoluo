@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/services/pomodoro_native.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/data/database/database.dart';
@@ -9,16 +10,18 @@ import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/features/profile/pomodoro_controller.dart';
 
 import '../support/fake_notification_scheduler.dart';
+import '../support/fake_pomodoro_native.dart';
 
-/// 番茄专注：进程级控制器状态机 + 通知同步 + 通知动作分发 + 记录写入
+/// 番茄专注：进程级控制器状态机 + 原生前台服务桥同步 + 通知动作分发 + 记录写入
 ///
 /// 时间推进方式：AppClock.setNow 注入 + debugTick 同步 tick，
-/// 规避真实 Timer 的不确定性；通知走记录型替身断言真实调用。
+/// 规避真实 Timer 的不确定性；原生桥与通知均走记录型替身断言真实调用。
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late AppDatabase db;
   late FakeNotificationScheduler fake;
+  late FakePomodoroNative native;
   late ProviderContainer container;
 
   setUp(() async {
@@ -31,7 +34,13 @@ void main() {
     await NotificationService.instance.refreshPermissionCache();
     NotificationService.instance.debugOverridePermission = null;
     SoundService.enabled = false;
-    container = ProviderContainer(overrides: [dbProvider.overrideWithValue(db)]);
+    native = FakePomodoroNative();
+    container = ProviderContainer(
+      overrides: [
+        dbProvider.overrideWithValue(db),
+        pomodoroNativeProvider.overrideWithValue(native),
+      ],
+    );
     addTearDown(container.dispose);
   });
 
@@ -61,14 +70,15 @@ void main() {
     ));
   }
 
-  test('开始：running + 满剩余 + 通知栏发出倒计时', () async {
+  test('开始：running + 满剩余 + 启动前台服务发布倒计时', () async {
     final c = container.read(pomodoroControllerProvider.notifier);
     c.start();
     expect(c.state.state, PomodoroState.running);
     expect(c.state.remainingSeconds, 25 * 60);
-    expect(fake.countdownShows, isNotEmpty, reason: '开始即显示倒计时通知');
-    expect(fake.countdownShows.last.running, isTrue);
-    expect(fake.countdownShows.last.remainingSeconds, 25 * 60);
+    expect(native.starts, isNotEmpty, reason: '开始即启动前台服务');
+    expect(native.starts.last.running, isTrue);
+    expect(native.starts.last.remainingSeconds, 25 * 60);
+    expect(native.starts.last.endAt, isNotNull, reason: 'chronometer 按结束时刻渲染');
   });
 
   test('墙钟推进：tick 后剩余按真实经过时间减少（挂起纠偏）', () async {
@@ -96,15 +106,16 @@ void main() {
     c.pause();
     expect(c.state.state, PomodoroState.paused);
     expect(c.state.remainingSeconds, frozen);
-    expect(fake.countdownShows.last.running, isFalse,
-        reason: '暂停态通知显示继续按钮');
+    expect(native.updates, isNotEmpty, reason: '暂停态更新通知');
+    expect(native.updates.last.running, isFalse, reason: '暂停态通知显示继续按钮');
+    expect(native.updates.last.endAt, isNull, reason: '暂停态关闭 chronometer');
     // 暂停后 tick 不推进剩余
     AppClock.setNow(t0.add(const Duration(seconds: 120)));
     c.debugTick();
     expect(c.state.remainingSeconds, frozen);
   });
 
-  test('继续：从冻结值恢复计时', () async {
+  test('继续：从冻结值恢复计时并重开 chronometer', () async {
     final t0 = DateTime(2026, 8, 20, 10, 0, 0);
     AppClock.setNow(t0);
     final c = container.read(pomodoroControllerProvider.notifier);
@@ -117,12 +128,14 @@ void main() {
     c.resume();
     expect(c.state.state, PomodoroState.running);
     expect(c.state.remainingSeconds, frozen, reason: '继续从暂停冻结值起步');
+    expect(native.updates.last.running, isTrue);
+    expect(native.updates.last.endAt, isNotNull, reason: '继续后恢复 chronometer');
     AppClock.setNow(t0.add(const Duration(seconds: 150)));
     c.debugTick();
     expect(c.state.remainingSeconds, frozen - 30);
   });
 
-  test('重新开始：放弃进度从头计时', () async {
+  test('重新开始：放弃进度从头计时并重启服务通知', () async {
     final t0 = DateTime(2026, 8, 20, 10, 0, 0);
     AppClock.setNow(t0);
     final c = container.read(pomodoroControllerProvider.notifier);
@@ -132,6 +145,7 @@ void main() {
     c.restart();
     expect(c.state.state, PomodoroState.running);
     expect(c.state.remainingSeconds, 25 * 60);
+    expect(native.starts.length, 2, reason: '重新开始重新启动前台服务');
   });
 
   test('空闲态切换时长同步剩余；运行中不可改', () async {
@@ -154,7 +168,7 @@ void main() {
     expect(c.state.taskId, taskId, reason: '运行中不可改关联任务');
   });
 
-  test('提前结束：记录实际时长、回空闲、清倒计时通知、发完成事件', () async {
+  test('提前结束：记录实际时长、回空闲、停服务清通知、发完成事件', () async {
     final t0 = DateTime(2026, 8, 20, 10, 0, 0);
     AppClock.setNow(t0);
     final c = container.read(pomodoroControllerProvider.notifier);
@@ -169,6 +183,8 @@ void main() {
     expect(c.state.remainingSeconds, 25 * 60, reason: '空闲态恢复待开始显示');
     expect(result?.isSuccess, isTrue);
     expect(result?.minutes, 5);
+    expect(native.stops, contains(NotificationIds.forPomodoro),
+        reason: '结束停止前台服务并移除通知');
     expect(fake.cancelled, contains(NotificationIds.forPomodoro),
         reason: '结束清理倒计时通知');
     final rows = await db.getPomodoros();
@@ -189,7 +205,7 @@ void main() {
     expect(rows.single.durationMinutes, 0);
   });
 
-  test('计时归零自动结束：写满时长、清通知、后台弹完成通知', () async {
+  test('计时归零自动结束：写满时长、停服务、后台弹完成通知', () async {
     final t0 = DateTime(2026, 8, 20, 10, 0, 0);
     AppClock.setNow(t0);
     final c = container.read(pomodoroControllerProvider.notifier);
@@ -201,7 +217,7 @@ void main() {
     await pumpUntil(() => c.state.state == PomodoroState.idle);
     await pumpUntil(() => result != null);
     expect(result?.minutes, 25);
-    expect(fake.cancelled, contains(NotificationIds.forPomodoro));
+    expect(native.stops, contains(NotificationIds.forPomodoro));
     // 测试环境无 resumed 生命周期 → 视为后台结束 → 弹完成通知
     expect(fake.finishedShows, contains(25));
     final rows = await db.getPomodoros();
@@ -223,40 +239,36 @@ void main() {
     expect(c.state.state, PomodoroState.idle);
   });
 
-  test('通知动作分发：暂停/继续/结束', () async {
+  test('通知动作分发：暂停/继续/结束（原生桥直达主隔离区）', () async {
     final t0 = DateTime(2026, 8, 20, 10, 0, 0);
     AppClock.setNow(t0);
     final c = container.read(pomodoroControllerProvider.notifier);
     c.start();
-    NotificationService.instance.debugSimulateAction(
-      PomodoroController.actionPause,
-    );
+    native.simulateAction(PomodoroController.actionPause);
     await pumpUntil(() => c.state.state == PomodoroState.paused);
     expect(c.state.state, PomodoroState.paused, reason: '通知栏暂停生效');
-    NotificationService.instance.debugSimulateAction(
-      PomodoroController.actionResume,
-    );
+    native.simulateAction(PomodoroController.actionResume);
     await pumpUntil(() => c.state.state == PomodoroState.running);
     expect(c.state.state, PomodoroState.running, reason: '通知栏继续生效');
     AppClock.setNow(t0.add(const Duration(minutes: 3)));
     c.debugTick();
-    NotificationService.instance.debugSimulateAction(
-      PomodoroController.actionStop,
-    );
+    native.simulateAction(PomodoroController.actionStop);
     await pumpUntil(() => c.state.state == PomodoroState.idle);
     expect(c.state.state, PomodoroState.idle, reason: '通知栏结束生效');
     final rows = await db.getPomodoros();
     expect(rows.single.durationMinutes, 3);
   });
 
-  test('通知权限被拒：计时照常运行，通知全部跳过', () async {
+  test('通知权限被拒：计时照常运行，前台服务照常保活，完成通知跳过', () async {
     NotificationService.instance.debugOverridePermission = false;
     await NotificationService.instance.refreshPermissionCache();
     final c = container.read(pomodoroControllerProvider.notifier);
     c.start();
     expect(c.state.state, PomodoroState.running, reason: '权限被拒不阻止计时');
-    expect(fake.countdownShows, isEmpty, reason: '权限被拒不弹倒计时');
+    expect(native.starts, isNotEmpty,
+        reason: '权限被拒仍启动前台服务（保活优先，通知由系统隐藏）');
     await c.finish();
+    expect(native.stops, contains(NotificationIds.forPomodoro));
     expect(fake.finishedShows, isEmpty, reason: '权限被拒不弹完成通知');
     expect(c.state.state, PomodoroState.idle);
   });

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/services/pomodoro_native.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
@@ -10,6 +11,7 @@ import 'package:zhuoluo/features/profile/pomodoro_controller.dart';
 import 'package:zhuoluo/features/profile/pomodoro_page.dart';
 
 import '../support/fake_notification_scheduler.dart';
+import '../support/fake_pomodoro_native.dart';
 
 /// 番茄专注页：UI 状态流转 + 返回后计时不中断（进程级控制器）
 ///
@@ -18,6 +20,7 @@ import '../support/fake_notification_scheduler.dart';
 void main() {
   late AppDatabase db;
   late FakeNotificationScheduler fake;
+  late FakePomodoroNative native;
   late ProviderContainer container;
 
   setUp(() async {
@@ -26,7 +29,13 @@ void main() {
     fake = FakeNotificationScheduler();
     NotificationService.instance.debugOverrideScheduler = fake;
     SoundService.enabled = false;
-    container = ProviderContainer(overrides: [dbProvider.overrideWithValue(db)]);
+    native = FakePomodoroNative();
+    container = ProviderContainer(
+      overrides: [
+        dbProvider.overrideWithValue(db),
+        pomodoroNativeProvider.overrideWithValue(native),
+      ],
+    );
     addTearDown(container.dispose);
   });
 
@@ -88,8 +97,8 @@ void main() {
     await tester.pump();
     expect(find.text('暂停'), findsOneWidget);
     expect(find.text('结束'), findsOneWidget);
-    expect(fake.countdownShows, isNotEmpty, reason: '开始即显示倒计时通知');
-    expect(fake.countdownShows.last.running, isTrue);
+    expect(native.starts, isNotEmpty, reason: '开始即启动前台服务');
+    expect(native.starts.last.running, isTrue);
     stopTimer();
   });
 
@@ -139,7 +148,7 @@ void main() {
     await tester.pump();
     expect(find.text('继续'), findsOneWidget);
     expect(find.text('重新开始'), findsOneWidget);
-    expect(fake.countdownShows.last.running, isFalse,
+    expect(native.updates.last.running, isFalse,
         reason: '暂停态通知显示继续按钮');
     await tester.tap(find.text('继续'));
     await tester.pump();
@@ -172,8 +181,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('开始'), findsOneWidget, reason: '结束后回空闲态');
     expect(find.text('专注已结束'), findsOneWidget, reason: '立即结束提示 0 分钟');
-    expect(fake.cancelled, contains(NotificationIds.forPomodoro),
-        reason: '结束清理倒计时通知');
+    expect(native.stops, contains(NotificationIds.forPomodoro),
+        reason: '结束停止前台服务并移除通知');
     final rows = await db.getPomodoros();
     expect(rows.single.durationMinutes, 0);
   });

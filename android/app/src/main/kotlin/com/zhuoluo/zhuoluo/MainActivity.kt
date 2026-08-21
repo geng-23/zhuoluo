@@ -17,8 +17,51 @@ import java.io.File
 import java.io.FileOutputStream
 
 class MainActivity : FlutterActivity() {
+
+    companion object {
+        /** 番茄钟桥通道（进程存活时非空；供 [PomodoroActionReceiver] 转发动作到 Dart 主隔离区） */
+        @JvmStatic
+        var pomodoroChannel: MethodChannel? = null
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // 番茄钟前台服务桥：Dart→原生 start/update/stop；原生→Dart action 事件。
+        // 静态持有供通知动作接收器在进程存活时直达主隔离区。
+        pomodoroChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "zhuoluo/pomodoro",
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "startForeground" -> {
+                        PomodoroService.start(
+                            this,
+                            call.argument<Int>("id") ?: 0,
+                            call.argument<Long>("endAtMs"),
+                            call.argument<Boolean>("running") ?: true,
+                            call.argument<Int>("remainingSec") ?: 0,
+                        )
+                        result.success(null)
+                    }
+                    "updateForeground" -> {
+                        PomodoroService.update(
+                            this,
+                            call.argument<Int>("id") ?: 0,
+                            call.argument<Long>("endAtMs"),
+                            call.argument<Boolean>("running") ?: true,
+                            call.argument<Int>("remainingSec") ?: 0,
+                        )
+                        result.success(null)
+                    }
+                    "stopForeground" -> {
+                        PomodoroService.stop(this, call.argument<Int>("id") ?: 0)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
         // 通知权限统一由 Dart 侧（main.dart 启动时）请求，
         // 此处不再重复请求（双入口弹窗时机冲突）
         MethodChannel(

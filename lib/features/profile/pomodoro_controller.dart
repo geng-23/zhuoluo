@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
+import 'package:zhuoluo/core/services/pomodoro_native.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
@@ -63,18 +64,18 @@ class PomodoroFinishResult {
 /// 挂起/Doze 导致 tick 延迟时自动纠偏，通知栏倒计时保持准确。
 class PomodoroController extends StateNotifier<PomodoroStatus> {
   PomodoroController(this._ref) : super(PomodoroStatus.initial()) {
-    // 通知栏动作订阅（暂停/继续/结束）。通知只存在于计时会话期间，
-    // 而会话只能由页面发起（打开页面必然先创建本控制器），订阅必然已生效。
-    _actionSub = _ref
-        .read(notificationServiceProvider)
-        .actionStream
-        .listen(_onNotificationAction);
+    // 注册原生→Dart 动作通道（幂等），并订阅通知动作（暂停/继续/结束）。
+    // 通知只存在于计时会话期间，而会话只能由页面发起（打开页面必然先创建
+    // 本控制器），订阅必然已生效。
+    final native = _ref.read(pomodoroNativeProvider);
+    native.init();
+    _actionSub = native.actions.listen(_onNotificationAction);
   }
 
-  /// 通知动作 ID（单一来源：NotificationService 常量）
-  static const actionPause = NotificationService.pomodoroActionPause;
-  static const actionResume = NotificationService.pomodoroActionResume;
-  static const actionStop = NotificationService.pomodoroActionStop;
+  /// 通知动作 ID（与原生 PomodoroActionReceiver 口径一致）
+  static const actionPause = 'pause';
+  static const actionResume = 'resume';
+  static const actionStop = 'stop';
 
   final Ref _ref;
   Timer? _timer;
@@ -120,11 +121,20 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
       taskId: state.taskId,
     );
     SoundService.instance.play(SoundKind.add);
-    // 清除上一会话残留通知（完成提醒等），再显示倒计时
+    // 清除上一会话残留通知（完成提醒等），再启动前台服务显示倒计时
     unawaited(_ref.read(notificationServiceProvider).cancelPomodoro());
-    unawaited(_pushCountdown());
+    unawaited(
+      _native().startForeground(
+        id: NotificationIds.forPomodoro,
+        endAt: _endAt,
+        running: true,
+        remainingSeconds: minutes * 60,
+      ),
+    );
     _startTicker();
   }
+
+  PomodoroNative _native() => _ref.read(pomodoroNativeProvider);
 
   /// 把当前运行段秒数并入 [_elapsedSec] 并清零 [_startedAt]（暂停/结束时调用）
   void _accumulateElapsed() {
@@ -140,7 +150,9 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
-  /// 每秒 tick：墙钟重算剩余；归零结束；否则刷新状态与通知
+  /// 每秒 tick：墙钟重算剩余；归零结束；否则刷新状态。
+  /// 通知读秒由系统 chronometer 原生渲染，无需每秒重发——仅每 10s
+  /// 自愈重发一次（防厂商系统丢通知；endAt 不变，chronometer 不受影响）。
   void _tick() {
     if (state.state != PomodoroState.running) return;
     final endAt = _endAt;
@@ -156,7 +168,16 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
       remainingSeconds: remaining,
       taskId: state.taskId,
     );
-    unawaited(_pushCountdown());
+    if (remaining % 10 == 0) {
+      unawaited(
+        _native().updateForeground(
+          id: NotificationIds.forPomodoro,
+          endAt: endAt,
+          running: true,
+          remainingSeconds: remaining,
+        ),
+      );
+    }
   }
 
   /// 暂停（仅运行态有效）
@@ -173,7 +194,13 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
       taskId: state.taskId,
     );
     SoundService.instance.play(SoundKind.pomodoroPause);
-    unawaited(_pushCountdown());
+    unawaited(
+      _native().updateForeground(
+        id: NotificationIds.forPomodoro,
+        running: false,
+        remainingSeconds: _pausedRemaining,
+      ),
+    );
   }
 
   /// 继续（仅暂停态有效）
@@ -188,7 +215,14 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
       taskId: state.taskId,
     );
     SoundService.instance.play(SoundKind.pomodoroResume);
-    unawaited(_pushCountdown());
+    unawaited(
+      _native().updateForeground(
+        id: NotificationIds.forPomodoro,
+        endAt: _endAt,
+        running: true,
+        remainingSeconds: _pausedRemaining,
+      ),
+    );
     _startTicker();
   }
 
@@ -206,7 +240,14 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
       taskId: state.taskId,
     );
     SoundService.instance.play(SoundKind.add);
-    unawaited(_pushCountdown());
+    unawaited(
+      _native().startForeground(
+        id: NotificationIds.forPomodoro,
+        endAt: _endAt,
+        running: true,
+        remainingSeconds: minutes * 60,
+      ),
+    );
     _startTicker();
   }
 
@@ -230,6 +271,8 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
       remainingSeconds: minutes * 60,
       taskId: taskId,
     );
+    // 停止前台服务（移除倒计时通知、结束进程保活），再弹完成提醒
+    unawaited(_native().stopForeground(id: NotificationIds.forPomodoro));
     final notifications = _ref.read(notificationServiceProvider);
     await notifications.cancelPomodoro();
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
@@ -298,18 +341,6 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
         unawaited(finish());
       default:
         break;
-    }
-  }
-
-  /// 更新倒计时通知（尽力而为：通知失败绝不影响计时与记录）
-  Future<void> _pushCountdown() async {
-    try {
-      await _ref.read(notificationServiceProvider).showPomodoroCountdown(
-        remainingSeconds: state.remainingSeconds,
-        running: state.state == PomodoroState.running,
-      );
-    } catch (e) {
-      debugPrint('番茄钟通知更新失败: $e');
     }
   }
 

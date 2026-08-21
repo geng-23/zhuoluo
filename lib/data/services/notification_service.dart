@@ -21,11 +21,6 @@ class NotificationService {
 
   final _tapController = StreamController<String?>.broadcast();
 
-  /// 通知动作事件流（Android 通知栏动作按钮点击，事件为 actionId 字符串：
-  /// 番茄钟暂停/继续/结束等）。与 [_tapController] 分流：actionId 非空 → 本流；
-  /// 内容点击 → tap 流。
-  final _actionController = StreamController<String>.broadcast();
-
   bool _initialized = false;
 
   /// 通知权限结果缓存（启动/设置页请求一次；
@@ -139,16 +134,10 @@ class NotificationService {
     );
     await _plugin.initialize(
       settings: settings,
-      // 点击通知 → 打开 App 定位任务
+      // 点击通知 → 打开 App 定位任务（番茄钟倒计时通知已改为原生前台服务，
+      // 其动作走 PomodoroNative 桥，不经过本回调）
       onDidReceiveNotificationResponse: (response) {
-        // 动作按钮（暂停/继续/结束）带 actionId → 动作流；
-        // 内容点击（深链定位）→ 原有 tap 流
-        final actionId = response.actionId;
-        if (actionId != null && actionId.isNotEmpty) {
-          _actionController.add(actionId);
-        } else {
-          _tapController.add(response.payload);
-        }
+        _tapController.add(response.payload);
       },
     );
     // 显式创建 channel（幂等；importance/声音在首次创建时生效）
@@ -253,10 +242,6 @@ class NotificationService {
   /// 通知点击深链流（HomeShell 订阅消费 payload）
   Stream<String?> get tapStream => _tapController.stream;
 
-  /// 通知动作点击流（Android 通知栏动作按钮，事件为 actionId；
-  /// 番茄钟暂停/继续/结束）。订阅方按 actionId 分发，进程存活期间有效。
-  Stream<String> get actionStream => _actionController.stream;
-
   /// 重新读取系统时区（原生侧实时获取——Flutter 引擎的本地时区在进程启动
   /// 时缓存，运行中修改系统时区后 Dart 侧 `DateTime` 偏移不会更新）。
   /// 时区变化时同步 AppClock 与 tz.local；返回 true 表示发生变化
@@ -285,12 +270,6 @@ class NotificationService {
   /// 生产代码不使用——与 [debugOverrideScheduler] 同属测试替身通道。
   void debugSimulateTap(String? payload) {
     _tapController.add(payload);
-  }
-
-  /// 测试用：模拟一次通知动作按钮点击（向动作流注入 actionId）。
-  /// 生产代码不使用——与 [debugOverrideScheduler] 同属测试替身通道。
-  void debugSimulateAction(String actionId) {
-    _actionController.add(actionId);
   }
 
   /// 请求通知权限（Android 13+；Web = 浏览器通知权限）。
@@ -464,95 +443,9 @@ class NotificationService {
     return true;
   }
 
-  /// 番茄钟倒计时通知动作 ID（与 PomodoroController 常量一致）
-  static const pomodoroActionPause = 'pomodoro_pause';
-  static const pomodoroActionResume = 'pomodoro_resume';
-  static const pomodoroActionStop = 'pomodoro_stop';
-
-  /// 显示/更新番茄钟常驻倒计时通知（运行中每秒重发同 ID 覆盖，仅首次提示音）。
-  /// [running] false = 已暂停（显示"继续"按钮）。
-  /// 权限被拒/未授权时静默跳过（计时照常运行，仅通知不显示）。
-  /// [timeoutAfter] 仅运行态设置：进程被杀后残留通知在会话原定结束时刻
-  /// 自动清除（暂停态无结束时刻，留待冷启动 init() 兜底清理）。
-  Future<void> showPomodoroCountdown({
-    required int remainingSeconds,
-    required bool running,
-  }) async {
-    // 权限门：被拒/未授权则不显示通知。stub/override 为测试通道——
-    // stub 模式视为已授权（不触平台）；override=false 直接跳过。
-    if (debugOverridePermission == false || _permissionGranted == false) {
-      return;
-    }
-    if (debugOverridePermission == null && debugOverrideScheduler == null) {
-      if (_permissionGranted == null) {
-        try {
-          final granted = await requestPermission();
-          if (!granted) return;
-        } catch (e) {
-          // 平台不可用（无原生宿主/未初始化）时跳过通知——计时不受影响
-          debugPrint('番茄钟通知权限检查失败: $e');
-          return;
-        }
-      }
-    }
-    final stub = debugOverrideScheduler;
-    if (stub != null) {
-      return stub.showPomodoroCountdown(
-        remainingSeconds: remainingSeconds,
-        running: running,
-      );
-    }
-    if (!_initialized) await init();
-    if (remainingSeconds < 0) remainingSeconds = 0;
-    final mm = (remainingSeconds ~/ 60).toString().padLeft(2, '0');
-    final ss = (remainingSeconds % 60).toString().padLeft(2, '0');
-    final body = running ? '剩余 $mm:$ss' : '已暂停 · 剩余 $mm:$ss';
-    final actions = [
-      AndroidNotificationAction(
-        running ? pomodoroActionPause : pomodoroActionResume,
-        running ? '暂停' : '继续',
-        showsUserInterface: false,
-      ),
-      AndroidNotificationAction(
-        pomodoroActionStop,
-        '结束',
-        showsUserInterface: false,
-      ),
-    ];
-    try {
-      await _plugin.show(
-        id: NotificationIds.forPomodoro,
-        title: '番茄专注',
-        body: body,
-        payload: 'pomodoro',
-        notificationDetails: NotificationDetails(
-          android: AndroidNotificationDetails(
-            'pomodoro_countdown_v1',
-            '番茄钟倒计时',
-            channelDescription: '番茄专注运行时的常驻倒计时通知',
-            visibility: NotificationVisibility.public,
-            importance: Importance.low,
-            priority: Priority.low,
-            ongoing: true,
-            autoCancel: false,
-            onlyAlertOnce: true,
-            showWhen: false,
-            category: AndroidNotificationCategory.service,
-            // 毫秒制（v22 timeoutAfter 为 int?）：进程被杀后残留通知
-            // 在会话原定结束时刻自动清除（暂停态无结束时刻，留待冷启动清理）
-            timeoutAfter: running
-                ? remainingSeconds * 1000 + 2000
-                : null,
-            actions: actions,
-          ),
-        ),
-      );
-    } catch (e) {
-      debugPrint('番茄钟通知显示失败: $e');
-    }
-  }
-
   /// 番茄钟完成提醒（后台结束时弹出一次；前台结束走应用内反馈不弹）。
+  /// 常驻倒计时通知已改为原生前台服务（PomodoroService + PomodoroNative 桥），
+  /// 不经过本插件。
   Future<void> showPomodoroFinished({required int minutes}) async {
     if (debugOverridePermission == false || _permissionGranted == false) {
       return;
@@ -651,13 +544,7 @@ abstract class NotificationScheduler {
   /// 取消全部通知
   Future<void> cancelAll();
 
-  /// 番茄钟常驻倒计时通知（运行中每秒重发覆盖；running=false 为已暂停）
-  Future<void> showPomodoroCountdown({
-    required int remainingSeconds,
-    required bool running,
-  });
-
-  /// 番茄钟完成提醒（后台结束时弹出一次）
+  /// 番茄钟完成提醒（后台结束时弹出一次；常驻倒计时走原生前台服务）
   Future<void> showPomodoroFinished({required int minutes});
 }
 

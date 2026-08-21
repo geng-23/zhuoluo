@@ -1,4 +1,4 @@
-﻿import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -48,15 +48,17 @@ void main() {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
-    // 普通任务完成 → 计入（completedAt）
+    // 普通任务完成 → 计入（有计划开始日，按计划日归组）
     final t1 = await db.insertTask(TasksCompanion.insert(
       listId: list.id,
       title: '普通任务',
+      planStart: Value(today),
+      planEnd: Value(today.add(const Duration(hours: 1))),
       createdAt: now,
     ));
     await db.completeTask(t1);
 
-    // 重复任务实例完成 → 计入（task_completions）
+    // 重复任务实例完成 → 计入（task_completions，按实例日归组）
     final t2 = await db.insertTask(TasksCompanion.insert(
       listId: list.id,
       title: '重复任务',

@@ -1462,7 +1462,12 @@ class AppDatabase extends _$AppDatabase {
   }
 
   // ---------- 统计 ----------
-  /// 完成率：按完成时间统计（重复任务实例 + 普通任务）
+  /// 完成率：完成数按任务所属日统计（与计划数同口径，保证每日 完成数 ≤ 计划数）：
+  /// - 重复任务实例：按实例日（instanceDate = 该实例的计划日）计入，
+  ///   补做/提前完成不按实际完成时刻归日；
+  /// - 非重复任务：按计划开始日计入；无计划开始按截止日计入；
+  /// - 无计划时间的任务（无 planStart 且无 dueTime）与子任务不计入
+  ///   （与 getPlannedCountByDay 的归日口径一致）。
   Future<Map<DateTime, int>> getCompletedCountByDay(
     DateTime from,
     DateTime to,
@@ -1470,14 +1475,24 @@ class AppDatabase extends _$AppDatabase {
     final start = AppClock.at(from.year, from.month, from.day);
     final end = AppClock.nextDay(to);
     final result = <DateTime, int>{};
-    // 重复任务实例完成（task_completions）
-    final completions =
-        await (select(taskCompletions)..where(
-              (c) =>
-                  c.completedAt.isBiggerOrEqualValue(start) &
-                  c.completedAt.isSmallerThanValue(end),
-            ))
-            .get();
+
+    void add(DateTime d) {
+      // ：d 可能是 DB 读回值（instanceDate/planStart/dueTime），统一按
+      // 应用时区解释后取字段分组
+      final a = AppClock.asApp(d);
+      final key = AppClock.at(a.year, a.month, a.day);
+      if (!key.isBefore(start) && key.isBefore(end)) {
+        result[key] = (result[key] ?? 0) + 1;
+      }
+    }
+
+    // 重复任务实例完成（task_completions）：按实例日（计划日）计入
+    final completions = await (select(taskCompletions)..where(
+          (c) =>
+              c.instanceDate.isBiggerOrEqualValue(start) &
+              c.instanceDate.isSmallerThanValue(end),
+        ))
+        .get();
     // 与计划数口径一致——仅计顶层任务，子任务不计入完成数
     // （重复子任务的实例完成记录也需过滤）
     final completionTaskIds = completions.map((c) => c.taskId).toSet();
@@ -1492,27 +1507,22 @@ class AppDatabase extends _$AppDatabase {
     }
     for (final c in completions) {
       if (!topLevelTaskIds.contains(c.taskId)) continue;
-      // ：completedAt 为 DB 读回值，字段按应用时区解释后分组
-      final a = AppClock.asApp(c.completedAt);
-      final d = AppClock.at(a.year, a.month, a.day);
-      result[d] = (result[d] ?? 0) + 1;
+      add(c.instanceDate);
     }
-    // 普通任务完成（completedAt，rrule 为空，避免与实例表重复计数；
-    // 排除子任务）
-    final doneTasks =
-        await (select(tasks)..where(
-              (t) =>
-                  t.completedAt.isBiggerOrEqualValue(start) &
-                  t.completedAt.isSmallerThanValue(end) &
-                  t.rrule.equals('') &
-                  t.parentId.isNull(),
-            ))
-            .get();
+
+    // 非重复任务完成（completedAt，rrule 为空）：按计划开始日/截止日计入，
+    // 排除子任务；无计划时间的任务与计划数口径一致，不计入
+    final doneTasks = await (select(tasks)..where(
+          (t) =>
+              t.completedAt.isNotNull() &
+              t.rrule.equals('') &
+              t.parentId.isNull(),
+        ))
+        .get();
     for (final t in doneTasks) {
-      // ：completedAt 为 DB 读回值，字段按应用时区解释后分组
-      final a = AppClock.asApp(t.completedAt!);
-      final d = AppClock.at(a.year, a.month, a.day);
-      result[d] = (result[d] ?? 0) + 1;
+      final day = t.planStart ?? t.dueTime;
+      if (day == null) continue;
+      add(day);
     }
     return result;
   }

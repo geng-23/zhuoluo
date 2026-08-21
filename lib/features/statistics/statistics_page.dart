@@ -68,9 +68,14 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
         from = AppClock.at(now.year, now.month, 1);
         to = AppClock.at(now.year, now.month + 1, 0);
     }
-    final completed = await db.getCompletedCountByDay(from, to);
-    final planned = await db.getPlannedCountByDay(from, to);
-    final pomodoros = await db.getPomodoros(from: from, to: to);
+    // 三个计数查询相互独立，并行执行——计划数展开（年视图逐日展开重复
+    // 任务）最慢，若顺序 await 会拖住完成数/专注数据的整体刷新（此前
+    // 数据变更后已完成柱"不能及时渲染"）
+    final (completed, planned, pomodoros) = await (
+      db.getCompletedCountByDay(from, to),
+      db.getPlannedCountByDay(from, to),
+      db.getPomodoros(from: from, to: to),
+    ).wait;
 
     // F1：习惯热力图（每个习惯独立）
     final habits = await db.getHabits();
@@ -154,7 +159,11 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                _CompletionCard(completed: _completed, planned: _planned),
+                _CompletionCard(
+                  completed: _completed,
+                  planned: _planned,
+                  range: _range,
+                ),
                 const SizedBox(height: 16),
                 _PomodoroCard(days: _pomodoros),
                 const SizedBox(height: 16),
@@ -186,11 +195,101 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
   }
 }
 
+/// 柱状图分桶：某统计区间（天/周/月）内的完成数与总任务数
+class CompletionBucket {
+  const CompletionBucket({
+    required this.label,
+    required this.completed,
+    required this.planned,
+  });
+
+  final String label;
+  final int completed;
+  final int planned;
+}
+
+/// 按统计范围把逐日完成/计划数聚合成柱状图分桶：
+/// - week：周一~周日 7 桶（标签 周一~周日）
+/// - month：周一起始的自然周（月初/月末不足 7 天的小周也独立成桶，
+///   标签为日期范围如 "7/27-8/2"）
+/// - year：1~12 月 12 桶（标签 "1月"~"12月"）
+///
+/// 分桶全走 AppClock 日历日运算（addCalendarDays/daysBetween），跨 DST
+/// 转换日不漂移；窗口外的日期在逐日 map 中无键取 0，月视图跨月周
+/// 天然只统计当月内日期，总数与卡片头部口径一致。
+List<CompletionBucket> completionBuckets({
+  required String range,
+  required DateTime now,
+  required Map<DateTime, int> completed,
+  required Map<DateTime, int> planned,
+}) {
+  int dayValue(Map<DateTime, int> map, DateTime day) {
+    final a = AppClock.asApp(day);
+    return map[AppClock.at(a.year, a.month, a.day)] ?? 0;
+  }
+
+  int sumDays(Map<DateTime, int> map, DateTime from, int count) {
+    var sum = 0;
+    for (var i = 0; i < count; i++) {
+      sum += dayValue(map, AppClock.addCalendarDays(from, i));
+    }
+    return sum;
+  }
+
+  final buckets = <CompletionBucket>[];
+  switch (range) {
+    case 'week':
+      final monday = DateUtilsEx.mondayOf(now);
+      for (var i = 0; i < 7; i++) {
+        final day = AppClock.addCalendarDays(monday, i);
+        buckets.add(CompletionBucket(
+          label: DateUtilsEx.weekdayCn[i],
+          completed: dayValue(completed, day),
+          planned: dayValue(planned, day),
+        ));
+      }
+    case 'month':
+      final monthStart = AppClock.at(now.year, now.month, 1);
+      final lastOfMonth = AppClock.at(
+        now.year,
+        now.month,
+        DateUtilsEx.daysInMonth(monthStart),
+      );
+      var weekStart = DateUtilsEx.mondayOf(monthStart);
+      while (AppClock.daysBetween(weekStart, lastOfMonth) >= 0) {
+        final weekEnd = AppClock.addCalendarDays(weekStart, 6);
+        buckets.add(CompletionBucket(
+          label:
+              '${weekStart.month}/${weekStart.day}-${weekEnd.month}/${weekEnd.day}',
+          completed: sumDays(completed, weekStart, 7),
+          planned: sumDays(planned, weekStart, 7),
+        ));
+        weekStart = AppClock.addCalendarDays(weekStart, 7);
+      }
+    case 'year':
+      for (var m = 1; m <= 12; m++) {
+        final monthStart = AppClock.at(now.year, m, 1);
+        final days = DateUtilsEx.daysInMonth(monthStart);
+        buckets.add(CompletionBucket(
+          label: '$m月',
+          completed: sumDays(completed, monthStart, days),
+          planned: sumDays(planned, monthStart, days),
+        ));
+      }
+  }
+  return buckets;
+}
+
 class _CompletionCard extends StatelessWidget {
-  const _CompletionCard({required this.completed, required this.planned});
+  const _CompletionCard({
+    required this.completed,
+    required this.planned,
+    required this.range,
+  });
 
   final Map<DateTime, int> completed;
   final Map<DateTime, int> planned;
+  final String range;
 
   @override
   Widget build(BuildContext context) {
@@ -201,8 +300,14 @@ class _CompletionCard extends StatelessWidget {
     final rate = totalPlanned == 0
         ? 0.0
         : (totalDone / totalPlanned).clamp(0.0, 1.0);
-    // 每日条形图
-    final days = planned.keys.toList()..sort();
+    // 分桶柱状图：周=7 天 / 月=自然周 / 年=12 月
+    final buckets = completionBuckets(
+      range: range,
+      now: AppClock.now(),
+      completed: completed,
+      planned: planned,
+    );
+    final hasData = buckets.any((b) => b.planned > 0 || b.completed > 0);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -237,77 +342,232 @@ class _CompletionCard extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              '说明：完成数按完成时间统计、计划数按计划日统计（子任务不计入）',
+              '说明：完成数与计划数均按任务所属日统计（计划开始日、截止日或重复实例日，跨天只计开始日）；无计划时间的任务与子任务不计入',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 11,
               ),
             ),
             const SizedBox(height: 12),
-            if (days.isEmpty)
+            if (!hasData)
               const Text('该时段无计划任务', style: TextStyle(color: Colors.grey))
             else
-              SizedBox(
-                height: 80,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    for (final d in days)
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 1),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              // C7-1：完成条按"完成/计划"比例填充在计划条内
-                              // （此前固定 14px 独立条，视觉与数字不等比）
-                              SizedBox(
-                                height: 20,
-                                child: Stack(
-                                  alignment: Alignment.bottomCenter,
-                                  children: [
-                                    Container(
-                                      width: 10,
-                                      height: ((planned[d] ?? 0)
-                                          .clamp(1, 20)
-                                          .toDouble()),
-                                      decoration: BoxDecoration(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.primaryContainer,
-                                        borderRadius:
-                                            const BorderRadius.vertical(
-                                              top: Radius.circular(2),
-                                            ),
-                                      ),
-                                    ),
-                                    if ((planned[d] ?? 0) > 0)
-                                      Container(
-                                        width: 4,
-                                        height:
-                                            ((planned[d] ?? 0)
-                                                .clamp(1, 20)
-                                                .toDouble()) *
-                                            ((completed[d] ?? 0) /
-                                                    (planned[d] ?? 0))
-                                                .clamp(0.0, 1.0),
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.primary,
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
+              _CompletionBarChart(buckets: buckets),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 单个分桶柱子的几何与标注（纯函数，便于单元测试）。
+///
+/// 渲染规则：
+/// - planned > 0：浅色"总任务"柱满高（所有非空桶等高）；
+///   深色"已完成"填充 = 满高 × min(1, 完成/计划)，completed > 0 时
+///   至少 minFill（避免极小比例时填充不可见）；
+/// - planned == 0 && completed > 0（补做遗留任务等）：无比例可算，
+///   填充按满高渲染，柱顶 100%（与卡片头部 C7-1 完成率封顶一致）；
+/// - planned == 0 && completed == 0：minBar 矮柱、无填充、柱顶 —。
+class BarMetrics {
+  const BarMetrics({
+    required this.totalHeight,
+    required this.fillHeight,
+    required this.percent,
+  });
+
+  final double totalHeight;
+  final double fillHeight; // 0 = 不渲染
+  final String percent;
+}
+
+BarMetrics barMetrics(
+  int planned,
+  int completed, {
+  double areaHeight = 100,
+  double minBar = 2,
+  double minFill = 2,
+}) {
+  final ratio = planned > 0 ? (completed / planned).clamp(0.0, 1.0) : 0.0;
+  return BarMetrics(
+    totalHeight: planned > 0 ? areaHeight : minBar,
+    fillHeight: planned > 0
+        ? (completed > 0
+              ? (areaHeight * ratio).clamp(minFill, areaHeight)
+              : 0.0)
+        : (completed > 0 ? areaHeight : 0.0),
+    percent: planned > 0
+        ? '${(ratio * 100).round()}%'
+        : (completed > 0 ? '100%' : '—'),
+  );
+}
+
+/// 完成率卡片下的分桶柱状图（堆叠填充式）：
+/// - 浅色柱 = 总任务数（计划数口径），planned > 0 的桶一律满高（等高）；
+/// - 深色填充 = 完成数，高度 = 满高 × 完成/计划（封顶 100%，下限 2px 保证可见）；
+/// - 柱顶百分比（无计划且无完成时显示 —）、柱下 完成数/总数 与桶标签。
+class _CompletionBarChart extends StatelessWidget {
+  const _CompletionBarChart({required this.buckets});
+
+  final List<CompletionBucket> buckets;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // 各段固定高度：百分比 12 + 柱区 100 + 计数 14 + 标签 14 = 140
+    const barAreaHeight = 100.0;
+    const barWidth = 16.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 图例
+        Row(
+          children: [
+            _LegendItem(color: scheme.primaryContainer, label: '总任务'),
+            const SizedBox(width: 12),
+            _LegendItem(color: scheme.primary, label: '已完成'),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 140,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              for (final b in buckets)
+                Expanded(
+                  child: _BucketBar(
+                    bucket: b,
+                    barAreaHeight: barAreaHeight,
+                    barWidth: barWidth,
+                    scheme: scheme,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 单根柱子：柱顶百分比 + 浅色总任务柱（等高）+ 深色已完成填充（比例）
+/// + 柱下 完成数/总数 图注 + 桶标签。
+class _BucketBar extends StatelessWidget {
+  const _BucketBar({
+    required this.bucket,
+    required this.barAreaHeight,
+    required this.barWidth,
+    required this.scheme,
+  });
+
+  final CompletionBucket bucket;
+  final double barAreaHeight;
+  final double barWidth;
+  final ColorScheme scheme;
+
+  @override
+  Widget build(BuildContext context) {
+    final b = bucket;
+    final m = barMetrics(b.planned, b.completed, areaHeight: barAreaHeight);
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        SizedBox(
+          height: 12,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              m.percent,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: b.planned > 0 ? scheme.primary : Colors.grey.shade500,
+              ),
+            ),
+          ),
+        ),
+        SizedBox(
+          height: barAreaHeight,
+          child: Stack(
+            alignment: Alignment.bottomCenter,
+            children: [
+              // 总任务柱（浅色，等高）
+              Container(
+                width: barWidth,
+                height: m.totalHeight,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(3),
+                  ),
+                ),
+              ),
+              // 已完成填充（深色，按 完成/计划 比例，下限 2px 保证可见）
+              if (m.fillHeight > 0)
+                Container(
+                  width: barWidth,
+                  height: m.fillHeight,
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(3),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 14,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              '${b.completed}/${b.planned}',
+              style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 14,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              b.label,
+              style: TextStyle(fontSize: 10, color: Colors.grey.shade700),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LegendItem extends StatelessWidget {
+  const _LegendItem({required this.color, required this.label});
+
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+        ),
+      ],
     );
   }
 }
@@ -488,7 +748,7 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
             ),
             const SizedBox(height: 2),
             Text(
-              '说明：颜色越深表示当天完成的任务越多',
+              '说明：颜色越深表示该日计划任务中已完成的越多',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 11,

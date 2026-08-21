@@ -313,16 +313,14 @@ void main() {
     );
     expect(aug13.length, 1, reason: '8/13 一个实例');
     expect(aug13.first.completed, isFalse, reason: '8/13 未完成');
-    // 统计按 completedAt（完成时刻=应用时区今天）归组；
-    // now 为注入的固定时刻，按应用时区解释后取字段（与归组口径一致）
-    final nowA = AppClock.asApp(AppClock.now());
-    final todayKey = AppClock.at(nowA.year, nowA.month, nowA.day);
+    // 统计按实例日（计划日 8/12）归组，而非完成时刻——完成数口径与
+    // 计划数一致（每日 完成数 ≤ 计划数）
     final counts = await db.getCompletedCountByDay(
-      AppClock.addCalendarDays(todayKey, -1),
-      AppClock.addCalendarDays(todayKey, 1),
+      AppClock.at(2026, 8, 1),
+      AppClock.at(2026, 8, 31),
     );
-    expect(counts[todayKey], 1,
-        reason: '统计按完成时刻（应用时区今天）归组');
+    expect(counts[AppClock.at(2026, 8, 12)], 1,
+        reason: '完成数按实例日（计划日 8/12）归组，而非完成时刻');
   });
 
   test('reminderTriggerAt：DB 读回任务（系统时区字段）不偏移', () async {

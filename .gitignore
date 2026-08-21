@@ -72,8 +72,6 @@ devtools_options.yaml
 opencode.jsonc
 AGENTS.md
 
-
-.gitignore
 # dsh 会话与 Flutter 本机缓存（不入库）
 .dsh-home/
-.flutter-root/
+

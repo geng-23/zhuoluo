@@ -57,12 +57,12 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
   void _pause() {
     _timer?.cancel();
     setState(() => _state = _PomodoroState.paused);
-    SoundService.instance.play(SoundKind.reopen);
+    SoundService.instance.play(SoundKind.pomodoroPause);
   }
 
   void _resume() {
     setState(() => _state = _PomodoroState.running);
-    SoundService.instance.play(SoundKind.reopen);
+    SoundService.instance.play(SoundKind.pomodoroResume);
     _startTimer();
   }
 

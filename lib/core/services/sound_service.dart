@@ -4,7 +4,18 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 /// 动作音效（轻提示音，播放失败静默）
-enum SoundKind { add, complete, reopen, delete, click, drop, skip }
+enum SoundKind {
+  add,
+  complete,
+  reopen,
+  delete,
+  click,
+  drop,
+  skip,
+  // 番茄钟专用暂停/继续音（此前误用 reopen「恢复」音，语义错配）
+  pomodoroPause,
+  pomodoroResume,
+}
 
 final soundServiceProvider = Provider<SoundService>(
   (ref) => SoundService.instance,
@@ -20,6 +31,8 @@ const Map<SoundKind, double> _volumeOf = {
   SoundKind.click: 0.5,
   SoundKind.drop: 0.8,
   SoundKind.skip: 0.65,
+  SoundKind.pomodoroPause: 0.6,
+  SoundKind.pomodoroResume: 0.6,
 };
 
 /// 音效池大小：快速连续操作时轮换播放器，互不截断
@@ -64,6 +77,8 @@ class SoundService {
     SoundKind.click => 'sounds/click.wav',
     SoundKind.drop => 'sounds/drop.wav',
     SoundKind.skip => 'sounds/skip.wav',
+    SoundKind.pomodoroPause => 'sounds/pomo_pause.wav',
+    SoundKind.pomodoroResume => 'sounds/pomo_resume.wav',
   };
 
   Future<void> play(SoundKind kind) async {

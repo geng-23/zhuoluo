@@ -669,7 +669,8 @@ class TasksController extends StateNotifier<TasksState> {
   /// 例外 + 番茄记录；同一快照持久化到 trash_items 供回收站页恢复）。
   /// 写回收站快照与物理删除在同一事务内——中途失败整体回滚，
   /// 不会出现"回收站有记录但任务还在"的孤儿。
-  Future<void> deleteTaskWithUndo(int id) async {
+  /// [silent]：批量删除时静默（避免逐条播声音，由批量方法统一播放一次）
+  Future<void> deleteTaskWithUndo(int id, {bool silent = false}) async {
     final t = await _db.getTask(id);
     if (t == null) return;
     final subs = await _collectSubtree(id);
@@ -720,6 +721,9 @@ class TasksController extends StateNotifier<TasksState> {
       await _db.deleteTask(id);
     });
     // 删除主路径必须 bump，否则日历/四象限/统计常驻页不刷新
+    if (!silent) {
+      SoundService.instance.play(SoundKind.delete);
+    }
     _bump();
   }
 
@@ -780,10 +784,13 @@ class TasksController extends StateNotifier<TasksState> {
   }
 
   /// 批量删除（逐条存撤销快照，支持批量撤销）
+  /// 逐条静默执行，完成后统一播放一次删除音（此前逐条响 N 次）
   Future<void> batchDelete(List<int> ids) async {
     for (final id in ids) {
-      await deleteTaskWithUndo(id);
+      await deleteTaskWithUndo(id, silent: true);
     }
+    if (ids.isEmpty) return;
+    SoundService.instance.play(SoundKind.delete);
   }
 
   /// 批量撤销删除（恢复快照中的任务/子任务/提醒/完成记录）
@@ -965,8 +972,13 @@ class TasksController extends StateNotifier<TasksState> {
     if (deleteTasks) {
       // 连带删除的任务先进回收站（与 task_page 连带删除路径一致）
       final tasks = await _db.getTasksByList(id);
-      for (final t in tasks.where((t) => t.parentId == null)) {
-        await deleteTaskWithUndo(t.id);
+      final roots = tasks.where((t) => t.parentId == null).toList();
+      // 逐条静默删除，最后统一播放一次删除音（删除整清单属批量操作）
+      for (final t in roots) {
+        await deleteTaskWithUndo(t.id, silent: true);
+      }
+      if (roots.isNotEmpty) {
+        SoundService.instance.play(SoundKind.delete);
       }
       await _db.deleteList(id, deleteTasks: false);
     } else {

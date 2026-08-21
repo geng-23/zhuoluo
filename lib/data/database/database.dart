@@ -564,6 +564,10 @@ class AppDatabase extends _$AppDatabase {
     return '${taskId}_${a.year}_${a.month}_${a.day}';
   }
 
+  /// 全量任务（含已完成/子任务/清单内全部）——专注详情等页面
+  /// 需要按 taskId 反查标题时使用（不能只取未完成任务）
+  Future<List<Task>> getAllTasks() => select(tasks).get();
+
   /// 智能清单：全部（未完成，不含子任务；排除已结束的有限重复系列）
   Future<List<Task>> getAllUncompleted() async {
     final rows = await select(tasks).get();

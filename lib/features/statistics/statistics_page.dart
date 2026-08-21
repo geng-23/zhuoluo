@@ -4,6 +4,7 @@ import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
+import 'package:zhuoluo/features/statistics/pomodoro_stats_page.dart';
 
 /// 统计页：完成率趋势 / 完成分布 / 专注时长 / 习惯热力图 / 年视图热力图
 class StatisticsPage extends ConsumerStatefulWidget {
@@ -580,39 +581,64 @@ class _PomodoroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final totalMinutes = days.values.fold(0, (a, b) => a + b);
+    // 点击进入专注详情页（每日/每任务明细 + 周月年图表）
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '专注时长',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey.shade700,
-              ),
-            ),
-            const SizedBox(height: 4),
-            // A6：专注时长数字 count-up 动画
-            TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0, end: totalMinutes / 60),
-              duration: const Duration(milliseconds: 700),
-              curve: Curves.easeOutCubic,
-              builder: (context, v, _) => Text(
-                '${v.toStringAsFixed(1)} 小时',
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const PomodoroStatsPage()),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '专注时长',
                 style: TextStyle(
-                  fontSize: 28,
                   fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.primary,
+                  color: Colors.grey.shade700,
                 ),
               ),
-            ),
-            Text(
-              '共 ${days.values.length} 天有专注记录',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-            ),
-          ],
+              const SizedBox(height: 4),
+              // A6：专注时长数字 count-up 动画
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: totalMinutes / 60),
+                duration: const Duration(milliseconds: 700),
+                curve: Curves.easeOutCubic,
+                builder: (context, v, _) => Text(
+                  '${v.toStringAsFixed(1)} 小时',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  Text(
+                    '共 ${days.values.length} 天有专注记录',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '查看详情',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right,
+                    size: 16,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

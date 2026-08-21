@@ -60,6 +60,18 @@ export PATH="$HOME/flutter/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdlin
 - **系统时区为 `America/Los_Angeles`（有夏令时）**。项目原在 `Asia/Shanghai`（无 DST）开发，个别测试对本地时区敏感（如 `test/reminders/reminder_regression_test.dart` 的通知 ID 用例）。若测试出现此类偶发失败，可用 `TZ=Asia/Shanghai flutter test` 规避。
 - 存在**两个 adb**：`~/Android/Sdk/platform-tools/adb`（在用，PATH 优先）与 `/usr/bin/adb`（pacman `android-tools`）。功能等价，属无害告警。
 
+### 1.5 沙箱缓存与临时文件约定
+
+dsh 沙箱下 `~/flutter`、`~/.gradle`、`~/.pub-cache` 等处于只读挂载，命令无法直接写入；临时副本统一放在仓库内两个目录（均已通过 `.git/info/exclude` 排除，不影响 git 状态）：
+
+- **`.dsh_cache/` —— 可复用缓存，保留不删**：
+  - `flutter/`：Flutter SDK 副本（运行 `flutter` 命令时把该 bin 置于 PATH 首位，配合 `HOME=.dsh_cache/home`、`GRADLE_USER_HOME=.dsh_cache/gradle` 使用）
+  - `gradle/`：Gradle 用户主目录副本（含 `gradle.properties` 中的 `kotlin.compiler.execution.strategy=in-process`，规避只读 HOME 下 Kotlin daemon 无法写标记文件的问题）
+  - `home/`：可写 HOME（含 `.pub-cache` 副本；`PUB_CACHE` 指向它避免 pub 重下）
+  - 这些副本重建成本高（数 GB、数分钟），**运行完成后不要删除**。
+- **`.dsh_tmp/` —— 一次性产物，运行完成后删除**：截图、`uiautomator` dump、临时 sqlite 拷贝等验证中间文件统一放这里，本次运行结束后清理。
+- `.dsh-vision-router/` 为视觉工具自身的产物目录，交由工具管理，不手动清理，保持 git 排除即可。
+
 ---
 
 ## 2. 交互原则

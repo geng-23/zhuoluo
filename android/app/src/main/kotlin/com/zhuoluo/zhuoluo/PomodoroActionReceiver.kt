@@ -34,18 +34,24 @@ class PomodoroActionReceiver : BroadcastReceiver() {
         }
         val channel = MainActivity.pomodoroChannel
         if (channel != null) {
-            // 进程存活：直达主隔离区
+            // 进程存活：直达主隔离区（引擎为进程级缓存，Activity 销毁后仍有效）
             try {
                 channel.invokeMethod("action", dartAction, null)
             } catch (e: Exception) {
+                // 通道失效（引擎已死等极端情况）：回退冷启动 App
                 Log.w(TAG, "转发番茄钟动作失败: $dartAction", e)
+                startApp(context)
             }
         } else {
             // 进程已死：冷启动 App（会话已失）
-            val launch = Intent(context, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(launch)
+            startApp(context)
         }
+    }
+
+    private fun startApp(context: Context) {
+        val launch = Intent(context, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(launch)
     }
 }

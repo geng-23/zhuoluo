@@ -52,13 +52,13 @@
         </receiver>
         <receiver android:exported="false"
             android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver" />
-        <!-- 番茄钟前台服务：stopWithTask=true —— 划掉最近任务即结束会话
-             （与"用户杀死进程"语义一致），通知随之移除无残留 -->
+        <!-- 番茄钟前台服务：会话期间保活进程（返回桌面/切后台/划掉任务计时
+             均不中断，仅强杀/重启终止）；引擎为进程级缓存，Activity 销毁后
+             会话继续，通知动作仍可直达 Dart 主隔离区 -->
         <service
             android:name=".PomodoroService"
             android:exported="false"
-            android:foregroundServiceType="specialUse"
-            android:stopWithTask="true">
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="pomodoro focus timer countdown"/>

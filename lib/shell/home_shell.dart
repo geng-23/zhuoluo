@@ -63,12 +63,18 @@ class _HomeShellState extends ConsumerState<HomeShell>
       _handlePayload(payload);
     });
     // 冷启动深链——进程被杀后点通知启动 App，payload 不经 onTap 回调，
-    // 需消费 init 时捕获的启动 payload（同步执行，无竞态）
-    final launchPayload = ref
+    // 需消费 init 时捕获的启动 payload（进程级引擎下 init 可能漏捕，
+    // 首次挂载异步补读一次，无竞态）
+    unawaited(_consumeLaunchPayload());
+  }
+
+  /// 消费冷启动深链 payload（init 漏捕时补读 getNotificationAppLaunchDetails）
+  Future<void> _consumeLaunchPayload() async {
+    final payload = await ref
         .read(notificationServiceProvider)
         .consumeLaunchPayload();
-    if (launchPayload != null) {
-      _handlePayload(launchPayload);
+    if (payload != null && mounted) {
+      _handlePayload(payload);
     }
   }
 

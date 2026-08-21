@@ -12,7 +12,10 @@ import android.provider.MediaStore
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
+import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugins.GeneratedPluginRegistrant
 import java.io.File
 import java.io.FileOutputStream
 
@@ -22,6 +25,31 @@ class MainActivity : FlutterActivity() {
         /** 番茄钟桥通道（进程存活时非空；供 [PomodoroActionReceiver] 转发动作到 Dart 主隔离区） */
         @JvmStatic
         var pomodoroChannel: MethodChannel? = null
+
+        /** 进程级引擎缓存 ID */
+        private const val ENGINE_ID = "zhuoluo_engine"
+    }
+
+    /**
+     * 进程级引擎（懒创建 + 缓存）：Activity 销毁（连续返回退出）后引擎与
+     * Dart 隔离区继续存活——番茄钟会话与通知栏动作（暂停/继续/结束）不中断。
+     * 首次挂载创建并缓存；后续挂载复用同一引擎（Activity 不销毁它）。
+     */
+    override fun provideFlutterEngine(context: android.content.Context): FlutterEngine? {
+        val cache = FlutterEngineCache.getInstance()
+        return cache.get(ENGINE_ID) ?: run {
+            val engine = FlutterEngine(context)
+            // 手动创建引擎需自行启动 Dart 入口（isExecutingDart 防与
+            // FlutterActivity 委托重复执行）；插件也需自行注册
+            if (!engine.dartExecutor.isExecutingDart()) {
+                engine.dartExecutor.executeDartEntrypoint(
+                    DartExecutor.DartEntrypoint.createDefault(),
+                )
+            }
+            GeneratedPluginRegistrant.registerWith(engine)
+            cache.put(ENGINE_ID, engine)
+            engine
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

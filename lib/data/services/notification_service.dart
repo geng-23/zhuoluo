@@ -231,9 +231,24 @@ class NotificationService {
     _initialized = true;
   }
 
-  /// 取出并清空冷启动深链 payload（HomeShell 订阅前调用一次）。
+  /// 取出并清空冷启动深链 payload（HomeShell 首次挂载时调用一次）。
   /// 返回 null 表示非通知启动或无 payload。
-  String? consumeLaunchPayload() {
+  ///
+  /// 进程级缓存引擎场景：Dart 入口可能先于 Activity 插件挂载启动，init()
+  /// 时无启动 Intent 而漏捕——首次 Activity 挂载后再补读一次
+  /// getNotificationAppLaunchDetails（仅当 init 未捕获时）。
+  Future<String?> consumeLaunchPayload() async {
+    if (_launchPayload == null) {
+      try {
+        final details = await _plugin.getNotificationAppLaunchDetails();
+        if (details?.didNotificationLaunchApp == true) {
+          _launchPayload = details?.notificationResponse?.payload;
+          debugPrint('通知：补捕获启动深链 payload=$_launchPayload');
+        }
+      } catch (e) {
+        debugPrint('通知：补读启动详情失败 $e');
+      }
+    }
     final p = _launchPayload;
     _launchPayload = null;
     return p;

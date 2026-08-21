@@ -352,7 +352,7 @@ class ReminderScheduler {
               when: when,
               payload: 'h${habit.id}',
               // 习惯提醒走独立渠道（声音/开关可与任务提醒分开控制）
-              channel: 'habit_reminder_v3',
+              channel: NotificationService.habitReminderChannelId,
             ) &&
             ok;
       }

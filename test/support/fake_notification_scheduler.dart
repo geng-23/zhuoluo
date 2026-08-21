@@ -37,7 +37,7 @@ class FakeNotificationScheduler implements NotificationScheduler {
     required String body,
     required DateTime when,
     String? payload,
-    String channel = 'task_reminder_v4',
+    String channel = NotificationService.reminderChannelId,
   }) async {
     if (failSchedules) return false;
     scheduled.add((

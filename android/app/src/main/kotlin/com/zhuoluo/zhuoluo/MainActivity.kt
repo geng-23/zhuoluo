@@ -5,6 +5,8 @@ import android.app.NotificationManager
 import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
@@ -196,19 +198,63 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(null)
                 }
-                // 将指定通知渠道的锁屏可见性更新为 PUBLIC。
-                // N1-C：flutter_local_notifications 的渠道 API 不支持设置
-                // lockscreenVisibility；小米 MIUI 默认按"未设置"处理为锁屏不显示，
-                // 锁屏既不弹通知也不响铃，这里统一改为锁屏显示全部内容。
-                "setLockscreenVisibility" -> {
+                // 统一断言提醒渠道默认设置（每次启动渠道创建后调用，幂等）：
+                // 系统默认通知音 + 振动开启 + 高重要性（悬浮通知/heads-up）。
+                // 锁屏显示按系统默认，不在此强制。
+                // 在同一次 fetch+mutate+recreate 中同时断言——部分 ROM 在
+                // 渠道 re-create 时会把声音/振动复位为关闭。
+                // AOSP 语义：用户已手动修改过的字段（user-locked）由系统保留，
+                // 不覆盖用户选择；用户未改过的渠道保证三项默认全开。
+                "applyReminderChannelDefaults" -> {
                     val ids = call.argument<List<String>>("channels") ?: emptyList()
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                        val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                        val audioAttributes = AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                            .build()
                         for (id in ids) {
                             val channel = nm.getNotificationChannel(id) ?: continue
-                            channel.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                            channel.setSound(soundUri, audioAttributes)
+                            channel.enableVibration(true)
+                            channel.setImportance(NotificationManager.IMPORTANCE_HIGH)
                             nm.createNotificationChannel(channel)
                         }
+                    }
+                    result.success(null)
+                }
+                // 查询单个通知渠道的设置状态（我的 → 通知权限中心展示与引导）。
+                // 悬浮通知以渠道重要性 >= IMPORTANCE_HIGH 为代理判断。
+                "getReminderChannelSettings" -> {
+                    val channelId = call.argument<String>("channelId")
+                    if (channelId == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                        result.success(mapOf("exists" to false))
+                        return@setMethodCallHandler
+                    }
+                    val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                    val channel = nm.getNotificationChannel(channelId)
+                    if (channel == null) {
+                        result.success(mapOf("exists" to false))
+                        return@setMethodCallHandler
+                    }
+                    result.success(
+                        mapOf(
+                            "exists" to true,
+                            "soundEnabled" to (channel.getSound() != null),
+                            "vibrationEnabled" to channel.shouldVibrate(),
+                            "importance" to channel.getImportance(),
+                        ),
+                    )
+                }
+                // 跳转系统"指定通知渠道"设置页（通知声音/悬浮通知/振动/锁屏显示
+                // 等选项集中在该页，供权限中心一键引导开启）
+                "openChannelNotificationSettings" -> {
+                    val channelId = call.argument<String>("channelId")
+                    if (channelId != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                            .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                            .putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+                        startActivity(intent)
                     }
                     result.success(null)
                 }

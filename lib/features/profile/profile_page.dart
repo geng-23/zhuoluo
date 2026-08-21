@@ -7,6 +7,7 @@ import 'package:zhuoluo/core/services/haptics_service.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/data/services/backup_service.dart';
+import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/features/profile/backup_page.dart';
 import 'package:zhuoluo/features/profile/habit_page.dart';
 import 'package:zhuoluo/features/profile/pomodoro_page.dart';
@@ -148,7 +149,7 @@ class ProfilePage extends ConsumerWidget {
             const _SectionHeader('关于'),
             ListTile(
               leading: const Icon(Icons.info_outline),
-              title: const Text('着落 v1.3.0+31'),
+              title: const Text('着落 v1.3.1+32'),
               subtitle: const Text('事事有着落 · 本地数据'),
               onTap: () => _showAbout(context),
             ),
@@ -376,6 +377,15 @@ class _NotificationPermissionTileState
   bool? _notifOk;
   bool? _batteryOk;
 
+  /// 提醒渠道设置状态（声音/悬浮/振动），按渠道 ID 缓存
+  final Map<String, ReminderChannelStatus?> _channelStatus = {};
+
+  /// 提醒渠道（任务/习惯）：状态展示 + 一键跳转系统渠道设置页
+  static const _reminderChannels = [
+    (id: NotificationService.reminderChannelId, name: '任务提醒'),
+    (id: NotificationService.habitReminderChannelId, name: '习惯提醒'),
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -387,6 +397,14 @@ class _NotificationPermissionTileState
     final exact = await svc.canScheduleExactAlarms();
     final notif = await svc.areNotificationsEnabled();
     final battery = await svc.isIgnoringBatteryOptimizations();
+    // 提醒渠道状态：渠道属性在系统侧创建后固化，应用只能尽力默认开启，
+    // 未开启的选项在下方展示并引导一键跳转开启
+    final taskStatus = await svc.getReminderChannelStatus(
+      NotificationService.reminderChannelId,
+    );
+    final habitStatus = await svc.getReminderChannelStatus(
+      NotificationService.habitReminderChannelId,
+    );
     // N-刷新调度权限缓存——用户从系统设置授权/拒绝后，
     // 否则调度器按旧缓存短路，提醒一直静默跳过直到重启
     await svc.refreshPermissionCache();
@@ -395,6 +413,8 @@ class _NotificationPermissionTileState
         _exactOk = exact;
         _notifOk = notif;
         _batteryOk = battery;
+        _channelStatus[NotificationService.reminderChannelId] = taskStatus;
+        _channelStatus[NotificationService.habitReminderChannelId] = habitStatus;
       });
     }
   }
@@ -496,8 +516,83 @@ class _NotificationPermissionTileState
               .read(notificationServiceProvider)
               .openAutoStartSettings(),
         ),
+        // 提醒渠道设置：通知声音/悬浮通知/振动默认开启（渠道创建时已尽力断言）；
+        // 部分 ROM 可能未生效，此处展示真实状态并一键跳转系统对应渠道设置页
+        // 引导开启。锁屏显示按系统默认，不纳入引导范围。
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Text(
+            '提醒渠道',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+        ),
+        if (_anyChannelNeedsAttention)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 14, color: Colors.orange.shade700),
+                const SizedBox(width: 6),
+                const Expanded(
+                  child: Text(
+                    '声音/悬浮/振动未全部开启，点击下方渠道前往系统设置开启',
+                    style: TextStyle(fontSize: 11, color: Colors.orange),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        for (final c in _reminderChannels) _channelTile(c.id, c.name),
       ],
     );
+  }
+
+  /// 任一提醒渠道存在未开启的关键选项（提示条展示条件）
+  bool get _anyChannelNeedsAttention => _reminderChannels.any((c) {
+        final s = _channelStatus[c.id];
+        return s != null && s.exists && !s.allOn;
+      });
+
+  /// 提醒渠道行：状态位（声音/悬浮/振动）+ 点击跳系统渠道设置页
+  Widget _channelTile(String channelId, String name) {
+    final status = _channelStatus[channelId];
+    final needsAttention = status != null && status.exists && !status.allOn;
+    return ListTile(
+      dense: true,
+      leading: Icon(
+        Icons.campaign_outlined,
+        size: 20,
+        color: needsAttention ? Colors.orange : Colors.grey.shade600,
+      ),
+      title: Text('$name渠道设置', style: const TextStyle(fontSize: 14)),
+      subtitle: Text(
+        _channelStatusText(status),
+        style: TextStyle(
+          fontSize: 11,
+          color: needsAttention ? Colors.orange.shade800 : Colors.grey.shade600,
+        ),
+      ),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () async {
+        await ref
+            .read(notificationServiceProvider)
+            .openChannelSettings(channelId);
+        // 从系统设置返回后重新查询状态
+        Future.delayed(const Duration(seconds: 1), _check);
+      },
+    );
+  }
+
+  /// 渠道状态文案：null=检查中/读取失败；exists=false=无渠道机制
+  String _channelStatusText(ReminderChannelStatus? s) {
+    if (s == null) return '状态检查中…';
+    if (!s.exists) return '渠道不存在（Android 8.0 以下无渠道机制）';
+    final parts = [
+      '声音 ${s.soundEnabled ? '✓' : '✗'}',
+      '悬浮 ${s.floatingEnabled ? '✓' : '✗'}',
+      '振动 ${s.vibrationEnabled ? '✓' : '✗'}',
+    ];
+    return parts.join(' · ');
   }
 
   /// 状态图标：null=检查中 / true=已开启 / false=未开启

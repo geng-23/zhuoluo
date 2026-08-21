@@ -12,10 +12,50 @@ import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 调度内核可注入（[debugOverrideScheduler]）：测试环境用记录型替身
 /// 断言真实调度结果（ID/时间/数量），而非依赖平台插件不可用时的
 /// 异常吞掉行为（此前测试"假绿"——断言的是环境失败而非功能正确性）。
+/// 提醒渠道设置状态（原生侧查询，供「我的 → 通知权限中心」展示与引导）。
+/// 悬浮通知（heads-up）以渠道重要性 >= HIGH 为代理判断——部分国产 ROM 的
+/// 「悬浮通知」为 ROM 级开关、无公开读取 API，只能以渠道重要性近似。
+/// 锁屏显示不属于必须开启项，不在此判定范围内（按系统默认）。
+class ReminderChannelStatus {
+  const ReminderChannelStatus({
+    required this.exists,
+    required this.soundEnabled,
+    required this.vibrationEnabled,
+    required this.floatingEnabled,
+  });
+
+  /// 渠道是否存在（Android 8.0 以下无渠道机制时为 false）
+  final bool exists;
+
+  /// 通知声音是否开启（渠道已设置声音）
+  final bool soundEnabled;
+
+  /// 振动是否开启
+  final bool vibrationEnabled;
+
+  /// 悬浮通知是否可用（渠道重要性 >= IMPORTANCE_HIGH）
+  final bool floatingEnabled;
+
+  /// 三项关键选项是否全部开启（渠道存在且无未开启项）
+  bool get allOn =>
+      exists && soundEnabled && vibrationEnabled && floatingEnabled;
+}
+
 class NotificationService {
   NotificationService._();
 
   static final NotificationService instance = NotificationService._();
+
+  /// 任务提醒渠道 ID（v4：显式系统默认通知音 + 高重要性 + 振动）。
+  /// 渠道属性在系统侧创建后固化，变更属性须换新渠道 ID（此前 v3→v4 同因）。
+  static const String reminderChannelId = 'task_reminder_v4';
+
+  /// 习惯提醒渠道 ID（v3：与任务渠道独立，声音/开关可单独控制）
+  static const String habitReminderChannelId = 'habit_reminder_v3';
+
+  /// 番茄钟渠道 ID
+  static const String pomodoroCountdownChannelId = 'pomodoro_countdown_v1';
+  static const String pomodoroDoneChannelId = 'pomodoro_done_v1';
 
   final _plugin = FlutterLocalNotificationsPlugin();
 
@@ -109,6 +149,60 @@ class NotificationService {
     } catch (_) {}
   }
 
+  /// 统一断言提醒渠道的默认设置（每次启动渠道创建后调用，幂等）：
+  /// 系统默认通知音 + 振动开启 + 高重要性（悬浮通知/heads-up）。
+  /// 锁屏显示按系统默认，不在此强制。
+  ///
+  /// AOSP 语义：用户已手动修改过的字段（user-locked）由系统保留、不覆盖；
+  /// 用户未改过的渠道保证声音/振动/悬浮默认开启。原生侧在同一次渠道
+  /// re-create 中同时断言，避免部分 ROM 在 re-create 时把声音/振动复位。
+  Future<void> applyReminderChannelDefaults() async {
+    try {
+      await _systemChannel
+          .invokeMethod<void>('applyReminderChannelDefaults', {
+            'channels': [reminderChannelId, habitReminderChannelId],
+          })
+          .timeout(const Duration(seconds: 2), onTimeout: () {});
+    } catch (_) {}
+  }
+
+  /// 查询提醒渠道的设置状态（声音/悬浮/振动）。
+  /// 无原生宿主（测试环境）或查询失败返回 null；Android 8.0 以下或
+  /// 渠道不存在时返回 [ReminderChannelStatus.exists] == false。
+  Future<ReminderChannelStatus?> getReminderChannelStatus(
+    String channelId,
+  ) async {
+    try {
+      final r = await _systemChannel
+          .invokeMethod<Map<dynamic, dynamic>>('getReminderChannelSettings', {
+            'channelId': channelId,
+          })
+          .timeout(const Duration(seconds: 2), onTimeout: () => null);
+      if (r == null) return null;
+      return ReminderChannelStatus(
+        exists: r['exists'] == true,
+        soundEnabled: r['soundEnabled'] == true,
+        vibrationEnabled: r['vibrationEnabled'] == true,
+        // 悬浮通知以渠道重要性 >= IMPORTANCE_HIGH(4) 为代理判断
+        floatingEnabled: ((r['importance'] as num?)?.toInt() ?? 0) >= 4,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 跳转系统"指定通知渠道"设置页（通知声音/悬浮通知/振动/锁屏显示
+  /// 等选项集中在该页，供权限中心一键引导开启）
+  Future<void> openChannelSettings(String channelId) async {
+    try {
+      await _systemChannel
+          .invokeMethod<void>('openChannelNotificationSettings', {
+            'channelId': channelId,
+          })
+          .timeout(const Duration(seconds: 2), onTimeout: () {});
+    } catch (_) {}
+  }
+
   /// 发送测试通知（1 秒后弹出，验证通知链路是否正常）。
   /// 返回 false 表示未成功排入系统（权限被拒等）。
   Future<bool> sendTestNotification() async {
@@ -154,33 +248,41 @@ class NotificationService {
       await android?.deleteNotificationChannel(channelId: 'task_reminder_v3');
       await android?.deleteNotificationChannel(channelId: 'habit_reminder_v2');
     } catch (_) {}
+    // 提醒渠道显式声明声音/振动/角标：playSound/enableVibration/showBadge
+    // 虽是插件默认值，仍显式写出——渠道属性创建后固化，防插件默认漂移。
     await android?.createNotificationChannel(
       const AndroidNotificationChannel(
-        'task_reminder_v4',
+        reminderChannelId,
         '任务提醒',
         description: '任务到点提醒',
         importance: Importance.high,
+        playSound: true,
         sound: UriAndroidNotificationSound(
           'content://settings/system/notification_sound',
         ),
+        enableVibration: true,
+        showBadge: true,
       ),
     );
     await android?.createNotificationChannel(
       const AndroidNotificationChannel(
-        'habit_reminder_v3',
+        habitReminderChannelId,
         '习惯提醒',
         description: '习惯打卡每日提醒',
         importance: Importance.high,
+        playSound: true,
         sound: UriAndroidNotificationSound(
           'content://settings/system/notification_sound',
         ),
+        enableVibration: true,
+        showBadge: true,
       ),
     );
     // 番茄钟渠道：倒计时（低重要/静音常驻）+ 完成提醒（高重要/默认音）。
     // 低重要渠道不打扰；只提醒一次由 onlyAlertOnce 保证，渠道本身无声音。
     await android?.createNotificationChannel(
       const AndroidNotificationChannel(
-        'pomodoro_countdown_v1',
+        pomodoroCountdownChannelId,
         '番茄钟倒计时',
         description: '番茄专注运行时的常驻倒计时通知',
         importance: Importance.low,
@@ -188,7 +290,7 @@ class NotificationService {
     );
     await android?.createNotificationChannel(
       const AndroidNotificationChannel(
-        'pomodoro_done_v1',
+        pomodoroDoneChannelId,
         '番茄钟完成',
         description: '番茄专注结束提醒',
         importance: Importance.high,
@@ -197,21 +299,9 @@ class NotificationService {
         ),
       ),
     );
-    // N1-C：小米 MIUI 渠道默认"锁屏不显示通知"（渠道 lockscreenVisibility 未设置时
-    // UI 显示为不显示，锁屏既不弹也不响）。flutter_local_notifications 渠道 API
-    // 不支持设置锁屏可见性，通过原生通道将渠道 lockscreenVisibility 更新为 PUBLIC。
-    try {
-      await _systemChannel
-          .invokeMethod<void>('setLockscreenVisibility', {
-            'channels': [
-              'task_reminder_v4',
-              'habit_reminder_v3',
-              'pomodoro_countdown_v1',
-              'pomodoro_done_v1',
-            ],
-          })
-          .timeout(const Duration(seconds: 2), onTimeout: () {});
-    } catch (_) {}
+    // 提醒渠道统一再断言默认设置（系统默认通知音 + 振动开启 + 高重要性）：
+    // 部分 ROM 在渠道 re-create 时可能复位声音/振动，启动时幂等修正。
+    await applyReminderChannelDefaults();
     // 清理进程被杀后残留的番茄钟倒计时通知（会话不持久化，冷启动一律清除，
     // 避免通知栏残留冻结的倒计时）
     try {
@@ -359,8 +449,8 @@ class NotificationService {
 
   /// 调度通知。返回 false 表示未调度（时间已过/无权限），供调用方提示用户
   /// [payload] 深链载荷：'t{taskId}' 定位任务 / 'h{habitId}' 打开习惯页
-  /// [channel] 通知渠道：任务提醒默认 task_reminder_v4；习惯提醒传
-  /// habit_reminder_v3（逐日排期后习惯提醒改走本方法，
+  /// [channel] 通知渠道：任务提醒默认 [reminderChannelId]；习惯提醒传
+  /// [habitReminderChannelId]（逐日排期后习惯提醒改走本方法，
   /// 此前硬编码任务渠道导致习惯提醒声音/开关无法单独控制）
   Future<bool> schedule(
     int id, {
@@ -369,7 +459,7 @@ class NotificationService {
     required DateTime when,
     // 可空：测试通知不带深链
     String? payload,
-    String channel = 'task_reminder_v4',
+    String channel = reminderChannelId,
   }) async {
     // 测试替身接管：直接记录调度请求，不触平台插件
     final stub = debugOverrideScheduler;
@@ -402,25 +492,39 @@ class NotificationService {
       return false;
     }
     final tzWhen = tz.TZDateTime.from(when, AppClock.location);
-    final details = channel == 'habit_reminder_v3'
+    // 逐条通知显式带声音/振动（playSound/sound/enableVibration）：
+    // Android 8.0+（渠道机制）由渠道设置接管，此处不生效但无副作用；
+    // Android 7.x（minSdk 24，无渠道）若不显式声明，插件会将 null 视为
+    // false 并显式 setSound(null)/setVibrate({0})，导致通知静音且不振动。
+    final details = channel == habitReminderChannelId
         ? const NotificationDetails(
             android: AndroidNotificationDetails(
-              'habit_reminder_v3',
+              habitReminderChannelId,
               '习惯提醒',
               channelDescription: '习惯打卡每日提醒',
               visibility: NotificationVisibility.public,
               importance: Importance.high,
               priority: Priority.high,
+              playSound: true,
+              sound: UriAndroidNotificationSound(
+                'content://settings/system/notification_sound',
+              ),
+              enableVibration: true,
             ),
           )
         : const NotificationDetails(
             android: AndroidNotificationDetails(
-              'task_reminder_v4',
+              reminderChannelId,
               '任务提醒',
               channelDescription: '任务到点提醒',
               visibility: NotificationVisibility.public,
               importance: Importance.high,
               priority: Priority.high,
+              playSound: true,
+              sound: UriAndroidNotificationSound(
+                'content://settings/system/notification_sound',
+              ),
+              enableVibration: true,
             ),
           );
     // 系统闹钟调度失败（如厂商默认拒绝 SCHEDULE_EXACT_ALARM）时降级为
@@ -490,12 +594,17 @@ class NotificationService {
         payload: 'pomodoro',
         notificationDetails: NotificationDetails(
           android: AndroidNotificationDetails(
-            'pomodoro_done_v1',
+            pomodoroDoneChannelId,
             '番茄钟完成',
             channelDescription: '番茄专注结束提醒',
             visibility: NotificationVisibility.public,
             importance: Importance.high,
             priority: Priority.high,
+            playSound: true,
+            sound: UriAndroidNotificationSound(
+              'content://settings/system/notification_sound',
+            ),
+            enableVibration: true,
             autoCancel: true,
             category: AndroidNotificationCategory.reminder,
             // 与倒计时通知同款番茄图标（小图标剪影 + 彩色大图标）
@@ -557,7 +666,7 @@ abstract class NotificationScheduler {
     required String body,
     required DateTime when,
     String? payload,
-    String channel = 'task_reminder_v4',
+    String channel = NotificationService.reminderChannelId,
   });
 
   /// 取消单条通知

@@ -122,4 +122,63 @@ void main() {
         reason: '已打卡习惯初始即完成态');
     expect(find.byIcon(Icons.check_circle), findsOneWidget);
   });
+
+  testWidgets('新建习惯：默认图标为 ⭐，可点选其他图标落库', (tester) async {
+    await db.ensureDefaultList();
+    await pumpHabitPage(tester);
+
+    // 打开新建弹窗，弹窗内应展示图标选择区
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    expect(find.text('新建习惯'), findsOneWidget);
+    expect(find.text('图标'), findsOneWidget);
+
+    // 输入名称并点选图标 📚
+    await tester.enterText(find.byType(TextField), '晨跑');
+    await tester.tap(find.text('📚'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('创建'));
+    await tester.pumpAndSettle();
+
+    final habits = await db.getHabits();
+    expect(habits, hasLength(1), reason: '创建成功');
+    expect(habits.first.name, '晨跑');
+    expect(habits.first.icon, '📚', reason: '点选的图标应落库');
+  });
+
+  testWidgets('新建习惯：不点图标时默认 ⭐', (tester) async {
+    await db.ensureDefaultList();
+    await pumpHabitPage(tester);
+
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '阅读');
+    await tester.tap(find.text('创建'));
+    await tester.pumpAndSettle();
+
+    final habits = await db.getHabits();
+    expect(habits, hasLength(1));
+    expect(habits.first.icon, '⭐', reason: '默认图标为 ⭐');
+  });
+
+  testWidgets('长按编辑图标：选择后落库并刷新列表', (tester) async {
+    await seedHabit();
+    await pumpHabitPage(tester);
+
+    // 长按习惯行打开操作底栏
+    await tester.longPress(find.text('阅读'));
+    await tester.pumpAndSettle();
+    expect(find.text('编辑图标'), findsOneWidget);
+    await tester.tap(find.text('编辑图标'));
+    await tester.pumpAndSettle();
+
+    // 选择 🏊 并确定
+    await tester.tap(find.text('🏊'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('确定'));
+    await tester.pumpAndSettle();
+
+    final updated = await db.getHabit(seedHabitId);
+    expect(updated!.icon, '🏊', reason: '编辑后的图标应落库');
+  });
 }

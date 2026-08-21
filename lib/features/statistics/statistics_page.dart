@@ -659,51 +659,97 @@ class _HabitHeatmap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final keys = heat.keys.toList()..sort();
+    // 窗口起点与终点（终点即今天），用于标注起止日期
+    final start = keys.first;
+    final end = keys.last;
+    final rangeText = start.year == end.year
+        ? '${start.month}/${start.day} – ${end.month}/${end.day}'
+        : '${start.year}/${start.month}/${start.day} – '
+            '${end.year}/${end.month}/${end.day}';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 12,
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.primaryContainer,
+                  child: Text(icon, style: const TextStyle(fontSize: 14)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '$habitName · 打卡热力图',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
             Text(
-              '$icon $habitName',
+              '近 90 天（$rangeText）· 红圈 = 今天',
               style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey.shade700,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 11,
               ),
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              height: 90,
-              child: GridView.builder(
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 30,
-                  mainAxisSpacing: 3,
-                  crossAxisSpacing: 3,
-                ),
-                itemCount: keys.length,
-                itemBuilder: (context, i) {
-                  final done = heat[keys[i]] ?? false;
-                  final isToday = DateUtilsEx.sameDay(keys[i], AppClock.now());
-                  return Container(
-                    decoration: BoxDecoration(
-                      color: done
-                          ? Theme.of(context).colorScheme.primary
-                          : Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerHighest,
-                      shape: BoxShape.circle,
-                      border: isToday
-                          ? Border.all(
-                              color: Theme.of(context).colorScheme.error,
-                              width: 1.5,
-                            )
-                          : null,
-                    ),
-                  );
-                },
-              ),
+            // 高度自适应——15 列 × 6 行恰好容纳 90 天，按宽度计算
+            // 格子尺寸与总行数；固定 90px 在手机宽度下会留约 63px
+            // 空白（30 列时每格仅约 7px、3 行只占约 27px）
+            LayoutBuilder(
+              builder: (context, constraints) {
+                const cols = 15;
+                const spacing = 3.0;
+                final cell =
+                    (constraints.maxWidth - spacing * (cols - 1)) / cols;
+                final rows = (keys.length / cols).ceil();
+                final height = rows * cell + spacing * (rows - 1);
+                return SizedBox(
+                  height: height,
+                  child: GridView.builder(
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: cols,
+                          mainAxisSpacing: spacing,
+                          crossAxisSpacing: spacing,
+                        ),
+                    itemCount: keys.length,
+                    itemBuilder: (context, i) {
+                      final done = heat[keys[i]] ?? false;
+                      final isToday = DateUtilsEx.sameDay(
+                        keys[i],
+                        AppClock.now(),
+                      );
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: done
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
+                          shape: BoxShape.circle,
+                          border: isToday
+                              ? Border.all(
+                                  color: Theme.of(context).colorScheme.error,
+                                  width: 1.5,
+                                )
+                              : null,
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
             ),
           ],
         ),
@@ -753,12 +799,13 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
         .fold<int>(0, (a, b) => b > a ? b : a)
         .clamp(1, 10)
         .toInt();
-    // 闰年 366 天（此前固定 365 格漏掉 12/31）；
-    // 用日历日差而非绝对时长差——DST 时区一年 365*24±1h，inDays 会得 364
-    final daysInYear = AppClock.daysBetween(
-      AppClock.at(now.year, 1, 1),
-      AppClock.at(now.year + 1, 1, 1),
-    );
+    // 只渲染「1/1 至今」的已过日历日（含今天）——不再为未来日期
+    // 留透明占位格，消除底部大片留白；今天为最后一格（红圈标注）。
+    // 用日历日差而非绝对时长差——DST 时区 ±1h 会让 inDays 截断
+    final jan1 = AppClock.at(now.year, 1, 1);
+    final dayOfYear =
+        AppClock.daysBetween(jan1, AppClock.at(now.year, now.month, now.day)) +
+        1;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -774,23 +821,30 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
             ),
             const SizedBox(height: 2),
             Text(
-              '说明：颜色越深表示该日计划任务中已完成的越多',
+              '1/1 – ${now.month}/${now.day} · 共 $dayOfYear 天',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 11,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '颜色越深表示该日完成越多 · 红圈 = 今天',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 11,
               ),
             ),
             const SizedBox(height: 12),
-            // 高度自适应——26 列下全年 365/366 天需 14~15 行，
-            // 固定 100px 只装得下约一半（8 月起底部被裁剪不可见）；
-            // 按宽度计算格子尺寸与总行数，完整显示全年
+            // 高度自适应——26 列按宽度计算格子尺寸与总行数，
+            // 完整显示 1/1 至今（固定高度会裁剪底部）
             LayoutBuilder(
               builder: (context, constraints) {
                 const cols = 26;
                 const spacing = 3.0;
                 final cell =
                     (constraints.maxWidth - spacing * (cols - 1)) / cols;
-                final rows = (daysInYear / cols).ceil();
+                final rows = (dayOfYear / cols).ceil();
                 final height = rows * cell + spacing * (rows - 1);
                 return SizedBox(
                   height: height,
@@ -802,21 +856,16 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
                           mainAxisSpacing: spacing,
                           crossAxisSpacing: spacing,
                         ),
-                    itemCount: daysInYear,
+                    itemCount: dayOfYear,
                     itemBuilder: (context, i) {
-                      final day = AppClock.addCalendarDays(
-                        AppClock.at(now.year, 1, 1),
-                        i,
-                      );
-                      if (day.isAfter(now)) {
-                        return Container(color: Colors.transparent);
-                      }
+                      final day = AppClock.addCalendarDays(jan1, i);
                       final c =
                           counts[AppClock.at(day.year, day.month, day.day)] ??
                           0;
                       final level = c == 0
                           ? 0.0
                           : (c / maxCount).clamp(0.0, 1.0);
+                      final isToday = i == dayOfYear - 1;
                       return Container(
                         decoration: BoxDecoration(
                           color: c == 0
@@ -831,6 +880,12 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
                                   level,
                                 ),
                           shape: BoxShape.circle,
+                          border: isToday
+                              ? Border.all(
+                                  color: Theme.of(context).colorScheme.error,
+                                  width: 1.5,
+                                )
+                              : null,
                         ),
                       );
                     },

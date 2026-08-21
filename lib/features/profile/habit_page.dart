@@ -7,6 +7,15 @@ import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 
+/// 可选的习惯图标（emoji，按习惯场景挑选，新建/编辑共用）
+const _habitIcons = <String>[
+  '⭐', '📚', '🏃', '💪', '🧘', '😴', '💧', '🥗',
+  '🍎', '💊', '🦷', '✍️', '🎨', '🎸', '🎹', '📖',
+  '💻', '📱', '💰', '🛒', '🧹', '🚶', '🚴', '🏊',
+  '⚽', '🏀', '🎾', '🏸', '🧠', '💡', '🌅', '🌙',
+  '☀️', '🐕', '🌱', '🎯', '🚭', '🌊', '🍵', '🥕',
+];
+
 class HabitPage extends ConsumerStatefulWidget {
   const HabitPage({super.key, this.initialHabitId});
 
@@ -126,6 +135,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
   Future<void> _addHabit() async {
     final controller = TextEditingController();
     var remind = false;
+    var icon = '⭐';
     var time = AppClock.at(
       AppClock.now().year,
       AppClock.now().month,
@@ -138,16 +148,28 @@ class _HabitPageState extends ConsumerState<HabitPage> {
       builder: (c) => StatefulBuilder(
         builder: (c, setDialogState) => AlertDialog(
           title: const Text('新建习惯'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: controller,
-                autofocus: true,
-                decoration: const InputDecoration(hintText: '如：阅读、健身、早睡'),
-              ),
-              const SizedBox(height: 8),
-              SwitchListTile(
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  decoration: const InputDecoration(hintText: '如：阅读、健身、早睡'),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '图标',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 6),
+                _HabitIconPicker(
+                  selected: icon,
+                  onSelected: (v) => setDialogState(() => icon = v),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 title: const Text('每日提醒'),
@@ -178,7 +200,8 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                     }
                   },
                 ),
-            ],
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -188,7 +211,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
             FilledButton(
               onPressed: () => Navigator.pop(
                 c,
-                _HabitDraft(controller.text.trim(), remind ? time : null),
+                _HabitDraft(controller.text.trim(), icon, remind ? time : null),
               ),
               child: const Text('创建'),
             ),
@@ -198,7 +221,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
     );
     if (draft != null && draft.name.isNotEmpty) {
       final db = ref.read(dbProvider);
-      final id = await db.insertHabit(draft.name, '⭐', draft.reminderTime);
+      final id = await db.insertHabit(draft.name, draft.icon, draft.reminderTime);
       // 习惯数据变更通知
       bumpDataVersion(ref);
       if (draft.reminderTime != null) {
@@ -222,12 +245,51 @@ class _HabitPageState extends ConsumerState<HabitPage> {
   }
 }
 
-/// 新建习惯草稿（名称 + 提醒时间）
+/// 新建习惯草稿（名称 + 图标 + 提醒时间）
 class _HabitDraft {
   final String name;
+  final String icon;
   final DateTime? reminderTime;
 
-  _HabitDraft(this.name, this.reminderTime);
+  _HabitDraft(this.name, this.icon, this.reminderTime);
+}
+
+/// 习惯图标选择网格（新建/编辑共用）：点选高亮（primary 边框 + 底色）
+class _HabitIconPicker extends StatelessWidget {
+  const _HabitIconPicker({required this.selected, required this.onSelected});
+
+  final String selected;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final ic in _habitIcons)
+          GestureDetector(
+            onTap: () => onSelected(ic),
+            child: Container(
+              width: 40,
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected == ic
+                    ? scheme.primaryContainer
+                    : scheme.surfaceContainerHighest,
+                shape: BoxShape.circle,
+                border: selected == ic
+                    ? Border.all(color: scheme.primary, width: 1.5)
+                    : null,
+              ),
+              child: Text(ic, style: const TextStyle(fontSize: 20)),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 class _HabitTile extends ConsumerStatefulWidget {
@@ -361,6 +423,14 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.emoji_emotions_outlined),
+              title: const Text('编辑图标'),
+              onTap: () {
+                Navigator.pop(c);
+                _editIcon();
+              },
+            ),
+            ListTile(
               leading: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.error),
               title: Text('删除习惯', style: TextStyle(color: Theme.of(context).colorScheme.error)),
               onTap: () {
@@ -372,6 +442,42 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
         ),
       ),
     );
+  }
+
+  /// 编辑习惯图标（长按 → 编辑图标，选择后落库）
+  Future<void> _editIcon() async {
+    final habit = widget.habit;
+    var icon = habit.icon;
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setDialogState) => AlertDialog(
+          title: const Text('选择图标'),
+          content: SingleChildScrollView(
+            child: _HabitIconPicker(
+              selected: icon,
+              onSelected: (v) => setDialogState(() => icon = v),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, icon),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || picked == habit.icon) return;
+    final db = ref.read(dbProvider);
+    await db.updateHabitIcon(habit.id, picked);
+    // 习惯数据变更通知（统计页热力图图标随之刷新）
+    bumpDataVersion(ref);
+    widget.onRefresh();
   }
 
   /// 编辑习惯提醒时间（开关 + 时间选择）

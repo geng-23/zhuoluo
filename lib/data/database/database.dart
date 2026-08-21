@@ -1378,6 +1378,12 @@ class AppDatabase extends _$AppDatabase {
         HabitsCompanion(reminderTime: Value(reminderTime)),
       );
 
+  /// 更新习惯图标
+  Future<void> updateHabitIcon(int id, String icon) =>
+      (update(habits)..where((h) => h.id.equals(id))).write(
+        HabitsCompanion(icon: Value(icon)),
+      );
+
   Future<bool> isHabitDone(int habitId, DateTime date) async {
     // ：入参可能是 DB 读回值，统一按应用时区解释后取字段
     final a = AppClock.asApp(date);

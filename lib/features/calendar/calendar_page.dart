@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
@@ -17,6 +20,9 @@ import 'package:zhuoluo/core/utils/app_clock.dart';
 /// 非长按（首次移动距 down <350ms）、位移 ≥24px 的滑动切换底部 tab；
 /// 中间 70% 区域滑动仍由 PageView 翻月/翻周/翻日；
 /// 任务块点击/长按拖动完全不受影响。
+/// 注意：检测层为 RawGestureDetector + 自定义识别器，边缘快速横向滑动
+/// 会抢占手势竞技场（下层 PageView 不再翻页）——切 tab 与翻页互斥，
+/// 避免返回日历后发现月/周/日范围被连带翻动。
 class CalendarPage extends ConsumerWidget {
   const CalendarPage({
     super.key,
@@ -212,7 +218,7 @@ class CalendarPage extends ConsumerWidget {
 }
 
 /// 边缘滑动切 tab 检测层（丝滑交互，零遮挡）：
-/// 全屏 Listener（HitTestBehavior.translucent——自身监听且下层正常交互），
+/// RawGestureDetector（HitTestBehavior.translucent——自身监听且下层正常交互），
 /// 判定条件（全部满足才切 tab）：
 /// 1. 指针起点在屏幕左右 15% 区域内（中间 70% 区域滑动仍由 PageView 翻页）
 /// 2. 非长按：首次位移距按下 <350ms（长按拖动任务/长按选时不受影响）
@@ -221,6 +227,11 @@ class CalendarPage extends ConsumerWidget {
 ///    纵向滚动/斜向移动的横向抖动不视为切 tab 意图
 /// 右滑 → [onSwipeRight]（左缘），左滑 → [onSwipeLeft]（右缘）。
 /// 拖动任务到边缘翻周/日由 Draggable 全局坐标驱动（views.dart），互不干扰。
+///
+/// 关键：与旧实现（全屏 Listener 被动监听）不同，本识别器**参与手势竞技场**——
+/// 判定为边缘快速横向滑动时立即 accepted 抢占，下层 PageView（月/周/日）
+/// 收不到该手势，切 tab 不再连带翻页（修复"返回日历发现视图范围变了"）；
+/// 非边缘滑动/长按/点击则 rejected 让位，行为与旧实现一致。
 class _EdgeTabSwipeDetector extends StatefulWidget {
   const _EdgeTabSwipeDetector({this.onSwipeRight, this.onSwipeLeft});
 
@@ -232,22 +243,145 @@ class _EdgeTabSwipeDetector extends StatefulWidget {
 }
 
 class _EdgeTabSwipeDetectorState extends State<_EdgeTabSwipeDetector> {
+  @override
+  Widget build(BuildContext context) {
+    return RawGestureDetector(
+      behavior: HitTestBehavior.translucent,
+      gestures: {
+        _EdgeTabSwipeRecognizer: GestureRecognizerFactoryWithHandlers<
+          _EdgeTabSwipeRecognizer
+        >(
+          () => _EdgeTabSwipeRecognizer(),
+          (instance) {
+            instance
+              ..screenWidth = MediaQuery.sizeOf(context).width
+              ..onSwipeRight = widget.onSwipeRight
+              ..onSwipeLeft = widget.onSwipeLeft;
+          },
+        ),
+      },
+      child: const SizedBox.expand(),
+    );
+  }
+}
+
+/// 边缘滑动切 tab 识别器：起点在屏幕左右 15% 区、350ms 内快速横向拖动时
+/// 立即赢得手势竞技场（下层 PageView 不再翻月/周/日），抬手满足条件才切 tab。
+class _EdgeTabSwipeRecognizer extends OneSequenceGestureRecognizer {
   /// 起点判定区：屏幕左右各 15%（收窄——边缘区过大易与拖动任务/选时误触）
   static const double _edgeZone = 0.15;
   /// 触发位移阈值（px）
   static const double _triggerDx = 32;
   /// 横向意图比例：abs(dx) 须明显大于 abs(dy) 才视为切 tab（抗纵向抖动）
   static const double _minDxRatio = 1.5;
-  /// 位移超过半屏视为翻页意图（交给 PageView），不切 tab
-  static const double _maxDx = 0.5;
-  /// 长按判定窗口：首次移动距按下超过此值 = 长按（拖动/选时），不切 tab
+  /// 抢占 slop：水平位移超过此值即赢得竞技场（远小于 PageView 翻页距离，
+  /// 一旦抢占 PageView 即收不到手势，切 tab 不再连带翻页）。
+  /// 必须小于平台 touchSlop（Android 设备约 8-16px，真机实测 ~10px）——
+  /// 若大于平台 slop，小步滑动时 PageView 的横向拖拽先跨过自身阈值
+  /// 抢先 accepted，本识别器被判负（真机实测月视图右缘滑动被抢走）。
+  static const double _slop = 4;
+  /// 长按判定窗口：首次移动距按下超过此值 = 长按（拖动/选时），让位不切 tab
   static const Duration _longPressWindow = Duration(milliseconds: 350);
+
+  /// 屏幕宽度（RawGestureDetector initialize 每次 build 更新，适配旋转）
+  double screenWidth = 0;
+  VoidCallback? onSwipeRight;
+  VoidCallback? onSwipeLeft;
 
   Offset? _downPos;
   DateTime? _downTime;
   DateTime? _firstMoveAt;
   double _dx = 0;
   double _dy = 0;
+  bool _inEdgeZone = false;
+  bool _accepted = false;
+  Timer? _timer;
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    // 已有活动指针（多指）时忽略新按下——单指边缘手势语义
+    if (_downPos != null) return;
+    startTrackingPointer(event.pointer, event.transform);
+    final w = screenWidth;
+    final zone = w * _edgeZone;
+    _downPos = event.position;
+    _downTime = DateTime.now();
+    _firstMoveAt = null;
+    _dx = 0;
+    _dy = 0;
+    _accepted = false;
+    _inEdgeZone = event.position.dx < zone || event.position.dx > w - zone;
+    // 起点不在边缘区 → 立即让位（中间区滑动由 PageView 翻页）
+    if (!_inEdgeZone) {
+      resolve(GestureDisposition.rejected);
+      stopTrackingPointer(event.pointer);
+      return;
+    }
+    // 边缘区：350ms 内无快速横向移动 → 让位（长按拖动/慢滑由下层接管）
+    _timer = Timer(_longPressWindow, () {
+      resolve(GestureDisposition.rejected);
+    });
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (event is PointerMoveEvent) {
+      final down = _downPos;
+      if (down == null) return;
+      _firstMoveAt ??= DateTime.now();
+      // 绝对位移（相对按下点）而非 delta 累加——抖动不会逐次累积
+      _dx = event.position.dx - down.dx;
+      _dy = event.position.dy - down.dy;
+      // 快速横向意图（位移超 slop 且 dx 明显大于 dy）→ 抢占手势，
+      // PageView 收不到该手势，切 tab 不再连带翻页
+      if (!_accepted &&
+          _dx.abs() > _slop &&
+          _dx.abs() > _dy.abs() * _minDxRatio) {
+        _accepted = true;
+        _timer?.cancel();
+        resolve(GestureDisposition.accepted);
+      }
+    } else if (event is PointerUpEvent || event is PointerCancelEvent) {
+      _finish(event);
+    }
+  }
+
+  void _finish(PointerEvent event) {
+    _timer?.cancel();
+    if (_accepted) {
+      final down = _downPos;
+      final downTime = _downTime;
+      final firstMove = _firstMoveAt;
+      if (down != null && downTime != null && firstMove != null) {
+        if (_dx.abs() >= _triggerDx &&
+            _dx.abs() > _dy.abs() * _minDxRatio) {
+          final w = screenWidth;
+          if (down.dx < w * _edgeZone && _dx > 0) {
+            onSwipeRight?.call();
+          } else if (down.dx > w * (1 - _edgeZone) && _dx < 0) {
+            onSwipeLeft?.call();
+          }
+        }
+      }
+    } else {
+      // 未抢占（点击/非横向）→ 弃权，让下层（tap/滚动/长按）获胜
+      resolve(GestureDisposition.rejected);
+    }
+    stopTrackingPointer(event.pointer);
+  }
+
+  @override
+  void rejectGesture(int pointer) {
+    _timer?.cancel();
+    _reset();
+    super.rejectGesture(pointer);
+  }
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {
+    _timer?.cancel();
+    _reset();
+  }
 
   void _reset() {
     _downPos = null;
@@ -255,65 +389,18 @@ class _EdgeTabSwipeDetectorState extends State<_EdgeTabSwipeDetector> {
     _firstMoveAt = null;
     _dx = 0;
     _dy = 0;
-  }
-
-  void _onDown(PointerDownEvent e) {
-    _downPos = e.position;
-    _downTime = DateTime.now();
-    _firstMoveAt = null;
-    _dx = 0;
-    _dy = 0;
-  }
-
-  void _onMove(PointerMoveEvent e) {
-    final down = _downPos;
-    if (down == null) return;
-    _firstMoveAt ??= DateTime.now();
-    // 绝对位移（相对按下点）而非 delta 累加——抖动不会逐次累积
-    _dx = e.position.dx - down.dx;
-    _dy = e.position.dy - down.dy;
-  }
-
-  void _onUp(PointerUpEvent e) {
-    _maybeTrigger();
-    _reset();
-  }
-
-  void _onCancel(PointerCancelEvent e) => _reset();
-
-  void _maybeTrigger() {
-    final down = _downPos;
-    final downTime = _downTime;
-    final firstMove = _firstMoveAt;
-    if (down == null || downTime == null || firstMove == null) return;
-    if (_dx.abs() < _triggerDx) return;
-    // 横向意图：仅当水平位移明显大于垂直位移（纵向滚动/斜向移动的
-    // 横向抖动不视为切 tab 意图）
-    if (_dx.abs() <= _dy.abs() * _minDxRatio) return;
-    // 长按（拖动任务/选时）：首次移动发生在按下后 350ms 以上 → 不切 tab
-    if (firstMove.difference(downTime) >= _longPressWindow) return;
-    // 位移过半屏 → 翻页意图，不切
-    final w = MediaQuery.sizeOf(context).width;
-    if (_dx.abs() >= w * _maxDx) return;
-    // 起点在左右 15% 区
-    if (down.dx < w * _edgeZone) {
-      if (_dx > 0) widget.onSwipeRight?.call();
-    } else if (down.dx > w * (1 - _edgeZone)) {
-      if (_dx < 0) widget.onSwipeLeft?.call();
-    }
+    _inEdgeZone = false;
+    _accepted = false;
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Listener(
-      behavior: HitTestBehavior.translucent,
-      onPointerDown: _onDown,
-      onPointerMove: _onMove,
-      onPointerUp: _onUp,
-      onPointerCancel: _onCancel,
-      child: const SizedBox.expand(),
-    );
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
+
+  @override
+  String get debugDescription => 'edge tab swipe';
 }
 
 /// E12：日历侧边栏（视图切换/添加/月份导航）
@@ -578,7 +665,11 @@ class MonthView extends ConsumerWidget {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final rows = totalCells ~/ 7;
+              // 向下取整：浮点误差会让 rows*cellH 恰好超出视口变成可滚动，
+              // 触发 debug 断言（RenderSliverFixedExtentBoxAdaptor...itemExtent）
+              // 刷屏；取整后内容刚好放得下（<1px/行的余量，视觉无差）
               final cellH = ((constraints.maxHeight - 12) / rows)
+                  .floorToDouble()
                   .clamp(72.0, 320.0);
               return GridView.builder(
                 padding: EdgeInsets.zero,

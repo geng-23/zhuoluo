@@ -231,6 +231,97 @@ void main() {
       await tester.pumpAndSettle();
       expect(left + right, 0);
     });
+
+    // 回归：边缘滑动切 tab 时，同一手势不得再被下层 PageView 消费翻页
+    // （修复前 Listener 被动监听不参与竞技场，切 tab 连带翻月/翻周/翻日，
+    // 返回日历后发现视图范围变了）
+    testWidgets('左缘右滑切 tab 时月视图不翻月', (tester) async {
+      await db.ensureDefaultList();
+      var left = 0;
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: CalendarPage(onNavigateLeft: () => left++),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      container
+          .read(calendarControllerProvider.notifier)
+          .setView('month');
+      await tester.pumpAndSettle();
+      final before = container.read(calendarControllerProvider).displayedMonth;
+
+      await tester.flingFrom(const Offset(12, 400), const Offset(200, 0), 2000);
+      await tester.pumpAndSettle();
+      expect(left, 1, reason: '左缘右滑应切上一个 tab');
+      final after = container.read(calendarControllerProvider).displayedMonth;
+      expect(
+        DateUtilsEx.sameDay(after, before),
+        isTrue,
+        reason: '切 tab 不应连带翻月（修复前 displayedMonth 被翻到相邻月）',
+      );
+    });
+
+    testWidgets('左缘右滑切 tab 时周视图不翻周', (tester) async {
+      await db.ensureDefaultList();
+      var left = 0;
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: CalendarPage(onNavigateLeft: () => left++),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final before = container.read(calendarControllerProvider).selectedDay;
+
+      await tester.flingFrom(const Offset(12, 400), const Offset(200, 0), 2000);
+      await tester.pumpAndSettle();
+      expect(left, 1, reason: '左缘右滑应切上一个 tab');
+      final after = container.read(calendarControllerProvider).selectedDay;
+      expect(
+        DateUtilsEx.sameDay(after, before),
+        isTrue,
+        reason: '切 tab 不应连带翻周（修复前 selectedDay 被翻到相邻周）',
+      );
+    });
+
+    testWidgets('右缘左滑切 tab 时日视图不翻日', (tester) async {
+      await db.ensureDefaultList();
+      var right = 0;
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: CalendarPage(onNavigateRight: () => right++),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      container.read(calendarControllerProvider.notifier).setView('day');
+      await tester.pumpAndSettle();
+      final before = container.read(calendarControllerProvider).selectedDay;
+
+      await tester.flingFrom(
+        const Offset(788, 400),
+        const Offset(-200, 0),
+        2000,
+      );
+      await tester.pumpAndSettle();
+      expect(right, 1, reason: '右缘左滑应切下一个 tab');
+      final after = container.read(calendarControllerProvider).selectedDay;
+      expect(
+        DateUtilsEx.sameDay(after, before),
+        isTrue,
+        reason: '切 tab 不应连带翻日（修复前 selectedDay 被翻到相邻日）',
+      );
+    });
   });
 
   group('拖动任务块到边缘翻周/日（Draggable 全局坐标驱动）', () {

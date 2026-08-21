@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
+import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
@@ -126,6 +127,8 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                     // 先取消已排的每日提醒，避免删除后仍收到通知
                     await scheduler.cancelHabitReminder(habit.id);
                     await db.deleteHabit(habit.id);
+                    // 删除动作音效
+                    SoundService.instance.play(SoundKind.delete);
                     // 习惯数据变更通知
                     bumpDataVersion(ref);
                     _load();
@@ -135,6 +138,8 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                       '已删除「${habit.name}」',
                       actionLabel: '撤销',
                       onAction: () async {
+                        // 撤销删除 = 恢复，配恢复音效
+                        SoundService.instance.play(SoundKind.reopen);
                         await db.restoreHabit(habit, records);
                         await scheduler.scheduleHabitReminder(habit);
                         bumpDataVersion(ref);
@@ -564,6 +569,10 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
                 try {
                   // 打卡/取消打卡都是 toggle 语义，带撤销条（误触可恢复）
                   final willDone = !_doneToday;
+                  // 打卡/取消打卡配动作音效（完成/恢复，与任务完成一致）
+                  SoundService.instance.play(
+                    willDone ? SoundKind.complete : SoundKind.reopen,
+                  );
                   await db.checkHabit(widget.habit.id, AppClock.now());
                   // 打卡/取消后重排习惯提醒——已打卡日期不再排
                   //（取消打卡后当天提醒恢复）
@@ -579,6 +588,8 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
                     willDone ? '已打卡「${widget.habit.name}」' : '已取消今日打卡',
                     actionLabel: '撤销',
                     onAction: () async {
+                      // 撤销打卡 = 恢复，配恢复音效
+                      SoundService.instance.play(SoundKind.reopen);
                       await db.checkHabit(widget.habit.id, AppClock.now());
                       await ref
                           .read(reminderSchedulerProvider)

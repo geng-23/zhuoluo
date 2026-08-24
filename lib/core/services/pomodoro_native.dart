@@ -31,6 +31,27 @@ class PomodoroNative {
   final _opens = StreamController<void>.broadcast();
   Stream<void> get opens => _opens.stream;
 
+  /// "打开番茄页"待消费标志（冷启动竞态补偿）：openPomodoro 事件可能
+  /// 先于 HomeShell 订阅到达，broadcast 流会丢弃该事件——置位本标志，
+  /// 订阅方就绪后经 [consumePendingOpen] 补消费。流路径正常送达时由
+  /// 监听回调清除，保证同一事件只导航一次。
+  bool _pendingOpen = false;
+
+  /// 消费待处理的"打开番茄页"事件：返回是否存在并清除标志。
+  bool consumePendingOpen() {
+    final pending = _pendingOpen;
+    _pendingOpen = false;
+    return pending;
+  }
+
+  /// 前台服务是否存活（番茄会话进行中）。全量重排据此跳过全局 cancelAll，
+  /// 防止误杀倒计时通知——startForeground 置位、stopForeground 复位；
+  /// 进程级内存态：进程被杀则前台服务随之终止，重启后初值 false 正确。
+  bool _foregroundActive = false;
+
+  /// 是否有进行中的番茄会话（前台服务存活）。
+  bool get foregroundActive => _foregroundActive;
+
   bool _handlerSet = false;
 
   /// 注册原生→Dart 通道（幂等；main 启动时调用，保证冷启动即就绪）。
@@ -45,6 +66,7 @@ class PomodoroNative {
             _actions.add(actionId);
           }
         case 'openPomodoro':
+          _pendingOpen = true;
           _opens.add(null);
         default:
           break;
@@ -61,6 +83,7 @@ class PomodoroNative {
     required int totalSeconds,
     String? title,
   }) {
+    _foregroundActive = true;
     return _invoke(
       'startForeground',
       _args(running, remainingSeconds, totalSeconds, title, id: id),
@@ -83,6 +106,7 @@ class PomodoroNative {
 
   /// 停止服务并移除通知（会话结束）。
   Future<void> stopForeground({required int id}) {
+    _foregroundActive = false;
     return _invoke('stopForeground', {'id': id});
   }
 

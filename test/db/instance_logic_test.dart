@@ -207,10 +207,11 @@ void main() {
     final json = await BackupService(db).exportJson();
     expect(json, contains('"remindAtMinutes":600'));
 
-    // 旧格式备份（无 remindAtMinutes）恢复后为 null
+    // 旧格式备份（无 remindAtMinutes，也无 checksum 字段）恢复后为 null
     final data = jsonDecode(json) as Map<String, dynamic>;
     final reminders = (data['reminders'] as List);
     (reminders.first as Map<String, dynamic>).remove('remindAtMinutes');
+    data.remove('checksum');
     final legacy = jsonEncode(data);
     final db2 = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db2.close);
@@ -338,6 +339,40 @@ void main() {
       r.firstHitOnOrAfter(DateTime(2026, 8, 10), 'FREQ=DAILY'),
       DateTime(2026, 8, 10),
     );
+  });
+
+  test('YEARLY 锚定 2/29：非闰年跳过，展开与命中判定同口径', () {
+    final r = RruleService.instance;
+    final hits = r.expand(
+      DateTime(2024, 2, 29),
+      'FREQ=YEARLY',
+      to: DateTime(2031, 12, 31),
+    );
+    // 仅闰年产生实例（2024、2028；2032 超出窗口）
+    expect(hits.map((d) => d.year).toSet(), {2024, 2028},
+        reason: '非闰年必须整年跳过');
+    for (final d in hits) {
+      expect(d.month, 2, reason: '不得进位为 3/1 实例');
+      expect(d.day, 29);
+    }
+    // 命中判定与展开一致：非闰年 3/1 永不命中
+    expect(
+      r.hitsOn('FREQ=YEARLY', DateTime(2024, 2, 29), DateTime(2025, 3, 1)),
+      isFalse,
+      reason: '修复前展开出现 2025-03-01 但 hitsOn 判不命中（口径分裂）',
+    );
+    expect(
+      r.hitsOn('FREQ=YEARLY', DateTime(2024, 2, 29), DateTime(2028, 2, 29)),
+      isTrue,
+    );
+    // MONTHLY 的无效日口径保持一致：锚定 31 号遇小月同样整月跳过
+    final monthly = r.expand(
+      DateTime(2026, 1, 31),
+      'FREQ=MONTHLY',
+      to: DateTime(2026, 12, 31),
+    );
+    expect(monthly.map((d) => d.month).toSet(), {1, 3, 5, 7, 8, 10, 12},
+        reason: '小月（无 31 号）不得出现进位实例');
   });
 
   // ---------- 今日对齐父子联动 ----------

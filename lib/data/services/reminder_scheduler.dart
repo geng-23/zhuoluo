@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/foundation.dart';
+import 'package:zhuoluo/core/services/pomodoro_native.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
@@ -35,7 +36,7 @@ class ReminderScheduler {
   }
 
   /// 任务在实例日期的"提醒基准时间"：
-  /// - 全天任务：当天 [Reminder.remindAtMinutes] 时刻（null = 默认 09:00）
+  /// - 全天任务：当天 [Reminder.remindAtMinutes] 墙钟时刻（null = 默认 09:00）
   /// - 定时任务：实例时间（例外改期带时分时用实例时分），否则 planStart 的时分
   DateTime _reminderBase(Task task, DateTime instanceDate, Reminder r) {
     final d = AppClock.at(
@@ -45,8 +46,7 @@ class ReminderScheduler {
     );
     final ps = task.planStart;
     if (task.isAllDay || ps == null) {
-      final remindAt = r.remindAtMinutes ?? 540; // 默认 09:00
-      return d.add(Duration(minutes: remindAt));
+      return allDayMoment(d.year, d.month, d.day, r.remindAtMinutes);
     }
     // 例外改期到带时分的目标（如改期本次选了具体时间）
     if (instanceDate.hour != 0 || instanceDate.minute != 0) {
@@ -280,7 +280,13 @@ class ReminderScheduler {
         debugPrint('全量重排跳过：通知权限未授予');
         return;
       }
-      await NotificationService.instance.cancelAll();
+      // 番茄会话进行中跳过全局取消：cancelAll 连前台服务的倒计时通知
+      // 一并清除，用户会看到专注计时"凭空消失"。任务/习惯的旧通知由
+      // 下方各 schedule 内部精确取消（cancelTask/cancelHabitReminder），
+      // 仅孤儿通知留待下次无会话的全量重排清理。
+      if (!PomodoroNative.instance.foregroundActive) {
+        await NotificationService.instance.cancelAll();
+      }
       final allTasks = await _db.getAllUncompleted();
       for (final t in allTasks) {
         final ps = t.planStart;
@@ -452,9 +458,9 @@ class ReminderScheduler {
 }
 
 /// 计算某条提醒在"目标实例日"的触发时间：
-/// - 全天任务：实例日 00:00 + [remindAtMinutes]（null = 默认 09:00）− 提前量
+/// - 全天任务：实例日当天 [remindAtMinutes] 墙钟时刻（null = 默认 09:00）− 提前量
 /// - 定时任务：实例日 + planStart 时分 − 提前量
-/// - 仅截止时间任务：截止日 + [remindAtMinutes]（与调度器口径一致）
+/// - 仅截止时间任务：截止日 + [remindAtMinutes] 墙钟时刻（与调度器口径一致）
 /// 实例日：重复任务 = 今天；非重复 = planStart 当天。
 /// 返回 null 表示任务没有计划/截止时间（无法判断）。
 DateTime? reminderTriggerAt(
@@ -471,9 +477,7 @@ DateTime? reminderTriggerAt(
     final due = task.dueTime;
     if (due == null) return null;
     final a = AppClock.asApp(due);
-    final min = remindAtMinutes ?? 540; // 默认 09:00
-    return AppClock.at(a.year, a.month, a.day)
-        .add(Duration(minutes: min))
+    return allDayMoment(a.year, a.month, a.day, remindAtMinutes)
         .subtract(Duration(minutes: remindMinutesBefore));
   }
   final pa = AppClock.asApp(ps);
@@ -481,9 +485,7 @@ DateTime? reminderTriggerAt(
       ? today
       : AppClock.at(pa.year, pa.month, pa.day);
   if (task.isAllDay) {
-    final min = remindAtMinutes ?? 540; // 默认 09:00
-    return day
-        .add(Duration(minutes: min))
+    return allDayMoment(day.year, day.month, day.day, remindAtMinutes)
         .subtract(Duration(minutes: remindMinutesBefore));
   }
   return AppClock.at(
@@ -493,4 +495,22 @@ DateTime? reminderTriggerAt(
     pa.hour,
     pa.minute,
   ).subtract(Duration(minutes: remindMinutesBefore));
+}
+
+/// 全天式"提醒时刻"墙钟构造：[y]/[m]/[d] 当天 [remindAtMinutes] 分钟数
+/// 对应的墙钟时刻（null = 默认 09:00）。
+///
+/// 必须按时/分组装（AppClock.at），不得对 00:00 做 `add(Duration(minutes:))`——
+/// TZDateTime.add 是真实时长（elapsed）运算，DST 转换日会偏移：
+/// 春季拨快日 00:00+540min=10:00、秋季回拨日 =08:00，而非墙钟 09:00，
+/// 与详情页展示和习惯提醒（AppClock.at 墙钟）口径不一致。
+/// 越界分钟数按日进/退位归一（1440 → 次日 00:00，-60 → 前一日 23:00），
+/// 损坏数据不崩溃且保持墙钟语义。
+DateTime allDayMoment(int y, int m, int d, int? remindAtMinutes) {
+  final total = remindAtMinutes ?? 540; // 默认 09:00
+  // Dart 的 ~/ 向零截断（负数非 floor），先用欧几里得余数取当日分钟，
+  // 再由差值反推日偏移，保证负值也按日退位
+  final minOfDay = total % 1440;
+  final dayOffset = (total - minOfDay) ~/ 1440;
+  return AppClock.at(y, m, d + dayOffset, minOfDay ~/ 60, minOfDay % 60);
 }

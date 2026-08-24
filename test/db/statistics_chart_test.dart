@@ -196,13 +196,13 @@ void main() {
         AppClock.at(2026, 8, 17),
         AppClock.at(2026, 8, 23),
       );
-      // 锚点日按原口径计 2：planStart 计 1 + 实例展开计 1（与
-      // timezone_semantics_test 的"重复任务 planStart 额外计 1 次"一致）
-      expect(weekCount[AppClock.at(2026, 8, 17)], 2,
-          reason: '周一（锚点/开始日）按原口径计 2（planStart + 实例）');
+      // 锚点日（周一）也是规则命中日：重复任务只按实例展开计一次，
+      // planStart 不得再额外计 1（旧口径锚点日计 2，首日虚高）
+      expect(weekCount[AppClock.at(2026, 8, 17)], 1,
+          reason: '周一（锚点/开始日）只按规则实例计 1 次');
       expect(weekCount[AppClock.at(2026, 8, 18)], isNull,
           reason: '周二覆盖日不计入');
-      expect(weekCount.values.fold<int>(0, (a, b) => a + b), 2);
+      expect(weekCount.values.fold<int>(0, (a, b) => a + b), 1);
 
       await db.close();
     });

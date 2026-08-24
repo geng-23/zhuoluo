@@ -6,6 +6,7 @@ import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
+import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 
 /// DST 转换日测试矩阵：春/秋转换日附近，通知 ID、窗口边界、RRULE 展开、
@@ -287,6 +288,64 @@ void main() {
       final a = AppClock.asApp(newStart!);
       expect(a.day, 10);
       expect(a.hour, 9);
+    });
+  });
+
+  group('全天/仅截止提醒时刻（America/Los_Angeles，DST 转换日墙钟）', () {
+    /// 插入全天任务 + 一条"当天 09:00"提醒，返回调度器计算的触发时刻
+    Future<List<DateTime>> allDayReminderTimes(DateTime day) async {
+      final id = await insertTask(
+        title: '全天',
+        start: day,
+        isAllDay: true,
+      );
+      await db.insertReminder(RemindersCompanion.insert(
+        taskId: id,
+        remindMinutesBefore: const Value(0),
+        remindAtMinutes: const Value(540), // 09:00
+      ));
+      final task = (await db.getTask(id))!;
+      final reminders = await db.getReminders(id);
+      return ReminderScheduler(db).computeReminderTimes(task, day, reminders);
+    }
+
+    test('春季拨快日（2026-03-08）提醒时刻 = 墙钟 09:00', () async {
+      AppClock.setTimezone('America/Los_Angeles');
+      final times = await allDayReminderTimes(AppClock.at(2026, 3, 8));
+      final a = AppClock.asApp(times.single);
+      expect(a.hour, 9,
+          reason: 'elapsed 加法 00:00+540min=10:00（修复前），墙钟必须 09:00');
+      expect(a.minute, 0);
+      // 洛杉矶 2026-03-08 09:00 PDT（UTC-7）= UTC 16:00
+      expect(times.single.toUtc(), DateTime.utc(2026, 3, 8, 16, 0));
+    });
+
+    test('秋季回拨日（2026-11-01）提醒时刻 = 墙钟 09:00', () async {
+      AppClock.setTimezone('America/Los_Angeles');
+      final times = await allDayReminderTimes(AppClock.at(2026, 11, 1));
+      final a = AppClock.asApp(times.single);
+      expect(a.hour, 9,
+          reason: 'elapsed 加法 00:00+540min=08:00（修复前），墙钟必须 09:00');
+      // 洛杉矶 2026-11-01 09:00 PST（UTC-8）= UTC 17:00
+      expect(times.single.toUtc(), DateTime.utc(2026, 11, 1, 17, 0));
+    });
+
+    test('allDayMoment 越界分钟数按日归一并保持墙钟语义', () {
+      AppClock.setTimezone('America/Los_Angeles');
+      // 1440 → 次日 00:00；1500 → 次日 01:00；-60 → 前一日 23:00
+      final next = AppClock.asApp(allDayMoment(2026, 3, 8, 1440));
+      expect(next.day, 9);
+      expect(next.hour, 0);
+      final next1 = AppClock.asApp(allDayMoment(2026, 3, 8, 1500));
+      expect(next1.day, 9);
+      expect(next1.hour, 1);
+      final prev = AppClock.asApp(allDayMoment(2026, 3, 8, -60));
+      expect(prev.day, 7);
+      expect(prev.hour, 23);
+      // null 默认 09:00
+      final def = AppClock.asApp(allDayMoment(2026, 3, 8, null));
+      expect(def.hour, 9);
+      expect(def.minute, 0);
     });
   });
 }

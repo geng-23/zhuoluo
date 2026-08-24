@@ -103,30 +103,50 @@ Future<void> deleteBackupFilesImpl(List<String> paths) async {
   }
 }
 
-/// 备份文件详情（路径 + 文件名 + 修改时间，仅 zhuoluo_backup_ 前缀）
+/// 备份文件详情（路径 + 文件名 + 修改时间，仅 zhuoluo_backup_ 前缀）。
+/// 全量视图（下载目录 + 应用文档目录等），供备份管理页展示/恢复用。
 Future<List<BackupFileInfo>> listBackupInfosImpl() async {
   final files = <BackupFileInfo>[];
   for (final dir in await _backupDirs()) {
-    try {
-      if (!await dir.exists()) continue;
-      await for (final f in dir.list()) {
-        if (f is File &&
-            f.path.endsWith('.json') &&
-            f.path.split('/').last.startsWith('zhuoluo_backup_')) {
-          final stat = await f.stat();
-          files.add(
-            BackupFileInfo(
-              path: f.path,
-              name: f.path.split('/').last,
-              modified: stat.modified,
-              size: stat.size,
-            ),
-          );
-        }
-      }
-    } catch (_) {}
+    files.addAll(await _scanBackupDir(dir));
   }
   files.sort((a, b) => b.modified.compareTo(a.modified));
+  return files;
+}
+
+/// 自动备份文件列表：**只扫描应用文档目录**（自动备份的写入域）。
+///
+/// 自动备份"保留最近 N 份"的清理必须以本列表为基准——若用全量视图
+/// [listBackupInfosImpl] 计数，用户手动导出到下载目录的旧备份会被一并
+/// 计入"第 N+1 份及更旧"而遭误删。
+Future<List<BackupFileInfo>> listAutoBackupInfosImpl() async {
+  final files = await _scanBackupDir(await getApplicationDocumentsDirectory());
+  files.sort((a, b) => b.modified.compareTo(a.modified));
+  return files;
+}
+
+/// 扫描单个目录下的备份文件（zhuoluo_backup_ 前缀 + .json），目录不存在
+/// 或无权限时返回空列表（静默跳过，不中断其余目录的扫描）
+Future<List<BackupFileInfo>> _scanBackupDir(Directory dir) async {
+  final files = <BackupFileInfo>[];
+  try {
+    if (!await dir.exists()) return files;
+    await for (final f in dir.list()) {
+      if (f is File &&
+          f.path.endsWith('.json') &&
+          f.path.split('/').last.startsWith('zhuoluo_backup_')) {
+        final stat = await f.stat();
+        files.add(
+          BackupFileInfo(
+            path: f.path,
+            name: f.path.split('/').last,
+            modified: stat.modified,
+            size: stat.size,
+          ),
+        );
+      }
+    }
+  } catch (_) {}
   return files;
 }
 

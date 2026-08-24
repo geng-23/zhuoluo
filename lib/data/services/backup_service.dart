@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:collection';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:drift/drift.dart' show Value;
 import 'package:zhuoluo/data/database/database.dart';
@@ -50,7 +52,10 @@ class BackupService {
           .map((e) => {'key': e.key, 'value': e.value})
           .toList(),
     };
-    return jsonEncode(data);
+    // 完整性校验：对载荷（不含 checksum 字段）做规范化编码后取 SHA-256，
+    // 导入端重算比对——损坏/被修改的备份在导入时整体拒绝（P1-3）
+    final checksum = _payloadChecksum(data);
+    return jsonEncode({...data, 'checksum': checksum});
   }
 
   /// 导出到文件（应用文档目录 / 浏览器下载），返回文件路径或下载文件名
@@ -58,6 +63,11 @@ class BackupService {
     final json = await exportJson();
     return exportToFileImpl(json, toDownloads: toDownloads);
   }
+
+  /// 自动备份写盘（应用私有目录）。独立成方法供测试替身拦截，
+  /// 生产路径直接走 [exportToFileImpl]。
+  Future<String> writeAutoBackupFile(String json) =>
+      exportToFileImpl(json, toDownloads: false);
 
   /// 读取备份文件内容
   Future<String> readFile(String path) => readFileImpl(path);
@@ -81,6 +91,12 @@ class BackupService {
 
   /// H2：备份文件详情（路径 + 文件名 + 修改时间）
   Future<List<BackupFileInfo>> listBackupInfos() => listBackupInfosImpl();
+
+  /// 自动备份域（应用私有目录）内的备份文件列表——"保留最近 N 份"
+  /// 清理的唯一基准；与 [listBackupInfos] 的全量视图刻意分离，
+  /// 防止用户手动导出的备份被自动清理误删。
+  Future<List<BackupFileInfo>> listAutoBackupInfos() =>
+      listAutoBackupInfosImpl();
 
   /// 方案 A：导出到用户选定位置（系统保存对话框，默认下载目录）。
   /// 返回保存位置路径；用户取消返回 null。
@@ -120,6 +136,119 @@ class BackupService {
           ? data[key] as List
           : const [];
 
+  // ---------- 完整性校验与导入字段白名单（P1-3 / P2-30） ----------
+
+  /// 载荷校验和：递归键排序的规范化 JSON 编码后取 SHA-256——
+  /// 哈希基准与键序无关，同内容备份无论由哪个版本导出校验值一致。
+  static String _payloadChecksum(Map<String, dynamic> payload) =>
+      sha256.convert(utf8.encode(jsonEncode(_canonicalize(payload)))).toString();
+
+  /// 规范化：Map 递归转按键排序（SplayTreeMap），List 逐项处理，
+  /// 其余原样。jsonEncode 按迭代序输出，排序后编码即确定性的。
+  static dynamic _canonicalize(dynamic v) {
+    if (v is Map) {
+      final sorted = SplayTreeMap<String, dynamic>();
+      v.forEach((k, value) => sorted[k.toString()] = _canonicalize(value));
+      return sorted;
+    }
+    if (v is List) return v.map(_canonicalize).toList();
+    return v;
+  }
+
+  /// 导入前完整性校验：带 checksum 的备份重算比对，不符整体拒绝
+  /// （内容已损坏或被外部修改）；无 checksum 字段的旧版备份跳过校验，
+  /// 保持向后兼容。
+  static void _verifyChecksum(Map<String, dynamic> data) {
+    final expected = data['checksum'];
+    if (expected == null) return;
+    if (expected is! String) {
+      throw const FormatException('备份完整性字段非法');
+    }
+    final payload = Map<String, dynamic>.of(data)..remove('checksum');
+    if (_payloadChecksum(payload) != expected) {
+      throw const FormatException('备份完整性校验失败：文件已损坏或被修改');
+    }
+  }
+
+  /// RRULE 白名单：仅接受本应用生成的结构——FREQ 四种频率 +
+  /// INTERVAL/COUNT/UNTIL/BYDAY/BYMONTHDAY 参数，值格式与范围合法，
+  /// 总长 ≤256。外部工具写入的高级/畸形规则此前会静默降级甚至产生
+  /// 畸形展开，导入时统一拒绝（用户可先在来源应用内规范化）。
+  static void _validateRrule(String rrule) {
+    if (rrule.isEmpty) return;
+    if (rrule.length > 256) {
+      throw const FormatException('备份校验失败：重复规则超长');
+    }
+    const freqs = {'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'};
+    const days = {'MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'};
+    var hasFreq = false;
+    for (final seg in rrule.split(';')) {
+      final i = seg.indexOf('=');
+      if (i <= 0 || i == seg.length - 1) {
+        throw const FormatException('备份校验失败：重复规则格式非法');
+      }
+      final key = seg.substring(0, i).toUpperCase();
+      final value = seg.substring(i + 1);
+      switch (key) {
+        case 'FREQ':
+          final v = value.toUpperCase();
+          if (!freqs.contains(v)) {
+            throw const FormatException('备份校验失败：不支持的重复频率');
+          }
+          hasFreq = true;
+        case 'INTERVAL' || 'COUNT':
+          final n = int.tryParse(value);
+          if (n == null ||
+              n < 1 ||
+              n > (key == 'INTERVAL' ? 9999 : 999999)) {
+            throw const FormatException('备份校验失败：重复规则数值越界');
+          }
+        case 'UNTIL':
+          if (!RegExp(r'^\d{8}(T\d{6}Z)?$').hasMatch(value)) {
+            throw const FormatException('备份校验失败：重复规则结束条件非法');
+          }
+        case 'BYDAY':
+          for (final d in value.toUpperCase().split(',')) {
+            if (!days.contains(d)) {
+              throw const FormatException('备份校验失败：重复规则星期非法');
+            }
+          }
+        case 'BYMONTHDAY':
+          for (final d in value.split(',')) {
+            final n = int.tryParse(d);
+            if (n == null || n == 0 || n.abs() > 31) {
+              throw const FormatException('备份校验失败：重复规则日期非法');
+            }
+          }
+        default:
+          throw FormatException('备份校验失败：重复规则含未知参数 $key');
+      }
+    }
+    if (!hasFreq) {
+      throw const FormatException('备份校验失败：重复规则缺少 FREQ');
+    }
+  }
+
+  /// skippedDates 白名单：JSON 字符串数组且每项可解析为日期，
+  /// 条目上限 10000——防注入超大载荷拖垮解析与 RRULE 展开。
+  static void _validateSkippedDates(String s) {
+    if (s.isEmpty) return;
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(s);
+    } catch (_) {
+      throw const FormatException('备份校验失败：跳过日期格式非法');
+    }
+    if (decoded is! List || decoded.length > 10000) {
+      throw const FormatException('备份校验失败：跳过日期格式非法或条目过多');
+    }
+    for (final e in decoded) {
+      if (e is! String || DateTime.tryParse(e) == null) {
+        throw const FormatException('备份校验失败：跳过日期项非法');
+      }
+    }
+  }
+
   /// 自动备份执行中的 Future（并发去重）。
   /// 冷启动 main() 与回前台生命周期可能先后触发，同一时刻只执行一次，
   /// 后续调用复用进行中的 Future，避免同秒写两份备份。
@@ -128,7 +257,8 @@ class BackupService {
   /// 每天首次打开/回到前台自动备份（备份方案设计 3.2）：
   /// 1) Settings 读 lastAutoBackupAt；距现在 <24h → 直接返回
   /// 2) exportJson → 写应用文档目录（私有目录，规避 Android 11+ 作用域存储限制）
-  /// 3) 清理：全量备份文件（下载 + 私有目录）按修改时间降序，删除第 11 份及更旧
+  /// 3) 清理：**仅私有自动备份域内**的文件按修改时间降序，删除第 11 份及更旧
+  ///   （不得用全量视图计数——用户手动导出到下载目录的旧备份会被误删）
   /// 4) 成功 → 写 lastAutoBackupAt；失败 → 写 autoBackupFailed（角标提示）
   Future<bool> autoBackup() {
     final inFlight = _autoBackupInFlight;
@@ -153,8 +283,9 @@ class BackupService {
     debugPrint('自动备份：执行写盘');
     try {
       final json = await exportJson();
-      await exportToFileImpl(json, toDownloads: false);
-      final infos = await listBackupInfos();
+      await writeAutoBackupFile(json);
+      // 清理基准 = 自动备份私有目录内的文件（隔离手动导出的备份，防误删）
+      final infos = await listAutoBackupInfos();
       if (infos.length > keepBackupCount) {
         await deleteBackupFiles(
           infos.skip(keepBackupCount).map((f) => f.path).toList(),
@@ -187,6 +318,8 @@ class BackupService {
     if (data['version'] != 1) {
       throw FormatException('不支持的备份版本');
     }
+    // 完整性先行：篡改/损坏的备份在触碰数据库前整体拒绝
+    _verifyChecksum(data);
     // 缺表键（不完整旧备份）兜底为空表，不抛 TypeError
     final lists = _rows(data, 'lists').map(_jsonToList).toList();
     final tasks = _rows(data, 'tasks').map(_jsonToTask).toList();
@@ -537,6 +670,11 @@ class BackupService {
   );
 
   TasksCompanion _jsonToTask(dynamic j) {
+    // 导入字段白名单：重复规则与跳过日期只接受本应用生成的合法结构，
+    // 越界/畸形值整体拒绝导入（损坏或被篡改的备份不应静默落库）
+    final rrule = j['rrule'] as String;
+    _validateRrule(rrule);
+    _validateSkippedDates(j['skippedDates'] as String);
     // 兼容 v1 备份：scheduledDate/startTime/durationMinutes/dueDate → planStart/planEnd/dueTime
     DateTime? planStart;
     DateTime? planEnd;
@@ -575,7 +713,7 @@ class BackupService {
       dueTime: dueTime == null ? const Value(null) : Value(dueTime),
       isAllDay: Value(j['isAllDay'] as bool),
       color: Value(j['color'] as String? ?? ''),
-      rrule: Value(j['rrule'] as String),
+      rrule: Value(rrule),
       hasReminder: Value(j['hasReminder'] as bool),
       hasNote: Value(j['hasNote'] as bool),
       sortOrder: Value(j['sortOrder'] as int),
@@ -587,16 +725,28 @@ class BackupService {
     );
   }
 
-  RemindersCompanion _jsonToReminder(dynamic j) => RemindersCompanion(
-    id: Value(j['id'] as int),
-    taskId: Value(j['taskId'] as int),
-    remindMinutesBefore: Value(j['remindMinutesBefore'] as int),
-    isPersistent: Value(j['isPersistent'] as bool),
-    // 旧备份无该字段 → null（默认 09:00）
-    remindAtMinutes: j['remindAtMinutes'] == null
-        ? const Value(null)
-        : Value(j['remindAtMinutes'] as int),
-  );
+  RemindersCompanion _jsonToReminder(dynamic j) {
+    // 提醒字段范围校验：提前量为非负且 ≤31 天；全天提醒时刻为当日
+    // 0-1439 分钟——越界值会产生过去时刻或次日错位的提醒（P2-30）
+    final before = j['remindMinutesBefore'];
+    if (before is! int || before < 0 || before > 44640) {
+      throw const FormatException('备份校验失败：提醒提前量越界');
+    }
+    final atMin = j['remindAtMinutes'];
+    if (atMin != null && (atMin is! int || atMin < 0 || atMin > 1439)) {
+      throw const FormatException('备份校验失败：全天提醒时刻越界');
+    }
+    return RemindersCompanion(
+      id: Value(j['id'] as int),
+      taskId: Value(j['taskId'] as int),
+      remindMinutesBefore: Value(before),
+      isPersistent: Value(j['isPersistent'] as bool),
+      // 旧备份无该字段 → null（默认 09:00）
+      remindAtMinutes: atMin == null
+          ? const Value(null)
+          : Value(atMin as int),
+    );
+  }
 
   TaskCompletionsCompanion _jsonToCompletion(dynamic j) =>
       TaskCompletionsCompanion(

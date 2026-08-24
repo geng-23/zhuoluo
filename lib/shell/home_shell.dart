@@ -67,19 +67,32 @@ class _HomeShellState extends ConsumerState<HomeShell>
     });
     // 番茄钟通知主体点击 → 打开番茄专注页（原生桥事件，进程级引擎下
     // 引擎常驻，本订阅在 Activity 重建后依然有效）
-    _pomodoroOpenSub = ref
-        .read(pomodoroNativeProvider)
-        .opens
-        .listen((_) {
-          if (!mounted) return;
-          Navigator.of(context, rootNavigator: true).push(
-            MaterialPageRoute(builder: (_) => const PomodoroPage()),
-          );
-        });
+    final pomodoroNative = ref.read(pomodoroNativeProvider);
+    _pomodoroOpenSub = pomodoroNative.opens.listen((_) {
+      _openPomodoroPage();
+    });
+    // 冷启动竞态补偿：openPomodoro 事件可能先于本订阅到达而被
+    // broadcast 流丢弃——桥内 latch 留有标志，订阅就绪后补消费一次。
+    // 首帧构建期间 Navigator 锁定不能 push，延后到首帧完成后再导航。
+    if (pomodoroNative.consumePendingOpen()) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _openPomodoroPage();
+      });
+    }
     // 冷启动深链——进程被杀后点通知启动 App，payload 不经 onTap 回调，
     // 需消费 init 时捕获的启动 payload（进程级引擎下 init 可能漏捕，
     // 首次挂载异步补读一次，无竞态）
     unawaited(_consumeLaunchPayload());
+  }
+
+  /// 打开番茄专注页（通知主体点击统一入口：流路径与 latch 补偿共用）。
+  /// 先清桥内 latch——事件已进入导航流程，防止 HomeShell 重建时被二次消费。
+  void _openPomodoroPage() {
+    ref.read(pomodoroNativeProvider).consumePendingOpen();
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute(builder: (_) => const PomodoroPage()),
+    );
   }
 
   /// 消费冷启动深链 payload（init 漏捕时补读 getNotificationAppLaunchDetails）

@@ -1595,12 +1595,15 @@ class AppDatabase extends _$AppDatabase {
       result[key] = (result[key] ?? 0) + 1;
     }
 
-    // 1) 计划开始日在窗口内的任务（原口径）
+    // 1) 计划开始日在窗口内的任务（仅非重复任务）——重复任务的 planStart
+    // 不在此计：其计划数由步骤 3 按规则实例逐日展开（含 planStart 当天），
+    // 此前步骤 1 未排除重复任务，系列首个计划日被计 2 次，完成率虚低
     final rows =
         await (select(tasks)..where(
               (t) =>
                   t.planStart.isBiggerOrEqualValue(start) &
                   t.planStart.isSmallerThanValue(end) &
+                  t.rrule.equals('') &
                   t.parentId.isNull(),
             ))
             .get();

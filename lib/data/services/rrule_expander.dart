@@ -215,11 +215,13 @@ class RruleService {
         if (diffYears > 0) startIdx = diffYears ~/ interval;
       }
       for (var i = startIdx; i < maxIter; i++) {
-        final d = AppClock.at(
-          s.year + i * interval,
-          s.month,
-          s.day,
-        );
+        final targetYear = s.year + i * interval;
+        final d = AppClock.at(targetYear, s.month, s.day);
+        // 无效日（闰日锚点 2/29 遇非闰年）被 DateTime 自动进位到 3/1，
+        // 校验后跳过该年——与 MONTHLY 的无效日处理一致，也与 hitsOn 的
+        // YEARLY 分支（要求月日完全相等）同口径，避免"日历出现 3/1 实例
+        // 但命中/完成判定不命中"的分裂
+        if (d.month != s.month || d.day != s.day) continue;
         if (!emit(d)) return result;
       }
     }

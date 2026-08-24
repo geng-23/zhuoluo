@@ -36,7 +36,7 @@ class MainActivity : FlutterActivity() {
         private const val ENGINE_ID = "zhuoluo_engine"
     }
 
-    /** 待转发的"打开番茄页"标志（onCreate/onNewIntent 置位，onResume 转发后清除） */
+    /** 待转发的"打开番茄页"标志（onCreate/onNewIntent 置位，转发成功后清除） */
     private var pendingOpenPomodoro = false
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
@@ -50,19 +50,30 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_POMODORO, false)) {
             pendingOpenPomodoro = true
+            // 已在前台时收到通知点击：Activity 不会再次走 onResume，
+            // 必须当场转发（此前标志滞留到下次 resumed，表现为点击无响应）
+            forwardPendingOpenPomodoro()
         }
     }
 
     override fun onResume() {
         super.onResume()
-        // Dart 主隔离区在首帧前已就绪（main 提前 init 桥），此处转发可达
-        if (pendingOpenPomodoro) {
-            pendingOpenPomodoro = false
-            try {
-                pomodoroChannel?.invokeMethod("openPomodoro", null, null)
-            } catch (_: Exception) {
-                // 通道不可用时静默（App 已打开，用户可自行导航）
-            }
+        forwardPendingOpenPomodoro()
+    }
+
+    /**
+     * 转发待处理的"打开番茄页"到 Dart 主隔离区。
+     * Dart 侧通道 handler 在 main() 启动链早期注册（早于首帧/onResume）；
+     * 若通道尚未就绪（极端时序），保留标志待下次 onResume 重试。
+     */
+    private fun forwardPendingOpenPomodoro() {
+        if (!pendingOpenPomodoro) return
+        val channel = pomodoroChannel ?: return
+        pendingOpenPomodoro = false
+        try {
+            channel.invokeMethod("openPomodoro", null, null)
+        } catch (_: Exception) {
+            // 通道不可用时静默（App 已打开，用户可自行导航）
         }
     }
 

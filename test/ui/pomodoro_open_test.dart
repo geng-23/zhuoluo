@@ -61,4 +61,29 @@ void main() {
     expect(find.byType(PomodoroPage), findsOneWidget, reason: '点击通知直达番茄页');
     expect(find.text('开始'), findsOneWidget, reason: '番茄页处于待开始态');
   });
+
+  testWidgets('冷启动竞态：openPomodoro 先于订阅到达 → latch 补偿导航一次', (
+    tester,
+  ) async {
+    // 事件先到（HomeShell 尚未挂载、无订阅者，broadcast 流丢弃事件）
+    native.emitOpenBeforeSubscribe();
+
+    await pumpShell(tester);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PomodoroPage), findsOneWidget,
+        reason: 'initState 订阅后消费 latch 补偿导航');
+  });
+
+  testWidgets('同一事件不重复消费：流送达后 latch 已清', (tester) async {
+    await pumpShell(tester);
+    native.emitOpen();
+    await tester.pumpAndSettle();
+    expect(find.byType(PomodoroPage), findsOneWidget);
+
+    // 流路径已送达并清除 latch：后续 HomeShell 重建时 initState 的
+    // 补消费不得再触发一次导航
+    expect(native.consumePendingOpen(), isFalse,
+        reason: 'openPomodoro 事件经流处理后不得残留待消费标志');
+  });
 }

@@ -37,6 +37,19 @@ class FakePomodoroNative implements PomodoroNative {
   @override
   Stream<void> get opens => _opens.stream;
 
+  bool _pendingOpen = false;
+  bool _foregroundActive = false;
+
+  @override
+  bool consumePendingOpen() {
+    final pending = _pendingOpen;
+    _pendingOpen = false;
+    return pending;
+  }
+
+  @override
+  bool get foregroundActive => _foregroundActive;
+
   @override
   void init() {
     initCount++;
@@ -50,6 +63,7 @@ class FakePomodoroNative implements PomodoroNative {
     required int totalSeconds,
     String? title,
   }) async {
+    _foregroundActive = true;
     starts.add((
       id: id,
       running: running,
@@ -78,6 +92,7 @@ class FakePomodoroNative implements PomodoroNative {
 
   @override
   Future<void> stopForeground({required int id}) async {
+    _foregroundActive = false;
     stops.add(id);
   }
 
@@ -86,9 +101,17 @@ class FakePomodoroNative implements PomodoroNative {
     _actions.add(actionId);
   }
 
-  /// 模拟一次通知主体点击（注入原生→Dart 打开事件）
+  /// 模拟一次通知主体点击（注入原生→Dart 打开事件；置 latch + 发流，
+  /// 与真实桥行为一致）
   void emitOpen() {
+    _pendingOpen = true;
     _opens.add(null);
+  }
+
+  /// 模拟冷启动竞态：openPomodoro 先于 HomeShell 订阅到达——只置 latch，
+  /// 不发流（broadcast 流无监听时事件本就被丢弃）
+  void emitOpenBeforeSubscribe() {
+    _pendingOpen = true;
   }
 
   void clear() {

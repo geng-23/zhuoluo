@@ -247,15 +247,16 @@ void main() {
       reason: '统计 key 按应用时区解释为 2026-08',
     );
     // 计划数：纽约 8/10 起的每日任务在 8 月窗口展开 22 个实例（8/10-8/31）；
-    // 原统计口径对重复任务的 planStart 额外计 1 次（8/10）→ 合计 23
+    // 重复任务只按实例展开计一次——planStart 当天也是规则命中日，
+    // 不得再额外计 1（旧口径合计 23，首日虚高）
     final planned = await db.getPlannedCountByDay(
       AppClock.at(2026, 8, 1),
       AppClock.at(2026, 8, 31),
     );
     expect(
       planned.values.fold<int>(0, (a, b) => a + b),
-      23,
-      reason: '重复任务计划数 = 展开 22 + planStart 1（原口径）',
+      22,
+      reason: '重复任务计划数 = 展开实例数（8/10-8/31 共 22 天），首日不重复计',
     );
   });
 

@@ -14,10 +14,13 @@
          Android 14+ 要求声明服务类型 specialUse 及对应权限 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <!-- WebDAV 云备份：上传/下载/列表需要网络访问 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="着落"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

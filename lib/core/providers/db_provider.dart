@@ -18,6 +18,19 @@ final autoBackupFailedProvider = FutureProvider<String>((ref) async {
   return await db.getSetting(BackupService.keyAutoBackupFailed) ?? '';
 });
 
+/// 上次 WebDAV 云端同步成功时间（空串 = 从未同步）
+final webdavLastSyncProvider = FutureProvider<String>((ref) async {
+  final db = ref.read(dbProvider);
+  return await db.getSetting(BackupService.keyWebdavLastSyncAt) ?? '';
+});
+
+/// 上次 WebDAV 云端同步失败标志：空串 = 无失败；非空 = 失败 JSON {time, error}。
+/// 下次同步成功时清除并 invalidate 本 provider。
+final webdavFailedProvider = FutureProvider<String>((ref) async {
+  final db = ref.read(dbProvider);
+  return await db.getSetting(BackupService.keyWebdavFailed) ?? '';
+});
+
 final reminderSchedulerProvider = Provider<ReminderScheduler>(
   (ref) => ReminderScheduler(ref.read(dbProvider)),
 );

@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
-import 'package:zhuoluo/core/services/haptics_service.dart';
-import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
-import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_types.dart';
-import 'package:zhuoluo/features/task/providers.dart';
+import 'package:zhuoluo/features/profile/restore_flow.dart';
 
 /// H2：#30 备份管理页（列出/删除单份/多份/全部/恢复）
 class BackupManagePage extends ConsumerStatefulWidget {
@@ -216,23 +213,11 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
       ),
     );
     if (confirmed != true) return;
-    final service = ref.read(backupServiceProvider);
-    final db = ref.read(dbProvider);
     try {
-      // + 备份方案设计 3.5：恢复前自动安全备份当前数据（私有目录），
-      // 恢复失败/不满意时可从备份管理回退
-      await service.exportToFile(toDownloads: false);
-      final json = await service.readFile(path);
-      await service.importJson(json);
-      await db.ensureDefaultList();
-      // B4：恢复后全量刷新任务控制器
-      await ref.read(tasksControllerProvider.notifier).init();
-      // 恢复后 bump 数据版本（四象限/日历/统计常驻页同步刷新）
-      bumpDataVersion(ref);
-      // 重载备份中的内存态设置（主题/音效/震动）
-      await reloadRuntimeSettings(db, ref);
-      // 恢复成功后自动全量重排通知（先取消旧通知再按新数据排期）
-      await ref.read(reminderSchedulerProvider).rescheduleAll();
+      // 恢复前自动安全备份当前数据（备份方案设计 3.5，私有目录可回退）
+      // 与导入后的全量刷新/重排统一走共享编排
+      final json = await ref.read(backupServiceProvider).readFile(path);
+      await importBackupWithRefresh(ref, json, merge: false, safetyBackup: true);
       if (mounted) {
         showAppSnackBar(context, '恢复完成', icon: Icons.restore);
       }
@@ -330,20 +315,4 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
       _load();
     }
   }
-}
-
-/// 备份恢复后重载内存态设置（主题/音效/震动/应用时区）
-/// 恢复导入的 settings 含 themeMode/soundEnabled/hapticsEnabled/appTimezone，
-/// 此前只在启动时加载，恢复后需重启才生效。
-Future<void> reloadRuntimeSettings(AppDatabase db, WidgetRef ref) async {
-  final savedTheme = await db.getSetting('themeMode');
-  if (savedTheme != null && savedTheme.isNotEmpty) {
-    ref.read(themeModeProvider.notifier).state = savedTheme;
-  }
-  final settings = ref.read(settingsProvider);
-  SoundService.soundsEnabled = await settings.getSoundEnabled();
-  Haptics.hapticsEnabled = await settings.getHapticsEnabled();
-  // 偏好设置组：恢复备份后同步应用时区（内存态）。
-  // 全量重排由调用方（导入/恢复流程）在 reloadRuntimeSettings 之后执行
-  AppClock.setTimezone(await settings.getAppTimezone());
 }

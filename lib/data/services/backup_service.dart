@@ -8,6 +8,7 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/backup_json.dart';
 import 'package:zhuoluo/data/services/backup_platform.dart';
 import 'package:zhuoluo/data/services/backup_types.dart';
+import 'package:zhuoluo/data/services/webdav_service.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 
@@ -21,6 +22,20 @@ class BackupService {
   /// 自动备份相关设置键（备份方案设计 3.2/3.3）
   static const keyLastAutoBackupAt = 'lastAutoBackupAt';
   static const keyAutoBackupFailed = 'autoBackupFailed';
+
+  /// WebDAV 云备份设置键。凭据仅存本机 settings 表；
+  /// 导出备份时全部 webdav 开头的键都会被剔除（见 exportJson），
+  /// 避免明文凭据随备份文件外流，覆盖恢复也不会打断已有云端配置。
+  static const keyWebdavUrl = 'webdavUrl';
+  static const keyWebdavUser = 'webdavUser';
+  static const keyWebdavPassword = 'webdavPassword';
+  static const keyWebdavDir = 'webdavDir';
+  static const keyWebdavEnabled = 'webdavEnabled'; // 'true'/'false'
+  static const keyWebdavLastSyncAt = 'webdavLastSyncAt';
+  static const keyWebdavFailed = 'webdavFailed'; // 失败 JSON {time, error}
+
+  /// WebDAV 服务工厂：默认真实实现；测试注入替身拦截网络操作
+  WebdavService Function()? webdavFactory;
 
   /// 自动备份保留份数（备份方案设计 决策 2）
   static const keepBackupCount = 10;
@@ -48,7 +63,10 @@ class BackupService {
       'habits': habits.map((e) => _habitToJson(e)).toList(),
       'habitRecords': habitRecords.map((e) => _habitRecordToJson(e)).toList(),
       'pomodoros': pomodoros.map((e) => pomodoroToJson(e)).toList(),
+      // webdav 开头的键（含云端账号密码）不进备份：备份文件会写入公共
+      // 目录或第三方云端，凭据必须留在本机；覆盖恢复后本地云端配置保持不变
       'settings': settings
+          .where((e) => !e.key.startsWith('webdav'))
           .map((e) => {'key': e.key, 'value': e.value})
           .toList(),
     };
@@ -293,6 +311,9 @@ class BackupService {
       }
       await _db.setSetting(keyLastAutoBackupAt, AppClock.now().toIso8601String());
       await _db.setSetting(keyAutoBackupFailed, '');
+      // 云端同步挂在本地备份成功之后：失败只记 webdavFailed 角标，
+      // 不影响本地自动备份的成功状态（syncToWebdav 内部吞异常）
+      await syncToWebdav(json);
       return true;
     } catch (e) {
       debugPrint('自动备份：写盘失败 $e');
@@ -303,6 +324,79 @@ class BackupService {
             'time': AppClock.now().toIso8601String(),
             'error': '$e',
           }),
+        );
+      } catch (_) {}
+      return false;
+    }
+  }
+
+  // ---------- WebDAV 云备份 ----------
+
+  /// 读取云端备份配置；从未配置（无服务器地址）返回 null。
+  /// 目录为空时回落默认目录名。
+  Future<WebdavConfig?> readWebdavConfig() async {
+    final url = (await _db.getSetting(keyWebdavUrl))?.trim() ?? '';
+    if (url.isEmpty) return null;
+    final dir =
+        (await _db.getSetting(keyWebdavDir))?.trim() ??
+        WebdavService.defaultDir;
+    return WebdavConfig(
+      url: url,
+      username: (await _db.getSetting(keyWebdavUser))?.trim() ?? '',
+      password: await _db.getSetting(keyWebdavPassword) ?? '',
+      dir: dir.isEmpty ? WebdavService.defaultDir : dir,
+      enabled: await _db.getSetting(keyWebdavEnabled) != 'false',
+    );
+  }
+
+  /// 保存云端备份配置
+  Future<void> writeWebdavConfig(WebdavConfig c) async {
+    await _db.setSetting(keyWebdavUrl, c.url.trim());
+    await _db.setSetting(keyWebdavUser, c.username.trim());
+    await _db.setSetting(keyWebdavPassword, c.password);
+    await _db.setSetting(keyWebdavDir, c.dir.trim());
+    await _db.setSetting(keyWebdavEnabled, c.enabled ? 'true' : 'false');
+  }
+
+  /// 上传一份备份到云端并做远端保留清理，写同步成功/失败状态。
+  /// 手动「立即上传」传 [requireEnabled] = false——自动开关只限制
+  /// 每日自动跟随，不应阻止用户主动上传。
+  ///
+  /// 失败语义：仅记录 webdavFailed（角标/页面展示），不抛出、不影响
+  /// 本地自动备份的成功状态。返回是否同步成功；未配置返回 false。
+  Future<bool> syncToWebdav(String json, {bool requireEnabled = true}) async {
+    final cfg = await readWebdavConfig();
+    if (cfg == null || !cfg.connectable) return false;
+    if (requireEnabled && !cfg.enabled) return false;
+    try {
+      final svc = webdavFactory?.call() ?? WebdavService();
+      final name = await svc.upload(cfg, json);
+      // 远端保留策略与本地一致：仅清理自己前缀的备份，保留最近 N 份；
+      // 清理失败不影响本次同步结果（下次同步会再尝试）
+      try {
+        final remote = await svc.list(cfg);
+        if (remote.length > keepBackupCount) {
+          await svc.delete(
+            cfg,
+            remote.skip(keepBackupCount).map((f) => f.name).toList(),
+          );
+        }
+      } catch (e) {
+        debugPrint('WebDAV 远端清理失败（不影响同步结果）：$e');
+      }
+      await _db.setSetting(
+        keyWebdavLastSyncAt,
+        AppClock.now().toIso8601String(),
+      );
+      await _db.setSetting(keyWebdavFailed, '');
+      debugPrint('WebDAV 同步成功：$name');
+      return true;
+    } catch (e) {
+      debugPrint('WebDAV 同步失败：$e');
+      try {
+        await _db.setSetting(
+          keyWebdavFailed,
+          jsonEncode({'time': AppClock.now().toIso8601String(), 'error': '$e'}),
         );
       } catch (_) {}
       return false;

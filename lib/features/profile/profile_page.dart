@@ -12,8 +12,9 @@ import 'package:zhuoluo/features/profile/backup_page.dart';
 import 'package:zhuoluo/features/profile/habit_page.dart';
 import 'package:zhuoluo/features/profile/pomodoro_page.dart';
 import 'package:zhuoluo/features/profile/preferences_page.dart';
+import 'package:zhuoluo/features/profile/restore_flow.dart';
+import 'package:zhuoluo/features/profile/webdav_page.dart';
 import 'package:zhuoluo/features/statistics/statistics_page.dart';
-import 'package:zhuoluo/features/task/providers.dart';
 
 /// 我的页：工具入口 + 设置
 class ProfilePage extends ConsumerWidget {
@@ -27,6 +28,9 @@ class ProfilePage extends ConsumerWidget {
     // 备份方案设计 3.3：自动备份失败 → 备份入口角标提示（不弹窗打扰）
     final backupFail = ref.watch(autoBackupFailedProvider).value ?? '';
     final failTime = _parseAutoBackupFailTime(backupFail);
+    // WebDAV 云端同步状态（入口副标题：上次同步时间 / 失败提示）
+    final webdavFail = ref.watch(webdavFailedProvider).value ?? '';
+    final webdavLast = ref.watch(webdavLastSyncProvider).value ?? '';
     return Scaffold(
       appBar: AppBar(title: const Text('我的')),
       // 空白处从左向右滑切四象限（翻页式：上一个 tab；列表垂直滚动不冲突）
@@ -102,6 +106,32 @@ class ProfilePage extends ConsumerWidget {
               title: const Text('导入备份'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => _import(context, ref),
+            ),
+            ListTile(
+              leading: Icon(
+                webdavFail.isEmpty ? Icons.cloud_outlined : Icons.cloud_off,
+                color: webdavFail.isEmpty ? null : Colors.orange,
+              ),
+              title: const Text('WebDAV 云备份'),
+              subtitle: webdavFail.isNotEmpty
+                  ? Text(
+                      '上次云端同步失败，点此查看',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.orange.shade700,
+                      ),
+                    )
+                  : Text(
+                      webdavLast.isEmpty
+                          ? '通过 WebDAV 把备份同步到你自己的服务器'
+                          : '上次云端同步 ${_fmtWebdavTime(webdavLast)}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _push(context, const WebdavPage()),
             ),
             const Divider(),
             const _SectionHeader('通知'),
@@ -186,6 +216,16 @@ class ProfilePage extends ConsumerWidget {
     ref.invalidate(autoBackupFailedProvider);
   }
 
+  /// WebDAV 上次同步时间的入口副标题文案（MM-dd HH:mm）
+  static String _fmtWebdavTime(String raw) {
+    final t = DateTime.tryParse(raw);
+    if (t == null) return '未知时间';
+    return '${t.month.toString().padLeft(2, '0')}-'
+        '${t.day.toString().padLeft(2, '0')} '
+        '${t.hour.toString().padLeft(2, '0')}:'
+        '${t.minute.toString().padLeft(2, '0')}';
+  }
+
   void _showAbout(BuildContext context) {
     showDialog<void>(
       context: context,
@@ -235,7 +275,6 @@ class ProfilePage extends ConsumerWidget {
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {
     final service = ref.read(backupServiceProvider);
-    final db = ref.read(dbProvider);
     // 方案 A：系统打开对话框，从任意位置选择备份 JSON
     // （分段 try：选择/读取失败与导入失败分开提示，便于定位）
     String? json;
@@ -265,14 +304,15 @@ class ProfilePage extends ConsumerWidget {
         return;
       }
       // 确认框：替换 / 合并两种导入方式（备份方案设计 3.4）
-      // 返回 'merge' 合并导入（按标题去重），'replace' 全量替换
+      // 返回 'merge' 合并导入（按内容指纹去重），'replace' 全量替换
       final choice = await showDialog<String>(
         context: context,
         builder: (c) => AlertDialog(
           title: const Text('导入备份'),
           content: Text(
             '备份中有 ${stats.tasks} 个任务、${stats.lists} 个清单。\n\n'
-            '「合并导入」按标题去重并入当前数据（推荐，不丢失现有内容）；\n'
+            '「合并导入」按内容指纹去重并入当前数据'
+            '（同名同内容才跳过，推荐，不丢失现有内容）；\n'
             '「恢复并覆盖」以备份为准替换全部数据（恢复前会自动备份当前数据，'
             '可在"备份管理"中回退）。',
           ),
@@ -293,34 +333,20 @@ class ProfilePage extends ConsumerWidget {
         ),
       );
       if (choice == null || !context.mounted) return;
-      if (choice == 'replace') {
-        // 冲突增强 ①：导入前自动安全备份当前数据（文档目录，备份管理可回退）
-        await service.exportToFile(toDownloads: false);
-        if (context.mounted) {
-          showAppSnackBar(
-            context,
-            '已自动备份当前数据（可在备份管理中回退）',
-            icon: Icons.backup_outlined,
-          );
-        }
-      }
-      await service.importJson(json, merge: choice == 'merge');
-      await db.ensureDefaultList();
-      // B4：恢复后全量刷新任务控制器（重载清单/任务）
-      await ref.read(tasksControllerProvider.notifier).init();
-      // 恢复后 bump 数据版本（四象限/日历/统计常驻页同步刷新）
-      bumpDataVersion(ref);
-      // 重载备份中的内存态设置（主题/音效/震动，此前需重启才生效）
-      await reloadRuntimeSettings(db, ref);
-      // 恢复成功后自动全量重排通知（rescheduleAll 先取消全部旧通知
-      // 再按新数据排期；不再依赖用户选择"稍后"导致通知状态不一致）
-      await ref.read(reminderSchedulerProvider).rescheduleAll();
+      // 导入与导入后的全量刷新/重排统一走共享编排
+      // （replace 模式由编排内部先自动安全备份当前数据）
+      await importBackupWithRefresh(
+        ref,
+        json,
+        merge: choice == 'merge',
+        safetyBackup: choice == 'replace',
+      );
       if (context.mounted) {
         // 冲突增强 ③：导入完成报告
         showAppSnackBar(
           context,
           choice == 'merge'
-              ? '已合并导入（按标题去重）'
+              ? '已合并导入（按内容指纹去重）'
               : '已恢复 ${stats.tasks} 个任务、${stats.reminders} 条提醒、'
                   '${stats.habits} 个习惯',
           icon: Icons.restore,

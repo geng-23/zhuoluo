@@ -321,27 +321,109 @@ class ReminderScheduler {
 
   // ---------- 习惯提醒 ----------
 
+  /// 每习惯操作队列：同一习惯的排期/补丁串行执行，防止快速
+  /// 「打卡→撤销→打卡」时并发交错导致通知重复或遗漏。
+  /// 值存吞错版本，前序失败不阻塞后续操作。
+  final Map<int, Future<void>> _habitQueues = {};
+
+  /// 把 [op] 排入该习惯的串行队列：返回值透传 op 的结果/错误；
+  /// 队列内保存吞错版本，保证链条不因前序失败断裂
+  Future<T> _enqueueHabitOp<T>(int habitId, Future<T> Function() op) {
+    final prev = _habitQueues[habitId] ?? Future<void>.value();
+    final job = prev.then((_) => op());
+    final swallowed = job.then<void>((_) {}, onError: (Object _) {});
+    _habitQueues[habitId] = swallowed;
+    swallowed.whenComplete(() {
+      // 仍是队尾时移除，避免长期驻留；已被后继替换则保留链
+      if (identical(_habitQueues[habitId], swallowed)) {
+        _habitQueues.remove(habitId);
+      }
+    });
+    return job;
+  }
+
+  /// 平台通道分批并发的窗口大小：单次往返约几毫秒到十几毫秒，
+  /// 全窗口 93 条串行 ≈2s；8 并发把墙钟时间压到约 1/8 且不会压垮插件
+  static const int _habitBatchSize = 8;
+
+  /// 打卡/撤销打卡后的当天增量通知补丁（O(1)，替代全窗口重排）：
+  /// - 打卡（done=true）：仅取消今天的习惯提醒——未来日期的已排通知
+  ///   不受影响（打卡只改变今天一条记录）；
+  /// - 撤销（done=false）：今日提醒时刻未过则补排今天一条，已过则无需处理
+  ///   （与全窗口重排的过时跳过口径一致）。
+  /// 全窗口重排仅在创建/改提醒/恢复删除/全量重排时执行。
+  /// 返回 false 表示有通知未成功排入系统（权限被拒等）。
+  Future<bool> onHabitToggled(Habit habit, {required bool done}) =>
+      _enqueueHabitOp(habit.id, () => _onHabitToggledInner(habit, done));
+
+  Future<bool> _onHabitToggledInner(Habit habit, bool done) async {
+    try {
+      final time = habit.reminderTime;
+      if (time == null) return true;
+      final now = AppClock.now();
+      final today = AppClock.startOfDay(now);
+      final id = NotificationIds.forHabit(habit.id, today);
+      if (done) {
+        await NotificationService.instance.cancel(id);
+        return true;
+      }
+      // reminderTime 为 DB 读回值（系统时区字段），先按应用时区解释
+      final a = AppClock.asApp(time);
+      final when = AppClock.at(
+        today.year,
+        today.month,
+        today.day,
+        a.hour,
+        a.minute,
+      );
+      if (when.isBefore(now)) return true;
+      return await NotificationService.instance.schedule(
+        id,
+        title: '习惯提醒',
+        body: '该打卡「${habit.name}」了',
+        when: when,
+        payload: 'h${habit.id}',
+        // 习惯提醒走独立渠道（声音/开关可与任务提醒分开控制）
+        channel: NotificationService.habitReminderChannelId,
+      );
+    } catch (e) {
+      debugPrint('习惯打卡通知补丁失败 habitId=${habit.id}: $e');
+      return false;
+    }
+  }
+
   /// 调度习惯每日提醒（无 reminderTime 则取消）。
   /// 逐日排期（93 天窗口，一次性通知，ID 含日期维度）——
   /// 已打卡的日期跳过（此前 scheduleDaily 循环通知无法按天跳过，
-  /// 当天已打卡后仍弹"该打卡了"）；打卡/撤销打卡后调用本方法重排。
+  /// 当天已打卡后仍弹"该打卡了"）；创建/改提醒/恢复删除等
+  /// 需要重建整个窗口的场景调用，打卡/撤销走 [onHabitToggled] 增量补丁。
   /// 返回 false 表示有提醒未成功排入系统（权限被拒等）。
-  Future<bool> scheduleHabitReminder(Habit habit) async {
+  Future<bool> scheduleHabitReminder(Habit habit) =>
+      _enqueueHabitOp(habit.id, () => _scheduleHabitReminderInner(habit));
+
+  Future<bool> _scheduleHabitReminderInner(Habit habit) async {
     try {
       final time = habit.reminderTime;
       // 无论是否取消提醒，先取消窗口内全部旧通知再重排——
-      // 打卡后重排时已排的"今天"通知必须取消，否则已打卡仍到点弹
-      await cancelHabitReminder(habit.id);
+      // 已排的"今天"通知必须取消，否则已打卡仍到点弹
+      await cancelWindowInBatches(habit.id);
       if (time == null) return true;
       var ok = true;
       final now = AppClock.now();
-      final start = AppClock.at(now.year, now.month, now.day);
+      final start = AppClock.startOfDay(now);
+      // 批量预取窗口内已打卡日期（1 次查询替代逐日查库 93 次）
+      final doneDays = await _db.getHabitDoneDays(
+        habit.id,
+        start,
+        AppClock.addCalendarDays(start, 92),
+      );
+      // reminderTime 为 DB 读回值（系统时区字段），先按应用时区解释
+      final a = AppClock.asApp(time);
+      final pending = <DateTime>[];
       for (var i = 0; i < 93; i++) {
         final day = AppClock.addCalendarDays(start, i);
         // 已打卡的日期不排提醒（无效打扰）
-        if (await _db.isHabitDone(habit.id, day)) continue;
-        // reminderTime 为 DB 读回值（系统时区字段），先按应用时区解释
-        final a = AppClock.asApp(time);
+        if (doneDays.contains(day)) continue;
         final when = AppClock.at(
           day.year,
           day.month,
@@ -351,16 +433,28 @@ class ReminderScheduler {
         );
         // 已过去的提醒时刻（今天）跳过，从明天开始
         if (when.isBefore(now)) continue;
-        ok = await NotificationService.instance.schedule(
-              NotificationIds.forHabit(habit.id, day),
+        pending.add(when);
+      }
+      // 分批并发排期：串行 93 次 ≈2s，8 并发把墙钟时间压到约 1/8
+      for (var i = 0; i < pending.length; i += _habitBatchSize) {
+        final end = (i + _habitBatchSize > pending.length)
+            ? pending.length
+            : i + _habitBatchSize;
+        final results = await Future.wait([
+          for (final when in pending.sublist(i, end))
+            NotificationService.instance.schedule(
+              NotificationIds.forHabit(habit.id, when),
               title: '习惯提醒',
               body: '该打卡「${habit.name}」了',
               when: when,
               payload: 'h${habit.id}',
               // 习惯提醒走独立渠道（声音/开关可与任务提醒分开控制）
               channel: NotificationService.habitReminderChannelId,
-            ) &&
-            ok;
+            ),
+        ]);
+        for (final r in results) {
+          ok = r && ok;
+        }
       }
       return ok;
     } catch (e) {
@@ -370,13 +464,28 @@ class ReminderScheduler {
   }
 
   /// 取消习惯提醒（未来 93 天窗口逐日取消，ID 含日期维度）
-  Future<void> cancelHabitReminder(int habitId) async {
+  Future<void> cancelHabitReminder(int habitId) =>
+      _enqueueHabitOp(habitId, () => cancelWindowInBatches(habitId));
+
+  /// 窗口内逐日取消（分批并发）。仅供队列内部调用——
+  /// 已入队的操作里不得再调排队版本（cancelHabitReminder），否则死锁
+  Future<void> cancelWindowInBatches(int habitId) async {
     final now = AppClock.now();
-    final start = AppClock.at(now.year, now.month, now.day);
-    for (var i = 0; i < 93; i++) {
-      await NotificationService.instance.cancel(
-        NotificationIds.forHabit(habitId, AppClock.addCalendarDays(start, i)),
-      );
+    final start = AppClock.startOfDay(now);
+    const window = 93;
+    for (var i = 0; i < window; i += _habitBatchSize) {
+      final n = (i + _habitBatchSize > window)
+          ? window - i
+          : _habitBatchSize;
+      await Future.wait([
+        for (var j = i; j < i + n; j++)
+          NotificationService.instance.cancel(
+            NotificationIds.forHabit(
+              habitId,
+              AppClock.addCalendarDays(start, j),
+            ),
+          ),
+      ]);
     }
   }
 

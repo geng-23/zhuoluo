@@ -1433,6 +1433,28 @@ class AppDatabase extends _$AppDatabase {
     return found != null;
   }
 
+  /// [from]（含）到 [to]（含）窗口内已打卡日期集合（日历日归一，DST 安全）。
+  /// 提醒排期路径的批量预取用——替代逐日 isHabitDone 查询
+  /// （93 天窗口单习惯 93 次 → 1 次），口径与 isHabitDone 一致。
+  Future<Set<DateTime>> getHabitDoneDays(
+    int habitId,
+    DateTime from,
+    DateTime to,
+  ) async {
+    final start = AppClock.startOfDay(AppClock.asApp(from));
+    final end = AppClock.nextDay(to);
+    final rows =
+        await (select(habitRecords)
+              ..where(
+                (h) =>
+                    h.habitId.equals(habitId) &
+                    h.date.isBiggerOrEqualValue(start) &
+                    h.date.isSmallerThanValue(end),
+              ))
+            .get();
+    return {for (final r in rows) AppClock.startOfDay(AppClock.asApp(r.date))};
+  }
+
   /// 打卡/取消（toggle 语义）。事务化——双击并发时串行执行，
   /// 第二次调用看到第一次的提交结果（查→删/插），不会并发插入重复记录
   ///（配合 habit_records 唯一索引双保险）

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
+import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 
 /// 可选的习惯图标（emoji，按习惯场景挑选，新建/编辑共用）
 const _habitIcons = <String>[
@@ -143,9 +145,13 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                         // 撤销删除 = 恢复，配恢复音效
                         SoundService.instance.play(SoundKind.reopen);
                         await db.restoreHabit(habit, records);
-                        await scheduler.scheduleHabitReminder(habit);
+                        // 恢复数据立即上屏；全窗口重排后台执行
+                        //（删除时已取消全部旧通知，需重建窗口）
                         bumpDataVersion(ref);
                         _load();
+                        unawaited(
+                          scheduler.scheduleHabitReminder(habit),
+                        );
                       },
                       icon: Icons.delete_outline,
                     );
@@ -280,23 +286,23 @@ class _HabitPageState extends ConsumerState<HabitPage> {
       );
       // 习惯数据变更通知
       bumpDataVersion(ref);
-      if (draft.reminderTime != null) {
-        final habit = await db.getHabit(id);
-        if (habit != null) {
-          // 提醒未成功排入系统时提示
-          final ok = await ref
-              .read(reminderSchedulerProvider)
-              .scheduleHabitReminder(habit);
-          if (!ok && mounted) {
-            showAppSnackBar(
-              context,
-              '提醒未成功排入系统：请检查通知权限',
-              icon: Icons.notifications_off_outlined,
-            );
-          }
-        }
-      }
+      // 列表先刷新；93 天全窗口排期较慢，后台执行不阻塞新习惯出现
       _load();
+      if (draft.reminderTime != null) {
+        final scheduler = ref.read(reminderSchedulerProvider);
+        unawaited(
+          _rebuildHabitWindow(db, scheduler, id).then((ok) {
+            // 提醒未成功排入系统时提示（后台完成时页面可能已退出）
+            if (!ok && mounted) {
+              showAppSnackBar(
+                context,
+                '提醒未成功排入系统：请检查通知权限',
+                icon: Icons.notifications_off_outlined,
+              );
+            }
+          }),
+        );
+      }
     }
   }
 }
@@ -308,6 +314,20 @@ class _HabitDraft {
   final DateTime? reminderTime;
 
   _HabitDraft(this.name, this.icon, this.reminderTime);
+}
+
+/// 后台重建习惯的 93 天提醒窗口（创建/改提醒共用，不阻塞调用方刷新）。
+/// db/scheduler 由调用方先同步读出——后台任务完成时页面可能已退出，
+/// 不得再触碰 ref。返回 false 表示有提醒未成功排入系统（权限被拒等）；
+/// 习惯已被删除视为成功。
+Future<bool> _rebuildHabitWindow(
+  AppDatabase db,
+  ReminderScheduler scheduler,
+  int habitId,
+) async {
+  final habit = await db.getHabit(habitId);
+  if (habit == null) return true;
+  return scheduler.scheduleHabitReminder(habit);
 }
 
 /// 图标选择弹窗（从表单点击进入）：网格点选即返回所选，取消/点外部关闭
@@ -585,30 +605,38 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
         willDone ? SoundKind.complete : SoundKind.reopen,
       );
       await db.checkHabit(widget.habit.id, AppClock.now());
-      // 打卡/取消后重排习惯提醒——已打卡日期不再排
-      //（取消打卡后当天提醒恢复）
+      // 补丁方向以打卡后的真实库内状态为准（不依赖可能过期的
+      // _doneToday——备份导入等外部变更后仍保证通知与数据一致）
+      final nowDone = await db.isHabitDone(widget.habit.id, AppClock.now());
+      // 打卡/取消后只做当天增量通知补丁（O(1)，毫秒级）——
+      // 打卡当天不再弹提醒、撤销当天恢复提醒；未来日期的已排通知
+      // 不受影响（打卡只改变今天一条记录）。全窗口重排仅在
+      // 创建/改提醒/恢复删除时执行，不再阻塞打卡反馈
       await ref
           .read(reminderSchedulerProvider)
-          .scheduleHabitReminder(widget.habit);
-      // 习惯打卡数据变更通知
+          .onHabitToggled(widget.habit, done: nowDone);
       bumpDataVersion(ref);
       _load();
       if (!mounted) return;
       showAppSnackBar(
         context,
-        willDone ? '已打卡「${widget.habit.name}」' : '已取消今日打卡',
+        nowDone ? '已打卡「${widget.habit.name}」' : '已取消今日打卡',
         actionLabel: '撤销',
         onAction: () async {
-          // 撤销打卡 = 恢复，配恢复音效
+          // 撤销打卡 = 恢复，配恢复音效（同样走当天增量补丁）
           SoundService.instance.play(SoundKind.reopen);
           await db.checkHabit(widget.habit.id, AppClock.now());
+          final undone = !await db.isHabitDone(
+            widget.habit.id,
+            AppClock.now(),
+          );
           await ref
               .read(reminderSchedulerProvider)
-              .scheduleHabitReminder(widget.habit);
+              .onHabitToggled(widget.habit, done: undone);
           bumpDataVersion(ref);
           _load();
         },
-        icon: willDone ? Icons.check_circle_outline : Icons.undo,
+        icon: nowDone ? Icons.check_circle_outline : Icons.undo,
       );
     } finally {
       _toggling = false;
@@ -788,18 +816,19 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
     await db.updateHabitReminder(habit.id, remind ? time : null);
     // 习惯数据变更通知
     bumpDataVersion(ref);
-    final updated = await db.getHabit(habit.id);
-    if (updated != null) {
-      // 提醒未成功排入系统时提示
-      final ok = await scheduler.scheduleHabitReminder(updated);
-      if (!ok && mounted) {
-        showAppSnackBar(
-          context,
-          '提醒未成功排入系统：请检查通知权限',
-          icon: Icons.notifications_off_outlined,
-        );
-      }
-    }
+    // 列表先刷新；改提醒需重建整个 93 天窗口，后台执行不阻塞上屏
     widget.onRefresh();
+    unawaited(
+      _rebuildHabitWindow(db, scheduler, habit.id).then((ok) {
+        // 提醒未成功排入系统时提示（后台完成时页面可能已退出）
+        if (!ok && mounted) {
+          showAppSnackBar(
+            context,
+            '提醒未成功排入系统：请检查通知权限',
+            icon: Icons.notifications_off_outlined,
+          );
+        }
+      }),
+    );
   }
 }

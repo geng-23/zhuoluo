@@ -951,12 +951,18 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
-  /// 搜索：全字段模糊
+  /// 搜索：全字段模糊。查询词中的 LIKE 通配符（% _ \）按字面匹配，
+  /// 需转义并显式声明 ESCAPE 字符，否则搜「100%」会命中全部任务
   Future<List<Task>> searchTasks(String query) async {
-    final q = '%$query%';
-    final rows = await (select(
-      tasks,
-    )..where((t) => t.title.like(q) | t.note.like(q))).get();
+    final escaped = query
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', '\\%')
+        .replaceAll('_', '\\_');
+    final q = '%$escaped%';
+    final rows = await (select(tasks)..where(
+      (t) =>
+          t.title.like(q, escapeChar: r'\') | t.note.like(q, escapeChar: r'\'),
+    )).get();
     return rows.where((t) => !isCompleted(t)).toList();
   }
 

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
@@ -211,36 +213,36 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                 ),
                 const SizedBox(height: 8),
                 SwitchListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                title: const Text('每日提醒'),
-                value: remind,
-                onChanged: (v) => setDialogState(() => remind = v),
-              ),
-              if (remind)
-                ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.schedule, size: 20),
-                  title: Text('提醒时间 ${DateUtilsEx.timeCn(time)}'),
-                  onTap: () async {
-                    final picked = await showTimePicker(
-                      context: context,
-                      initialTime: TimeOfDay.fromDateTime(time),
-                    );
-                    if (picked != null) {
-                      setDialogState(
-                        () => time = DateTime(
-                          time.year,
-                          time.month,
-                          time.day,
-                          picked.hour,
-                          picked.minute,
-                        ),
-                      );
-                    }
-                  },
+                  title: const Text('每日提醒'),
+                  value: remind,
+                  onChanged: (v) => setDialogState(() => remind = v),
                 ),
+                if (remind)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.schedule, size: 20),
+                    title: Text('提醒时间 ${DateUtilsEx.timeCn(time)}'),
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay.fromDateTime(time),
+                      );
+                      if (picked != null) {
+                        setDialogState(
+                          () => time = DateTime(
+                            time.year,
+                            time.month,
+                            time.day,
+                            picked.hour,
+                            picked.minute,
+                          ),
+                        );
+                      }
+                    },
+                  ),
               ],
             ),
           ),
@@ -317,11 +319,14 @@ Future<String?> showHabitIconPicker(
     context: context,
     builder: (c) {
       final scheme = Theme.of(c).colorScheme;
+      // 小屏/横屏自适应：宽不超屏宽 85%、高不超屏高一半
+      //（GridView 可滚动，空间不足时只缩不放导致溢出）
+      final size = MediaQuery.sizeOf(c);
       return AlertDialog(
         title: const Text('选择图标'),
         content: SizedBox(
-          width: 320,
-          height: 330,
+          width: math.min(320.0, size.width * 0.85),
+          height: math.min(330.0, size.height * 0.5),
           child: GridView.builder(
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 6,
@@ -483,7 +488,6 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
 
   @override
   Widget build(BuildContext context) {
-    final db = ref.read(dbProvider);
     final scheme = Theme.of(context).colorScheme;
     final remindText = widget.habit.reminderTime == null
         ? null
@@ -550,62 +554,65 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
           ),
         ],
       ),
+      onTap: _toggling ? null : _toggle,
       trailing: IconButton(
         icon: Icon(
           _doneToday ? Icons.check_circle : Icons.radio_button_unchecked,
           color: _doneToday ? Theme.of(context).colorScheme.primary : null,
         ),
-        onPressed: _toggling
-            ? null
-            : () async {
-                // 双击/连点防抖——toggle 语义下连点会变成
-                // "打卡+取消"；_toggling 置位未触发重建前，第二次点击
-                // 仍可能进入本闭包，故闭包内再守卫一次
-                if (_toggling) return;
-                // 批4-4：习惯打卡补触觉反馈（此前无）
-                Haptics.light();
-                _toggling = true;
-                if (mounted) setState(() {});
-                try {
-                  // 打卡/取消打卡都是 toggle 语义，带撤销条（误触可恢复）
-                  final willDone = !_doneToday;
-                  // 打卡/取消打卡配动作音效（完成/恢复，与任务完成一致）
-                  SoundService.instance.play(
-                    willDone ? SoundKind.complete : SoundKind.reopen,
-                  );
-                  await db.checkHabit(widget.habit.id, AppClock.now());
-                  // 打卡/取消后重排习惯提醒——已打卡日期不再排
-                  //（取消打卡后当天提醒恢复）
-                  await ref
-                      .read(reminderSchedulerProvider)
-                      .scheduleHabitReminder(widget.habit);
-                  // 习惯打卡数据变更通知
-                  bumpDataVersion(ref);
-                  _load();
-                  if (!context.mounted) return;
-                  showAppSnackBar(
-                    context,
-                    willDone ? '已打卡「${widget.habit.name}」' : '已取消今日打卡',
-                    actionLabel: '撤销',
-                    onAction: () async {
-                      // 撤销打卡 = 恢复，配恢复音效
-                      SoundService.instance.play(SoundKind.reopen);
-                      await db.checkHabit(widget.habit.id, AppClock.now());
-                      await ref
-                          .read(reminderSchedulerProvider)
-                          .scheduleHabitReminder(widget.habit);
-                      bumpDataVersion(ref);
-                      _load();
-                    },
-                    icon: willDone ? Icons.check_circle_outline : Icons.undo,
-                  );
-                } finally {
-                  _toggling = false;
-                }
-              },
+        onPressed: _toggling ? null : _toggle,
       ),
       onLongPress: () => _showActions(),
     );
+  }
+
+  /// 打卡/取消打卡（行主体点击与行尾图标共用，toggle 语义带撤销条）
+  Future<void> _toggle() async {
+    final db = ref.read(dbProvider);
+    // 双击/连点防抖——toggle 语义下连点会变成
+    // "打卡+取消"；_toggling 置位未触发重建前，第二次点击
+    // 仍可能进入本闭包，故闭包内再守卫一次
+    if (_toggling) return;
+    // 批4-4：习惯打卡补触觉反馈（此前无）
+    Haptics.light();
+    _toggling = true;
+    if (mounted) setState(() {});
+    try {
+      // 打卡/取消打卡都是 toggle 语义，带撤销条（误触可恢复）
+      final willDone = !_doneToday;
+      // 打卡/取消打卡配动作音效（完成/恢复，与任务完成一致）
+      SoundService.instance.play(
+        willDone ? SoundKind.complete : SoundKind.reopen,
+      );
+      await db.checkHabit(widget.habit.id, AppClock.now());
+      // 打卡/取消后重排习惯提醒——已打卡日期不再排
+      //（取消打卡后当天提醒恢复）
+      await ref
+          .read(reminderSchedulerProvider)
+          .scheduleHabitReminder(widget.habit);
+      // 习惯打卡数据变更通知
+      bumpDataVersion(ref);
+      _load();
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        willDone ? '已打卡「${widget.habit.name}」' : '已取消今日打卡',
+        actionLabel: '撤销',
+        onAction: () async {
+          // 撤销打卡 = 恢复，配恢复音效
+          SoundService.instance.play(SoundKind.reopen);
+          await db.checkHabit(widget.habit.id, AppClock.now());
+          await ref
+              .read(reminderSchedulerProvider)
+              .scheduleHabitReminder(widget.habit);
+          bumpDataVersion(ref);
+          _load();
+        },
+        icon: willDone ? Icons.check_circle_outline : Icons.undo,
+      );
+    } finally {
+      _toggling = false;
+    }
   }
 
   void _showActions() {

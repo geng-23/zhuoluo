@@ -398,10 +398,14 @@ class _NotificationPermissionTile extends ConsumerStatefulWidget {
 }
 
 class _NotificationPermissionTileState
-    extends ConsumerState<_NotificationPermissionTile> {
+    extends ConsumerState<_NotificationPermissionTile>
+    with WidgetsBindingObserver {
   bool? _exactOk;
   bool? _notifOk;
   bool? _batteryOk;
+
+  /// 跳转自启动设置后置位：回到应用（resumed）时提示用户确认
+  bool _autoStartHintPending = false;
 
   /// 提醒渠道设置状态（声音/悬浮/振动），按渠道 ID 缓存
   final Map<String, ReminderChannelStatus?> _channelStatus = {};
@@ -415,7 +419,31 @@ class _NotificationPermissionTileState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _check();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 从系统设置页返回即刷新权限状态——固定延时回读在用户于系统
+    // 设置停留超过延时时间时会显示旧值
+    if (state == AppLifecycleState.resumed) {
+      _check();
+      if (_autoStartHintPending) {
+        _autoStartHintPending = false;
+        showAppSnackBar(
+          context,
+          '已打开自启动设置，请确认已允许自启动',
+          icon: Icons.power_settings_new,
+        );
+      }
+    }
   }
 
   Future<void> _check() async {
@@ -475,11 +503,8 @@ class _NotificationPermissionTileState
           ),
           title: const Text('通知权限', style: TextStyle(fontSize: 14)),
           trailing: _statusIcon(notif),
-          onTap: () async {
-            await ref
-                .read(notificationServiceProvider)
-                .openNotificationSettings();
-            Future.delayed(const Duration(seconds: 1), _check);
+          onTap: () {
+            ref.read(notificationServiceProvider).openNotificationSettings();
           },
         ),
         // 精确闹钟（Android 12+ 默认拒绝）
@@ -496,11 +521,10 @@ class _NotificationPermissionTileState
             style: TextStyle(fontSize: 11),
           ),
           trailing: _statusIcon(exact),
-          onTap: () async {
-            await ref
+          onTap: () {
+            ref
                 .read(notificationServiceProvider)
                 .requestExactAlarmPermission();
-            Future.delayed(const Duration(seconds: 1), _check);
           },
         ),
         // 电池优化豁免
@@ -517,11 +541,10 @@ class _NotificationPermissionTileState
             style: TextStyle(fontSize: 11),
           ),
           trailing: _statusIcon(battery),
-          onTap: () async {
-            await ref
+          onTap: () {
+            ref
                 .read(notificationServiceProvider)
                 .requestBatteryOptimizationExemption();
-            Future.delayed(const Duration(seconds: 1), _check);
           },
         ),
         // 自启动（HyperOS：进程被清理后系统才会恢复闹钟通知）
@@ -538,9 +561,11 @@ class _NotificationPermissionTileState
             style: TextStyle(fontSize: 11),
           ),
           trailing: const Icon(Icons.chevron_right),
-          onTap: () => ref
-              .read(notificationServiceProvider)
-              .openAutoStartSettings(),
+          onTap: () {
+            // 无统一 API 查询自启动状态：跳转后靠 resumed 回调提示确认
+            _autoStartHintPending = true;
+            ref.read(notificationServiceProvider).openAutoStartSettings();
+          },
         ),
         // 提醒渠道设置：通知声音/悬浮通知/振动默认开启（渠道创建时已尽力断言）；
         // 部分 ROM 可能未生效，此处展示真实状态并一键跳转系统对应渠道设置页
@@ -599,12 +624,8 @@ class _NotificationPermissionTileState
         ),
       ),
       trailing: const Icon(Icons.chevron_right),
-      onTap: () async {
-        await ref
-            .read(notificationServiceProvider)
-            .openChannelSettings(channelId);
-        // 从系统设置返回后重新查询状态
-        Future.delayed(const Duration(seconds: 1), _check);
+      onTap: () {
+        ref.read(notificationServiceProvider).openChannelSettings(channelId);
       },
     );
   }

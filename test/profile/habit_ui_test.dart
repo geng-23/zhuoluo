@@ -123,6 +123,46 @@ void main() {
     expect(find.byIcon(Icons.check_circle), findsOneWidget);
   });
 
+  testWidgets('点习惯行主体：打卡；再点取消打卡', (tester) async {
+    await seedHabit();
+    // 跨测试去抖：同撤销打卡用例，真实等待越过 400ms 同文案去抖窗口
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 450)),
+    );
+    await pumpHabitPage(tester);
+    expect(find.text('今日未打卡'), findsOneWidget);
+
+    // 点行主体（名称）= 打卡
+    await tester.tap(find.text('阅读'));
+    await tester.pumpAndSettle();
+    expect(find.text('今日已打卡'), findsOneWidget, reason: '行主体点击触发打卡');
+    final today = DateTime.now();
+    expect(
+      await db.isHabitDone(
+        seedHabitId,
+        DateTime(today.year, today.month, today.day),
+      ),
+      isTrue,
+      reason: '打卡记录写入',
+    );
+
+    // 再点行主体 = 取消打卡（toggle）
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 450)),
+    );
+    await tester.tap(find.text('阅读'));
+    await tester.pumpAndSettle();
+    expect(find.text('今日未打卡'), findsOneWidget, reason: '再次点击取消打卡');
+    expect(
+      await db.isHabitDone(
+        seedHabitId,
+        DateTime(today.year, today.month, today.day),
+      ),
+      isFalse,
+      reason: '记录已删除',
+    );
+  });
+
   testWidgets('新建习惯：未选图标时提示并禁用创建，点选后创建落库', (tester) async {
     await db.ensureDefaultList();
     await pumpHabitPage(tester);

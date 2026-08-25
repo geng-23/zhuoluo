@@ -767,16 +767,22 @@ class _FocusBarChart extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
+        // 标签与柱区同为等宽 Expanded；FittedBox 缩放避免窄屏截断
+        //（对齐统计页完成率柱状图标签的做法）
         Row(
           children: [
             for (final b in buckets)
               Expanded(
-                child: Text(
-                  b.showLabel ? b.label : '',
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: labelStyle,
+                child: SizedBox(
+                  height: 14,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      b.showLabel ? b.label : '',
+                      maxLines: 1,
+                      style: labelStyle,
+                    ),
+                  ),
                 ),
               ),
           ],
@@ -940,9 +946,19 @@ class _SliceLegendRow extends StatelessWidget {
                   style: const TextStyle(fontSize: 13),
                 ),
               ),
-              Text(
-                formatFocusMinutes(slice.minutes),
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              // 时长可压缩缩放：极窄屏下不把图例行挤溢出
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    formatFocusMinutes(slice.minutes),
+                    maxLines: 1,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(width: 6),
               SizedBox(

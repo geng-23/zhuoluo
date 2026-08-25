@@ -282,6 +282,31 @@ void main() {
       }
     });
 
+    testWidgets('窄屏（320dp）月档周桶标签经 FittedBox 缩放显示', (tester) async {
+      // 回归：月档「8/17-8/23」等长标签在 <360dp 屏曾因 ellipsis 截断——
+      // 标签行改 FittedBox(scaleDown) 后完整缩放显示
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await seed();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: PomodoroStatsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull, reason: '窄屏渲染无异常');
+      // 标签在 FittedBox 内完整存在且可显示（修复前为 ellipsis 截断）
+      final labelInFittedBox = find.descendant(
+        of: find.byType(FittedBox),
+        matching: find.text('8/17-8/23'),
+      );
+      expect(labelInFittedBox, findsOneWidget, reason: '周桶标签应完整保留');
+    });
+
     testWidgets('统计页点击专注时长卡片进入专注详情页', (tester) async {
       await tester.pumpWidget(
         UncontrolledProviderScope(

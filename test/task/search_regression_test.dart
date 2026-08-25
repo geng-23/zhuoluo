@@ -161,4 +161,53 @@ void main() {
       isNot(contains(a)),
     );
   });
+
+  test('LIKE 通配符按字面匹配：% 不命中「100分」', () async {
+    final container = await makeContainer();
+    final notifier = container.read(tasksControllerProvider.notifier);
+    final pct = await insertTask(title: '进度100%');
+    final plain = await insertTask(title: '进度100分');
+
+    notifier.search('100%');
+    await drain();
+    final ids = container
+        .read(tasksControllerProvider)
+        .tasks
+        .map((t) => t.id)
+        .toList();
+    expect(ids, contains(pct), reason: '% 字面匹配命中「进度100%」');
+    expect(ids, isNot(contains(plain)), reason: '% 不得作为通配符命中「进度100分」');
+  });
+
+  test('LIKE 通配符按字面匹配：_ 不命中 AXB', () async {
+    final container = await makeContainer();
+    final notifier = container.read(tasksControllerProvider.notifier);
+    final under = await insertTask(title: 'A_B任务');
+    final plain = await insertTask(title: 'AXB任务');
+
+    notifier.search('A_B');
+    await drain();
+    final ids = container
+        .read(tasksControllerProvider)
+        .tasks
+        .map((t) => t.id)
+        .toList();
+    expect(ids, contains(under), reason: '_ 字面匹配命中「A_B任务」');
+    expect(ids, isNot(contains(plain)), reason: '_ 不得作为通配符命中「AXB任务」');
+  });
+
+  test('LIKE 通配符按字面匹配：反斜杠可被搜索', () async {
+    final container = await makeContainer();
+    final notifier = container.read(tasksControllerProvider.notifier);
+    final bs = await insertTask(title: r'C盘\备份');
+
+    notifier.search(r'\');
+    await drain();
+    final ids = container
+        .read(tasksControllerProvider)
+        .tasks
+        .map((t) => t.id)
+        .toList();
+    expect(ids, contains(bs), reason: r'反斜杠字面匹配「C盘\备份」');
+  });
 }

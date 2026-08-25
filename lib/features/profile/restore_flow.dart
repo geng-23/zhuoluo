@@ -35,6 +35,7 @@ Future<int> importBackupWithRefresh(
   bumpDataVersion(ref);
   await reloadRuntimeSettings(db, ref);
   // 全量重排通知（先取消旧通知再按新数据排期，保证通知与数据一致）
+  // sched-allow: 备份恢复后的一次性全量重建，恢复流程本身即为阻塞型操作
   await ref.read(reminderSchedulerProvider).rescheduleAll();
   return count;
 }

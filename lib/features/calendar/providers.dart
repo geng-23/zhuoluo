@@ -330,6 +330,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     );
     final updated = await _db.getTask(taskId);
     if (updated != null) {
+      // sched-allow: 日历规则编辑/拖拽改期的一次性重建
       await _scheduler.scheduleTask(updated);
     }
     _bump();
@@ -413,6 +414,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     );
     final updated = await _db.getTask(taskId);
     if (updated != null) {
+      // sched-allow: 日历规则编辑/拖拽改期的一次性重建
       await _scheduler.scheduleTask(updated);
     }
     _bump();
@@ -470,6 +472,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     }
     final updated = await _db.getTask(s.taskId);
     if (updated != null) {
+      // sched-allow: 日历规则编辑/拖拽改期的一次性重建
       await _scheduler.scheduleTask(updated);
     }
     _bump();
@@ -505,6 +508,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     );
     final updated = await _db.getTask(taskId);
     if (updated != null) {
+      // sched-allow: 日历规则编辑/拖拽改期的一次性重建
       await _scheduler.scheduleTask(updated);
     }
     _bump();
@@ -561,6 +565,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     );
     final updated = await _db.getTask(taskId);
     if (updated != null) {
+      // sched-allow: 日历规则编辑/拖拽改期的一次性重建
       await _scheduler.scheduleTask(updated);
     }
     _bump();
@@ -608,6 +613,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     );
     final updated = await _db.getTask(taskId);
     if (updated != null) {
+      // sched-allow: 日历规则编辑/拖拽改期的一次性重建
       await _scheduler.scheduleTask(updated);
     }
     _bump();
@@ -676,6 +682,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     );
     final updated = await _db.getTask(taskId);
     if (updated != null) {
+      // sched-allow: 日历规则编辑/拖拽改期的一次性重建
       await _scheduler.scheduleTask(updated);
     }
     _bump();
@@ -694,10 +701,10 @@ class CalendarController extends StateNotifier<CalendarState> {
     if (item.completed) {
       if (item.task.rrule.isNotEmpty) {
         await _db.uncompleteInstance(item.task.id, item.instanceDate);
-        // 恢复实例后重排：该实例提醒重新排上
+        // 恢复实例后补排当天提醒（O(1)：提醒时刻未过则排上，已过自动跳过）
         final fresh = await _db.getTask(item.task.id);
         if (fresh != null) {
-          await _scheduler.scheduleTask(fresh);
+          await _scheduler.onInstanceReopened(fresh, item.instanceDate);
         }
       } else {
         await _db.reopenTask(item.task.id);
@@ -709,10 +716,10 @@ class CalendarController extends StateNotifier<CalendarState> {
         // 命中校验统一收口（日历条目本身来自规则展开，正常必命中；
         // 兜底防御未来新增入口绕过 UI 检查）
         await _db.completeInstanceIfHit(item.task.id, item.instanceDate);
-        // 完成实例后重排：取消该实例已排提醒，其余未完成实例保留
+        // 完成实例后取消该实例当天通知（O(1)，其余未完成实例保留）
         final fresh = await _db.getTask(item.task.id);
         if (fresh != null) {
-          await _scheduler.scheduleTask(fresh);
+          await _scheduler.onInstanceCompleted(fresh, item.instanceDate);
         }
       } else {
         await _db.completeTask(item.task.id);

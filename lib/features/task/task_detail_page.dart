@@ -1390,9 +1390,9 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     ref.read(dataVersionProvider.notifier).state++;
     final t = await db.getTask(_task!.id);
     if (t != null) {
-      await ref
-          .read(reminderSchedulerProvider)
-          .scheduleTask(t);
+      // 反馈先行：重排转后台不阻塞页面刷新（规则未变，全窗重建
+      // 仅此一处触发，批并发后耗时有限）
+      unawaited(ref.read(reminderSchedulerProvider).scheduleTask(t));
     }
     _load();
   }

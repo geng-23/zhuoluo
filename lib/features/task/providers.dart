@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
@@ -548,6 +550,7 @@ class TasksController extends StateNotifier<TasksState> {
     final t = await _db.getTask(id);
     var ok = true;
     if (t != null) {
+      // sched-allow: 更新字段需返回权限结果供 UI 提示
       ok = await _scheduler.scheduleTask(t);
     }
     _bump();
@@ -575,26 +578,28 @@ class TasksController extends StateNotifier<TasksState> {
         final hit = await _db.completeInstanceIfHit(id, inst);
         if (!hit) return null;
       }
-      // 完成/撤销实例后重排：取消该实例已排提醒，其余未完成实例保留
+      // 完成/撤销实例后重排：完成只取消该实例当天通知（O(1) 补丁，
+      // 由下方反馈后转后台执行），其余未完成实例保留
       final fresh = await _db.getTask(id);
-      if (fresh != null) {
-        await _scheduler.scheduleTask(fresh);
-      }
       // C2：子任务全完成时自动完成父任务（含重复子任务的今日实例对齐）
       final parentId = t.parentId;
       if (parentId != null) {
         await _db.maybeAutoCompleteParent(parentId);
-        // 父任务被联动完成/恢复时同步重排其提醒
+      }
+      // 反馈先行：列表/撤销条立即刷新，通知重排全部转后台不阻塞——
+      // 本体走 O(1) 当天补丁；父任务联动状态分支多，保持全窗重建
+      _bump();
+      if (fresh != null) {
+        unawaited(_scheduler.onInstanceCompleted(fresh, inst));
+      }
+      if (parentId != null) {
         final parent = await _db.getTask(parentId);
         if (parent != null) {
-          // 父任务被联动完成/恢复时同步重排其提醒——scheduleTask
-          // 内部先取消全部旧通知再判断 completedAt，非重复父任务被联动
-          // 完成后旧提醒随之取消（此前仅重复父任务重排，非重复父任务
-          // 已完成仍弹提醒）
-          await _scheduler.scheduleTask(parent);
+          // scheduleTask 内部先取消全部旧通知再判断 completedAt，
+          // 非重复父任务被联动完成后旧提醒随之取消
+          unawaited(_scheduler.scheduleTask(parent));
         }
       }
-      _bump();
       return inst;
     }
     await _db.completeTask(id);
@@ -622,30 +627,39 @@ class TasksController extends StateNotifier<TasksState> {
       SoundService.instance.play(SoundKind.reopen);
       Haptics.light();
     }
+    DateTime? inst;
     if (t.rrule.isEmpty) {
       await _db.reopenTask(id);
     } else {
-      final inst = _currentInstanceDate(t);
+      inst = _currentInstanceDate(t);
       await _db.uncompleteInstance(id, inst);
     }
     // 反向联动：子任务恢复未完成时，父任务同步恢复未完成（含重复子任务）
     final parentId = t.parentId;
     if (parentId != null) {
       await _db.maybeReopenParent(parentId);
-      // 父任务被联动恢复时同步重排其提醒（此前仅 completeTask 侧
-      // 有联动重排，reopen 侧漏掉——父任务恢复后提醒静默丢失）
-      final parent = await _db.getTask(parentId);
-      if (parent != null) {
-        // 父任务仍完成（其他子任务未完成）时 scheduleTask 内部会取消提醒
-        await _scheduler.scheduleTask(parent);
+    }
+    // 重新取任务：旧快照可能缺本次写入的最新状态
+    final fresh = await _db.getTask(id);
+    // 反馈先行：列表立即刷新，通知重排转后台不阻塞。重复任务走 O(1)
+    // 当天补排（提醒时刻已过的自动跳过）；非重复任务提醒挂在计划日、
+    // 父任务联动状态分支多，保持全窗重建
+    _bump();
+    if (fresh != null) {
+      if (t.rrule.isNotEmpty && inst != null) {
+        unawaited(_scheduler.onInstanceReopened(fresh, inst));
+      } else {
+        unawaited(_scheduler.scheduleTask(fresh));
       }
     }
-    // 重新取任务：旧快照 completedAt 非空会让重排直接跳过
-    final fresh = await _db.getTask(id);
-    if (fresh != null) {
-      await _scheduler.scheduleTask(fresh);
+    if (parentId != null) {
+      // 父任务被联动恢复时同步重排其提醒（父任务仍完成/其他子任务未完成
+      // 时 scheduleTask 内部会取消其提醒）
+      final parent = await _db.getTask(parentId);
+      if (parent != null) {
+        unawaited(_scheduler.scheduleTask(parent));
+      }
     }
-    _bump();
   }
 
   // D1：删除撤销缓存（限容——超出上限丢弃最旧快照，防止长期不撤销时内存增长）

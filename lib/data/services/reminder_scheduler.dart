@@ -126,6 +126,10 @@ class ReminderScheduler {
         to: windowEnd,
         limit: 500,
       );
+      // 先收集窗口内待排期实例日（纯内存过滤），再按 (实例日 × 提醒)
+      // 扁平化分批并发排期——此前逐日串行 await，全窗 ≈90+ 次平台
+      // 往返是完成/编辑反馈慢的主因
+      final pendingDays = <DateTime>[];
       for (final inst in instances) {
         // 实例日期归一化到当天 00:00，与完成记录存储基准一致，
         // 避免 RRULE 展开保留的时分（如 09:00）与完成记录（00:00）互相不识别
@@ -135,7 +139,7 @@ class ReminderScheduler {
           continue;
         }
         if (doneSet.contains(_db.completionKey(task.id, day))) continue;
-        ok = await _scheduleDay(task, day, reminders) && ok;
+        pendingDays.add(day);
       }
       // 例外改期：原日期已被 hasInstanceOnDaySync 判为移走，改期到的新日期
       // 不在规则展开里，需单独在窗口内排提醒
@@ -146,36 +150,49 @@ class ReminderScheduler {
         final day = AppClock.at(a.year, a.month, a.day);
         if (day.isBefore(windowStart) || day.isAfter(windowEnd)) continue;
         if (doneSet.contains(_db.completionKey(task.id, day))) continue;
-        ok = await _scheduleDay(task, day, reminders) && ok;
+        pendingDays.add(day);
+      }
+      ok = await _forEachBatched<(DateTime, Reminder)>(
+        [
+          for (final day in pendingDays)
+            for (final r in reminders) (day, r),
+        ],
+        (pair) => _scheduleOne(task, pair.$1, pair.$2),
+      );
+      if (!task.hasReminder && pendingDays.isNotEmpty) {
+        await _db.updateTaskHasReminder(task.id, true);
       }
     }
     return ok;
   }
 
+  /// 排期单个（实例日, 提醒）组合。已过时刻返回 true（不算失败，
+  /// 与全窗重排口径一致）。
+  Future<bool> _scheduleOne(Task task, DateTime day, Reminder r) async {
+    final when = _reminderBase(task, day, r)
+        .subtract(Duration(minutes: r.remindMinutesBefore));
+    if (when.isBefore(AppClock.now())) return true;
+    // ID 含实例日期：同一 (task, reminder) 的不同实例通知互不覆盖
+    return NotificationService.instance.schedule(
+      NotificationIds.forReminder(r.id, day),
+      title: task.title,
+      body: _bodyText(task, day, r),
+      when: when,
+      payload: 't${task.id}',
+    );
+  }
+
+  /// 调度单个任务日的全部提醒（非重复任务/当天补排用），
+  /// 并按需补 hasReminder 标记
   Future<bool> _scheduleDay(
     Task task,
     DateTime day,
     List<Reminder> reminders,
   ) async {
-    var ok = true;
-    for (final r in reminders) {
-      final when = _reminderBase(
-        task,
-        day,
-        r,
-      ).subtract(Duration(minutes: r.remindMinutesBefore));
-      if (when.isBefore(AppClock.now())) continue; // 已过时间：不算失败
-      // ID 含实例日期：同一 (task, reminder) 的不同实例通知互不覆盖
-      final id = NotificationIds.forReminder(r.id, day);
-      final scheduled = await NotificationService.instance.schedule(
-        id,
-        title: task.title,
-        body: _bodyText(task, day, r),
-        when: when,
-        payload: 't${task.id}',
-      );
-      if (!scheduled) ok = false;
-    }
+    final ok = await _forEachBatched<Reminder>(
+      reminders,
+      (r) => _scheduleOne(task, day, r),
+    );
     if (!task.hasReminder) {
       await _db.updateTaskHasReminder(task.id, true);
     }
@@ -237,17 +254,24 @@ class ReminderScheduler {
       if (t == null) return;
       final reminders = await _db.getReminders(taskId);
       final dates = await _cancelDatesFor(t);
-      for (final d in dates) {
-        for (final r in reminders) {
+      // (日期 × 提醒) 扁平化后分批并发取消——重复任务全窗取消此前
+      // 串行 ≈94 次平台往返，是删除/改期反馈慢的主因之一
+      await _forEachBatched<(DateTime, Reminder)>(
+        [
+          for (final d in dates)
+            for (final r in reminders) (d, r),
+        ],
+        (pair) async {
           try {
             await NotificationService.instance.cancel(
-              NotificationIds.forReminder(r.id, d),
+              NotificationIds.forReminder(pair.$2.id, pair.$1),
             );
           } catch (e) {
-            debugPrint('通知取消失败 taskId=$taskId reminderId=${r.id}: $e');
+            debugPrint('通知取消失败 taskId=$taskId reminderId=${pair.$2.id}: $e');
           }
-        }
-      }
+          return true;
+        },
+      );
     } catch (e) {
       debugPrint('取消任务通知失败 taskId=$taskId: $e');
     }
@@ -266,6 +290,66 @@ class ReminderScheduler {
       }
     } catch (e) {
       debugPrint('取消提醒通知失败 taskId=$taskId reminderId=$reminderId: $e');
+    }
+  }
+
+  // ---------- 实例级 O(1) 通知补丁（完成/撤销重复任务实例） ----------
+
+  /// 任务实例补丁全局串行链：防止快速「完成→撤销→完成」并发交错导致
+  /// 同一天通知的取消/补排竞态。补丁均为毫秒级（≤2 次平台调用），
+  /// 全局串行无吞吐损失；链上保存吞错版本，前序失败不阻塞后续。
+  Future<void> _patchChain = Future<void>.value();
+
+  /// 把 [op] 排入补丁串行链：返回值透传 op 的结果/错误
+  Future<T> _enqueuePatch<T>(Future<T> Function() op) {
+    final job = _patchChain.then((_) => op());
+    _patchChain = job.then<void>((_) {}, onError: (Object _) {});
+    return job;
+  }
+
+  /// 完成实例后的当天通知增量取消（O(1)，替代全窗口重排）：
+  /// 完成只新增该实例一条完成记录，窗口内其余未完成实例的已排通知
+  /// 不受影响。例外改期实例的完成记录与通知 ID 同写在改期目标日，
+  /// 按传入实例日取消即可同时覆盖普通命中日与改期目标日。
+  Future<void> onInstanceCompleted(Task task, DateTime instanceDate) =>
+      _enqueuePatch(() => _onInstanceCompletedInner(task, instanceDate));
+
+  Future<void> _onInstanceCompletedInner(
+    Task task,
+    DateTime instanceDate,
+  ) async {
+    try {
+      // 归一化到当天 00:00：与排期侧通知 ID 的日期基准一致
+      final day = DateUtilsEx.normalizeInstanceDate(instanceDate);
+      final reminders = await _db.getReminders(task.id);
+      for (final r in reminders) {
+        await NotificationService.instance.cancel(
+          NotificationIds.forReminder(r.id, day),
+        );
+      }
+    } catch (e) {
+      debugPrint('实例完成通知取消失败 taskId=${task.id}: $e');
+    }
+  }
+
+  /// 撤销完成/恢复实例后的当天通知补排（O(1)）：复用 [_scheduleDay]，
+  /// 天然继承"提醒时刻已过则跳过"口径；任务整体已完成时不排。
+  /// 未来日期实例提前撤销同样适用（补排该计划日的提醒）。
+  Future<void> onInstanceReopened(Task task, DateTime instanceDate) =>
+      _enqueuePatch(() => _onInstanceReopenedInner(task, instanceDate));
+
+  Future<void> _onInstanceReopenedInner(
+    Task task,
+    DateTime instanceDate,
+  ) async {
+    try {
+      if (task.completedAt != null) return;
+      final day = DateUtilsEx.normalizeInstanceDate(instanceDate);
+      final reminders = await _db.getReminders(task.id);
+      if (reminders.isEmpty) return;
+      await _scheduleDay(task, day, reminders);
+    } catch (e) {
+      debugPrint('实例撤销通知补排失败 taskId=${task.id}: $e');
     }
   }
 
@@ -344,7 +428,28 @@ class ReminderScheduler {
 
   /// 平台通道分批并发的窗口大小：单次往返约几毫秒到十几毫秒，
   /// 全窗口 93 条串行 ≈2s；8 并发把墙钟时间压到约 1/8 且不会压垮插件
-  static const int _habitBatchSize = 8;
+  static const int _rpcBatchSize = 8;
+
+  /// 分批并发执行 [fn] 并聚合成功与否：批内 Future.wait、批间串行，
+  /// 兼顾墙钟时间与平台通道压力（排期/取消共用此模式）
+  Future<bool> _forEachBatched<T>(
+    List<T> items,
+    Future<bool> Function(T item) fn,
+  ) async {
+    var ok = true;
+    for (var i = 0; i < items.length; i += _rpcBatchSize) {
+      final end = (i + _rpcBatchSize > items.length)
+          ? items.length
+          : i + _rpcBatchSize;
+      final results = await Future.wait([
+        for (final item in items.sublist(i, end)) fn(item),
+      ]);
+      for (final r in results) {
+        ok = r && ok;
+      }
+    }
+    return ok;
+  }
 
   /// 打卡/撤销打卡后的当天增量通知补丁（O(1)，替代全窗口重排）：
   /// - 打卡（done=true）：仅取消今天的习惯提醒——未来日期的已排通知
@@ -436,10 +541,10 @@ class ReminderScheduler {
         pending.add(when);
       }
       // 分批并发排期：串行 93 次 ≈2s，8 并发把墙钟时间压到约 1/8
-      for (var i = 0; i < pending.length; i += _habitBatchSize) {
-        final end = (i + _habitBatchSize > pending.length)
+      for (var i = 0; i < pending.length; i += _rpcBatchSize) {
+        final end = (i + _rpcBatchSize > pending.length)
             ? pending.length
-            : i + _habitBatchSize;
+            : i + _rpcBatchSize;
         final results = await Future.wait([
           for (final when in pending.sublist(i, end))
             NotificationService.instance.schedule(
@@ -473,10 +578,10 @@ class ReminderScheduler {
     final now = AppClock.now();
     final start = AppClock.startOfDay(now);
     const window = 93;
-    for (var i = 0; i < window; i += _habitBatchSize) {
-      final n = (i + _habitBatchSize > window)
+    for (var i = 0; i < window; i += _rpcBatchSize) {
+      final n = (i + _rpcBatchSize > window)
           ? window - i
-          : _habitBatchSize;
+          : _rpcBatchSize;
       await Future.wait([
         for (var j = i; j < i + n; j++)
           NotificationService.instance.cancel(

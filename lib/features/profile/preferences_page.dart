@@ -273,6 +273,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
     AppClock.setTimezone(name);
     await settings.set(SettingsController.keyAppTimezone, name ?? '');
     // 时区口径变化：全量重排 93 天窗口内所有提醒
+    // sched-allow: 时区变化后的一次性全量重建，用户显式切换时区的低频操作
     await ref.read(reminderSchedulerProvider).rescheduleAll();
     // 时区口径变化：bump 数据版本，触发任务页/日历/统计立即刷新
     // （今天/明天判定、红线列位、周基准、统计范围按新时区重算）

@@ -9,6 +9,7 @@ import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
+import 'package:zhuoluo/core/widgets/done_check_icon.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
 
@@ -86,9 +87,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _habits.isEmpty
-          ? const Center(
-              child: Text('还没有习惯，点 + 添加', style: TextStyle(color: Colors.grey)),
-            )
+          ? const Center(child: Text('还没有习惯，点 + 添加'))
           : ListView.builder(
               controller: _scroll,
               itemExtent: _tileExtent,
@@ -197,7 +196,7 @@ class _HabitPageState extends ConsumerState<HabitPage> {
                       '图标',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.grey.shade600,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                     if (icon == null) ...[
@@ -420,17 +419,17 @@ class _HabitIconField extends StatelessWidget {
                   ? Icon(
                       Icons.emoji_emotions_outlined,
                       size: 18,
-                      color: Colors.grey.shade500,
+                      color: Theme.of(context).colorScheme.outline,
                     )
                   : Text(selected!, style: const TextStyle(fontSize: 18)),
             ),
             const SizedBox(width: 10),
             Text(
               selected == null ? '选择图标' : '更换图标',
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const Spacer(),
-            Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade500),
+            Icon(Icons.chevron_right, size: 18, color: Theme.of(context).colorScheme.outline),
           ],
         ),
       ),
@@ -512,10 +511,13 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
     final remindText = widget.habit.reminderTime == null
         ? null
         : '每日 ${DateUtilsEx.timeCn(widget.habit.reminderTime!)} 提醒';
-    return ListTile(
-      tileColor: widget.highlight
+    // 卡片容器与任务/统计页卡片语言一致（此前条目直接平铺无边界）
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      color: widget.highlight
           ? scheme.primaryContainer.withValues(alpha: 0.35)
           : null,
+      child: ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       leading: CircleAvatar(
         radius: 24,
@@ -537,13 +539,13 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
             _doneToday ? '今日已打卡' : '今日未打卡',
             style: TextStyle(
               fontSize: 12,
-              color: _doneToday ? scheme.primary : Colors.grey,
+              color: _doneToday ? scheme.primary : scheme.onSurfaceVariant,
             ),
           ),
           Text(
             '连续打卡 $_streak 天 · 共打卡 $_total 天'
             '${remindText == null ? '' : ' · $remindText'}',
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 4),
           Row(
@@ -568,7 +570,7 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
               const SizedBox(width: 8),
               Text(
                 '近7天',
-                style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                style: TextStyle(fontSize: 10, color: scheme.outline),
               ),
             ],
           ),
@@ -576,13 +578,11 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
       ),
       onTap: _toggling ? null : _toggle,
       trailing: IconButton(
-        icon: Icon(
-          _doneToday ? Icons.check_circle : Icons.radio_button_unchecked,
-          color: _doneToday ? Theme.of(context).colorScheme.primary : null,
-        ),
+        icon: DoneCheckIcon(done: _doneToday),
         onPressed: _toggling ? null : _toggle,
       ),
       onLongPress: () => _showActions(),
+      ),
     );
   }
 
@@ -622,6 +622,7 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
         context,
         nowDone ? '已打卡「${widget.habit.name}」' : '已取消今日打卡',
         actionLabel: '撤销',
+        aboveFab: true,
         onAction: () async {
           // 撤销打卡 = 恢复，配恢复音效（同样走当天增量补丁）
           SoundService.instance.play(SoundKind.reopen);
@@ -704,7 +705,10 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
                 const SizedBox(height: 12),
                 Text(
                   '图标',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 _HabitIconField(

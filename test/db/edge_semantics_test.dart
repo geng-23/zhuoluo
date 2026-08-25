@@ -440,6 +440,8 @@ void main() {
       // 开始后立即结束（不推进时间 → elapsed = 0）
       await tester.tap(find.text('开始'));
       await tester.pump();
+      // 等按钮组 AnimatedSwitcher 过渡完成，新按钮才可命中
+      await tester.pump(const Duration(milliseconds: 250));
       await tester.tap(find.text('结束'));
       await tester.pumpAndSettle();
 

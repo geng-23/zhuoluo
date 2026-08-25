@@ -10,6 +10,9 @@ void showAppSnackBar(
   VoidCallback? onAction,
   IconData icon = Icons.check,
   Duration duration = const Duration(seconds: 3),
+  /// 抬高到底部 FAB 之上（列表页完成/撤销等高频操作时，
+  /// 此前撤销条遮住 FAB 一半，露出上半截很突兀）
+  bool aboveFab = false,
 }) {
   // A17：去抖——同一消息 400ms 内不重复弹出（连续勾选任务时旧条滑出
   // 又滑入造成闪烁）
@@ -42,6 +45,7 @@ void showAppSnackBar(
         duration: duration,
         persist: false,
         behavior: SnackBarBehavior.floating,
+        margin: aboveFab ? const EdgeInsets.fromLTRB(16, 0, 16, 76) : null,
         backgroundColor: scheme.inverseSurface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         action: actionLabel == null

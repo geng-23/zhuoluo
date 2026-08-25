@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
+import 'package:zhuoluo/core/widgets/done_check_icon.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/features/calendar/providers.dart';
 import 'package:zhuoluo/features/calendar/quick_add_sheets.dart';
@@ -250,11 +251,9 @@ class DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
                             : null,
                         leading: IconButton(
                           visualDensity: VisualDensity.compact,
-                          icon: Icon(
-                            item.completed
-                                ? Icons.check_circle
-                                : Icons.radio_button_unchecked,
-                            color: item.completed ? Colors.grey.shade400 : null,
+                          icon: DoneCheckIcon(
+                            done: item.completed,
+                            doneColor: Colors.grey.shade400,
                           ),
                           onPressed: () => notifier.toggleComplete(item),
                         ),

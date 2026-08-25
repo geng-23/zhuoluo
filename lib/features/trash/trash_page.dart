@@ -184,7 +184,7 @@ class _TrashPageState extends ConsumerState<TrashPage> {
               title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
               subtitle: Text(
                 '删除于 ${_formatTime(item.deletedAt)}',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               dense: true,
             ),

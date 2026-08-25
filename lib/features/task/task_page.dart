@@ -16,6 +16,7 @@ import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
 import 'package:zhuoluo/features/trash/trash_page.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
+import 'package:zhuoluo/core/widgets/done_check_icon.dart';
 
 /// 任务页：抽屉侧栏 + 任务列表
 class TaskPage extends ConsumerStatefulWidget {
@@ -365,13 +366,23 @@ class _TaskPageState extends ConsumerState<TaskPage> {
             ? const Center(child: CircularProgressIndicator())
             : _buildBody(state),
       ),
-      // D3：多选时隐藏 FAB，避免遮挡底部栏
-      floatingActionButton: _multiSelect
-          ? null
-          : FloatingActionButton(
+      // D3：多选时隐藏 FAB，避免遮挡底部栏（缩放+淡出过渡，禁点）
+      floatingActionButton: AnimatedScale(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+        scale: _multiSelect ? 0 : 1,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 160),
+          opacity: _multiSelect ? 0 : 1,
+          child: IgnorePointer(
+            ignoring: _multiSelect,
+            child: FloatingActionButton(
               onPressed: _openQuickAdd,
               child: const Icon(Icons.add),
             ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -408,6 +419,10 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       );
     }
     final visible = state.tasks;
+    // findChildIndexCallback 用的 id → index 映射
+    final indexById = {
+      for (var i = 0; i < visible.length; i++) visible[i].id: i,
+    };
     return Column(
       children: [
         // 搜索模式：结果计数提示
@@ -421,7 +436,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
                     '找到 ${state.tasks.length} 个任务',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.grey.shade600,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -442,6 +457,17 @@ class _TaskPageState extends ConsumerState<TaskPage> {
                 bottom: _listBottomClearance,
               ),
               itemCount: visible.length,
+              // 任务 id → index 映射：完成/删除/插入导致条目位移时按 key
+              // 找回原有 element，防止位移条目 remount 使入场动画集体重播
+              findChildIndexCallback: (key) {
+                final s = key is ValueKey<String> ? key.value : null;
+                if (s == null) return null;
+                final id = int.tryParse(
+                  s.startsWith('enter-') ? s.substring(6) : s.substring(5),
+                );
+                if (id == null) return null;
+                return indexById[id];
+              },
               itemBuilder: (context, index) {
                 final t = visible[index];
                 final listColor = state.lists
@@ -517,26 +543,37 @@ class _TaskPageState extends ConsumerState<TaskPage> {
             ),
           ),
         ),
-        if (_multiSelect)
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  Text('已选 ${_selected.length} 项'),
-                  const Spacer(),
-                  TextButton.icon(
-                    icon: const Icon(Icons.drive_file_move_outline),
-                    label: const Text('移动'),
-                    onPressed: _selected.isEmpty
-                        ? null
-                        : () => _showMoveSheet(),
+        // 多选底栏：高度变化走 AnimatedSize，列表视口平滑让位
+        //（此前瞬间插入导致列表整体跳动）
+        AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.bottomCenter,
+          child: _multiSelect
+              ? SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Text('已选 ${_selected.length} 项'),
+                        const Spacer(),
+                        TextButton.icon(
+                          icon: const Icon(Icons.drive_file_move_outline),
+                          label: const Text('移动'),
+                          onPressed: _selected.isEmpty
+                              ? null
+                              : () => _showMoveSheet(),
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
-            ),
-          ),
+                )
+              : const SizedBox(width: double.infinity),
+        ),
       ],
     );
   }
@@ -1051,6 +1088,7 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       actionLabel: '撤销',
       onAction: onUndo,
       icon: icon,
+      aboveFab: true,
     );
   }
 
@@ -1221,6 +1259,12 @@ class _TaskTile extends StatelessWidget {
     final overdue = task.isOverdueNow;
     final color = overdue ? Theme.of(context).colorScheme.error : null;
     final listColor = listColorHex == null ? null : colorFromHex(listColorHex!);
+    // 非重复任务完成后会从当前视图移除 → 右滑放行给 onDismissed，
+    // 走原生滑出+收起动画（此前 confirmDismiss 固定 false 导致
+    // "滑出→跳回→稍后硬消失"的割裂感）；
+    // 重复任务完成后仍留在原地（划线）→ 保持回弹，配合控制器的
+    // 乐观更新让勾选/划线即时翻转
+    final dismissToComplete = task.rrule.isEmpty;
     return Dismissible(      key: ValueKey('task-${task.id}'),
       // 多选模式下禁用横滑手势（防误完成/误开更多操作）
       direction: multiSelect
@@ -1236,7 +1280,7 @@ class _TaskTile extends StatelessWidget {
           color: Theme.of(
             context,
           ).colorScheme.primaryContainer.withValues(alpha: 0.45),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: AppRadius.tile,
         ),
         child: Icon(
           Icons.check_circle_outline,
@@ -1251,7 +1295,7 @@ class _TaskTile extends StatelessWidget {
           color: Theme.of(
             context,
           ).colorScheme.tertiaryContainer.withValues(alpha: 0.45),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: AppRadius.tile,
         ),
         child: Icon(
           Icons.more_horiz,
@@ -1263,16 +1307,20 @@ class _TaskTile extends StatelessWidget {
       movementDuration: const Duration(milliseconds: 180),
       confirmDismiss: (direction) async {
         if (direction == DismissDirection.startToEnd) {
+          if (dismissToComplete) return true;
           onSwipeComplete();
           return false;
         }
         onSwipeMore();
         return false;
       },
+      // 仅非重复任务会走到这里（confirmDismiss 放行后滑出+收起完成时回调），
+      // 此刻卡片已离场，写库/撤销条在后台进行，reload 落地后条目自然移除
+      onDismissed: dismissToComplete ? (_) => onSwipeComplete() : null,
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: AppRadius.tile,
         child: Container(
           // 拟物卡片：圆角 + 背景 + 细边框 + 轻微阴影
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
@@ -1280,7 +1328,7 @@ class _TaskTile extends StatelessWidget {
             color: selected
                 ? Theme.of(context).colorScheme.primaryContainer
                 : Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: AppRadius.tile,
             border: Border.all(
               color: selected
                   ? Theme.of(context).colorScheme.primary
@@ -1309,37 +1357,36 @@ class _TaskTile extends StatelessWidget {
                   ),
                 ),
               if (multiSelect)
-                Checkbox(value: selected, onChanged: (_) => onTap())
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeOut,
+                  transitionBuilder: (child, animation) =>
+                      FadeTransition(opacity: animation, child: child),
+                  child: Checkbox(
+                    key: const ValueKey('checkbox'),
+                    value: selected,
+                    onChanged: (_) => onTap(),
+                  ),
+                )
               else
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 32,
-                    minHeight: 32,
-                  ),
-                  icon: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 260),
-                    switchInCurve: Curves.elasticOut,
-                    switchOutCurve: Curves.easeOut,
-                    transitionBuilder: (child, animation) {
-                      return ScaleTransition(
-                        scale: animation,
-                        child: FadeTransition(opacity: animation, child: child),
-                      );
-                    },
-                    child: Icon(
-                      done
-                          ? Icons.check_circle
-                          : Icons.radio_button_unchecked,
-                      key: ValueKey(done),
-                      size: 20,
-                      color: done
-                          ? Theme.of(context).colorScheme.primary
-                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeOut,
+                  transitionBuilder: (child, animation) =>
+                      FadeTransition(opacity: animation, child: child),
+                  child: IconButton(
+                    key: const ValueKey('icon'),
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
                     ),
+                    icon: DoneCheckIcon(done: done),
+                    onPressed: onSwipeComplete,
                   ),
-                  onPressed: onSwipeComplete,
                 ),
               const SizedBox(width: 6),
               Expanded(
@@ -1350,7 +1397,9 @@ class _TaskTile extends StatelessWidget {
                       task.title,
                       style: TextStyle(
                         decoration: done ? TextDecoration.lineThrough : null,
-                        color: done ? Colors.grey : color,
+                        color: done
+                            ? Theme.of(context).colorScheme.onSurfaceVariant
+                            : color,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -1360,7 +1409,7 @@ class _TaskTile extends StatelessWidget {
                         _subtitle(context)!,
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.grey.shade600,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,

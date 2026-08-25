@@ -26,6 +26,14 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: s,
       scaffoldBackgroundColor: s.surface,
+      // 各页面统一的平面 AppBar：滚动时不再叠加 M3 默认的
+      // surfaceTint 灰带（浅色内容上显脏、与任务页白色观感不一致）
+      appBarTheme: AppBarTheme(
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        backgroundColor: s.surface,
+      ),
       cardTheme: CardThemeData(
         elevation: 1,
         clipBehavior: Clip.antiAlias,
@@ -57,6 +65,9 @@ class AppTheme {
           TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
         ),
       ),
+      // 所有模态底部弹层统一带拖拽把手（此前全仓库 0 处 showDragHandle，
+      // 无下滑关闭提示）；形状/背景走 M3 默认
+      bottomSheetTheme: const BottomSheetThemeData(showDragHandle: true),
       inputDecorationTheme: InputDecorationTheme(
         // A13：输入框带填充（暗色下无填充的裸边框刺眼）；
         // 填充色用主题表面容器色，深浅主题自适应

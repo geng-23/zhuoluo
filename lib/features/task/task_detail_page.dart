@@ -17,6 +17,7 @@ import 'package:zhuoluo/features/task/plan_time_sheet.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/repeat_rule_sheet.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
+import 'package:zhuoluo/core/widgets/done_check_icon.dart';
 
 /// 任务详情页（7 区块，自动保存）
 class TaskDetailPage extends ConsumerStatefulWidget {
@@ -287,11 +288,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               IconButton(
-                icon: Icon(
-                  done ? Icons.check_circle : Icons.radio_button_unchecked,
-                  color: done ? Theme.of(context).colorScheme.primary : null,
-                  size: 28,
-                ),
+                icon: DoneCheckIcon(done: done, size: 28),
                 onPressed: () async {
                   // 重复任务当前实例日无实例（被跳过/改期移走）→ 不可完成
                   if (t.rrule.isNotEmpty && !_currentHas) {
@@ -568,40 +565,45 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
             padding: EdgeInsets.only(top: 16, bottom: 4),
             child: Text('子任务', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
-          for (final s in _subTasks)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                (_subTasksDone[s.id] ?? false)
-                    ? Icons.check_circle
-                    : Icons.radio_button_unchecked,
-                color: (_subTasksDone[s.id] ?? false)
-                    ? Theme.of(context).colorScheme.primary
-                    : null,
-                size: 20,
-              ),
-              title: Text(
-                s.title,
-                style: TextStyle(
-                  decoration: (_subTasksDone[s.id] ?? false)
-                      ? TextDecoration.lineThrough
-                      : null,
-                ),
-              ),
-              trailing: IconButton(
-                icon: const Icon(Icons.close, size: 18),
-                onPressed: () => _deleteSubTask(s),
-              ),
-              onTap: () async {
-                if (_subTasksDone[s.id] ?? false) {
-                  await _notifier.reopenTask(s.id);
-                } else {
-                  await _notifier.completeTask(s.id);
-                }
-                _load();
-              },
+          // 增删子任务时高度平滑过渡（此前瞬间插拔，下方内容整体跳动）
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: Column(
+              children: [
+                for (final s in _subTasks)
+                  ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: DoneCheckIcon(
+                      done: _subTasksDone[s.id] ?? false,
+                      size: 20,
+                    ),
+                    title: Text(
+                      s.title,
+                      style: TextStyle(
+                        decoration: (_subTasksDone[s.id] ?? false)
+                            ? TextDecoration.lineThrough
+                            : null,
+                      ),
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () => _deleteSubTask(s),
+                    ),
+                    onTap: () async {
+                      if (_subTasksDone[s.id] ?? false) {
+                        await _notifier.reopenTask(s.id);
+                      } else {
+                        await _notifier.completeTask(s.id);
+                      }
+                      _load();
+                    },
+                  ),
+              ],
             ),
+          ),
           TextButton.icon(
             onPressed: _addSubTask,
             icon: const Icon(Icons.add),
@@ -633,6 +635,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
           ),
           if (_noteEditMode)
             TextField(
+              key: const ValueKey('note-edit'),
               controller: _noteController,
               maxLines: 6,
               minLines: 3,
@@ -644,6 +647,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
             )
           else
             Container(
+              key: const ValueKey('note-preview'),
               width: double.infinity,
               constraints: const BoxConstraints(minHeight: 100),
               padding: const EdgeInsets.all(8),
@@ -661,19 +665,30 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
             '创建于 ${DateUtilsEx.dateCn(t.createdAt)}',
             style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
-          if (t.completedAt != null)
-            Text(
-              '完成于 ${DateUtilsEx.dateCn(t.completedAt!)}',
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          // 完成态行（完成于/重新打开）插拔时高度平滑过渡
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (t.completedAt != null)
+                  Text(
+                    '完成于 ${DateUtilsEx.dateCn(t.completedAt!)}',
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                if (done)
+                  TextButton(
+                    onPressed: () async {
+                      await _notifier.reopenTask(t.id);
+                      _load();
+                    },
+                    child: const Text('重新打开'),
+                  ),
+              ],
             ),
-          if (done)
-            TextButton(
-              onPressed: () async {
-                await _notifier.reopenTask(t.id);
-                _load();
-              },
-              child: const Text('重新打开'),
-            ),
+          ),
           const SizedBox(height: 32),
         ],
       ),

@@ -475,37 +475,44 @@ class _PomodoroStatsPageState extends ConsumerState<PomodoroStatsPage> {
               tooltip: '取消',
               onPressed: _exitSelection,
             ),
-          ] else ...[
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'week', label: Text('周')),
-                ButtonSegment(value: 'month', label: Text('月')),
-                ButtonSegment(value: 'year', label: Text('年')),
-                ButtonSegment(value: 'all', label: Text('全部')),
-              ],
-              selected: {_range},
-              onSelectionChanged: (s) {
-                setState(() {
-                  _range = s.first;
-                  _loading = true;
-                });
-                _load();
-              },
-              showSelectedIcon: false,
-              style: const ButtonStyle(visualDensity: VisualDensity.compact),
-            ),
-            const SizedBox(width: 8),
           ],
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _records.isEmpty
-          ? ListView(
-              padding: const EdgeInsets.all(16),
-              children: const [_EmptyCard()],
-            )
-          : ListView(
+      // 档位选择器移出 AppBar（与统计主页一致），固定在内容区顶部
+      body: Column(
+        children: [
+          if (!selecting)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+              child: SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'week', label: Text('周')),
+                  ButtonSegment(value: 'month', label: Text('月')),
+                  ButtonSegment(value: 'year', label: Text('年')),
+                  ButtonSegment(value: 'all', label: Text('全部')),
+                ],
+                selected: {_range},
+                onSelectionChanged: (s) {
+                  if (s.first == _range) return;
+                  // 切档保留旧内容就地刷新，避免整页白闪
+                  setState(() => _range = s.first);
+                  _load();
+                },
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _records.isEmpty
+                ? ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: const [_EmptyCard()],
+                  )
+                : ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 _SummaryRow(
@@ -546,6 +553,9 @@ class _PomodoroStatsPageState extends ConsumerState<PomodoroStatsPage> {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -564,7 +574,7 @@ class _EmptyCard extends StatelessWidget {
             Icon(
               Icons.timer_off_outlined,
               size: 48,
-              color: Colors.grey.shade400,
+              color: Theme.of(context).colorScheme.outline,
             ),
             const SizedBox(height: 12),
             const Text(
@@ -574,7 +584,7 @@ class _EmptyCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               '去"我的 > 番茄专注"开始第一次专注',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -633,7 +643,7 @@ class _SummaryTile extends StatelessWidget {
           children: [
             Text(
               label,
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 6),
             FittedBox(
@@ -678,7 +688,7 @@ class _BarChartCard extends StatelessWidget {
               title,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: Colors.grey.shade700,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 12),
@@ -716,7 +726,7 @@ class _FocusBarChart extends StatelessWidget {
     // 柱顶数值固定 16px 槽（FittedBox 缩放）：窄柱下文本不换行
     const valueSlot = 16.0;
     final showValues = buckets.length <= 12;
-    final labelStyle = TextStyle(fontSize: 9, color: Colors.grey.shade600);
+    final labelStyle = TextStyle(fontSize: 9, color: Theme.of(context).colorScheme.onSurfaceVariant);
     return Column(
       children: [
         SizedBox(
@@ -743,19 +753,28 @@ class _FocusBarChart extends StatelessWidget {
                             : null,
                       ),
                       const SizedBox(height: 2),
-                      // 固定柱宽、单元格内居中；高度按相对值（最大值满高）
+                      // 固定柱宽、单元格内居中；高度按相对值（最大值满高），
+                      // 隐式过渡让切档/数据刷新时柱高平滑变形
                       Center(
-                        child: Container(
-                          width: barWidth,
-                          height: (b.minutes / maxV * chartHeight)
-                              .clamp(0.0, chartHeight)
-                              .toDouble(),
-                          decoration: BoxDecoration(
-                            color: b.minutes > 0
-                                ? cs.primary
-                                : cs.surfaceContainerHighest,
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(2),
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween(
+                            begin: 0,
+                            end: (b.minutes / maxV * chartHeight)
+                                .clamp(0.0, chartHeight)
+                                .toDouble(),
+                          ),
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                          builder: (context, h, _) => Container(
+                            width: barWidth,
+                            height: h,
+                            decoration: BoxDecoration(
+                              color: b.minutes > 0
+                                  ? cs.primary
+                                  : cs.surfaceContainerHighest,
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(2),
+                              ),
                             ),
                           ),
                         ),
@@ -812,12 +831,12 @@ class _TaskDistributionCard extends StatelessWidget {
               '任务分布',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: Colors.grey.shade700,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 16),
             if (total == 0)
-              const Text('该时段无专注记录', style: TextStyle(color: Colors.grey))
+              Text('该时段无专注记录', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))
             else
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -845,7 +864,7 @@ class _TaskDistributionCard extends StatelessWidget {
                                 '总时长',
                                 style: TextStyle(
                                   fontSize: 10,
-                                  color: Colors.grey.shade600,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                                 ),
                               ),
                             ],
@@ -966,7 +985,7 @@ class _SliceLegendRow extends StatelessWidget {
                 child: Text(
                   '${(fraction * 100).toStringAsFixed(0)}%',
                   textAlign: TextAlign.right,
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ),
             ],
@@ -1016,14 +1035,14 @@ class _RecordListCard extends StatelessWidget {
               '记录明细',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: Colors.grey.shade700,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 4),
             if (groups.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('该时段无专注记录', style: TextStyle(color: Colors.grey)),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text('该时段无专注记录', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
               )
             else
               for (var i = 0; i < groups.length; i++) ...[
@@ -1077,7 +1096,7 @@ class _DayHeader extends StatelessWidget {
           const Spacer(),
           Text(
             '共 ${formatFocusMinutes(total)}',
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -1117,12 +1136,12 @@ class _RecordGroupTile extends StatelessWidget {
               size: 20,
               color: selected
                   ? Theme.of(context).colorScheme.primary
-                  : Colors.grey.shade500,
+                  : Theme.of(context).colorScheme.onSurfaceVariant,
             )
           : Icon(
               linked ? Icons.check_circle_outline : Icons.timer_outlined,
               size: 20,
-              color: Colors.grey.shade500,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
       title: Text(
         group.title,
@@ -1132,7 +1151,7 @@ class _RecordGroupTile extends StatelessWidget {
       ),
       subtitle: Text(
         '${group.records.length} 次',
-        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+        style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
       trailing: Text(
         formatFocusMinutes(group.totalMinutes),

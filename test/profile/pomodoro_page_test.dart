@@ -144,20 +144,26 @@ void main() {
     await openPage(tester);
     await tester.tap(find.text('开始'));
     await tester.pump();
+    // 按钮组 AnimatedSwitcher 过渡期间新按钮不可命中，先推进过渡
+    await tester.pump(const Duration(milliseconds: 250));
     await tester.tap(find.text('暂停'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('继续'), findsOneWidget);
     expect(find.text('重新开始'), findsOneWidget);
     expect(native.updates.last.running, isFalse,
         reason: '暂停态通知显示继续按钮');
     await tester.tap(find.text('继续'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('暂停'), findsOneWidget);
     // 重新开始仅暂停态显示：先暂停再重新开始
     await tester.tap(find.text('暂停'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
     await tester.tap(find.text('重新开始'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('暂停'), findsOneWidget);
     expect(
       container.read(pomodoroControllerProvider.notifier).state.remainingSeconds,
@@ -172,6 +178,8 @@ void main() {
     await openPage(tester);
     await tester.tap(find.text('开始'));
     await tester.pump();
+    // 等按钮组过渡完成再点结束
+    await tester.pump(const Duration(milliseconds: 250));
     await tester.tap(find.text('结束'));
     // finish 含真实 DB 写库：让真实异步收敛（broadcast 流投递 + SnackBar 入场）
     await tester.runAsync(

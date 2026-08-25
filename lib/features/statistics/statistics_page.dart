@@ -132,32 +132,35 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('统计'),
-        actions: [
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'week', label: Text('周')),
-              ButtonSegment(value: 'month', label: Text('月')),
-              ButtonSegment(value: 'year', label: Text('年')),
-            ],
-            selected: {_range},
-            onSelectionChanged: (s) {
-              setState(() {
-                _range = s.first;
-                _loading = true;
-              });
-              _load();
-            },
-            showSelectedIcon: false,
-            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+      appBar: AppBar(title: const Text('统计')),
+      // 档位选择器移出 AppBar：此前周/月/年与返回键、标题挤在一行，
+      // 视觉重量失衡；固定在内容区顶部保持常驻可切
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'week', label: Text('周')),
+                ButtonSegment(value: 'month', label: Text('月')),
+                ButtonSegment(value: 'year', label: Text('年')),
+              ],
+              selected: {_range},
+              onSelectionChanged: (s) {
+                if (s.first == _range) return;
+                // 切档不清空旧数据：保留当前内容就地等待新数据到达，
+                // 避免整页换 spinner 的白闪与 count-up 从零重播
+                setState(() => _range = s.first);
+                _load();
+              },
+              showSelectedIcon: false,
+              style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            ),
           ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 _CompletionCard(
@@ -183,15 +186,18 @@ class _StatisticsPageState extends ConsumerState<StatisticsPage> {
                       padding: const EdgeInsets.all(16),
                       child: Text(
                         '还没有习惯，去"我的 > 习惯打卡"添加',
-                        style: TextStyle(color: Colors.grey.shade600),
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                       ),
                     ),
                   ),
-                // key 随加载序号变化 → 数据刷新时重建（此前 State 复用
-                // 不重跑 initState，热力图在页面存活期间不更新）
-                _YearHeatmap(key: ValueKey(_loadSeq), db: ref.read(dbProvider)),
+                // 数据刷新时经 didUpdateWidget 重载（此前用 ValueKey(_loadSeq)
+                // 强制重挂载，每次刷新整块重建闪烁）
+                _YearHeatmap(version: _loadSeq, db: ref.read(dbProvider)),
               ],
             ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -319,7 +325,7 @@ class _CompletionCard extends StatelessWidget {
               '完成率',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: Colors.grey.shade700,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 4),
@@ -339,7 +345,7 @@ class _CompletionCard extends StatelessWidget {
             ),
             Text(
               '计划 $totalPlanned 项 · 完成 $totalDone 项',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
             ),
             const SizedBox(height: 2),
             Text(
@@ -351,7 +357,7 @@ class _CompletionCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             if (!hasData)
-              const Text('该时段无计划任务', style: TextStyle(color: Colors.grey))
+              Text('该时段无计划任务', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant))
             else
               _CompletionBarChart(buckets: buckets),
           ],
@@ -483,7 +489,7 @@ class _BucketBar extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
-                color: b.planned > 0 ? scheme.primary : Colors.grey.shade500,
+                color: b.planned > 0 ? scheme.primary : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ),
@@ -493,22 +499,31 @@ class _BucketBar extends StatelessWidget {
           child: Stack(
             alignment: Alignment.bottomCenter,
             children: [
-              // 总任务柱（浅色，等高）
-              Container(
-                width: barWidth,
-                height: m.totalHeight,
-                decoration: BoxDecoration(
-                  color: scheme.primaryContainer,
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(3),
+              // 总任务柱（浅色，等高）；高度走隐式过渡，切档时平滑变形
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: m.totalHeight),
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOutCubic,
+                builder: (context, h, _) => Container(
+                  width: barWidth,
+                  height: h,
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(3),
+                    ),
                   ),
                 ),
               ),
-              // 已完成填充（深色，按 完成/计划 比例，下限 2px 保证可见）
-              if (m.fillHeight > 0)
-                Container(
+              // 已完成填充（深色，按 完成/计划 比例，下限 2px 保证可见）；
+              // 始终参与动画，比例归零时平滑收缩到 0 而非硬消失
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: m.fillHeight),
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOutCubic,
+                builder: (context, h, _) => Container(
                   width: barWidth,
-                  height: m.fillHeight,
+                  height: h,
                   decoration: BoxDecoration(
                     color: scheme.primary,
                     borderRadius: const BorderRadius.vertical(
@@ -516,6 +531,7 @@ class _BucketBar extends StatelessWidget {
                     ),
                   ),
                 ),
+              ),
             ],
           ),
         ),
@@ -525,7 +541,7 @@ class _BucketBar extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text(
               '${b.completed}/${b.planned}',
-              style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ),
         ),
@@ -535,7 +551,7 @@ class _BucketBar extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text(
               b.label,
-              style: TextStyle(fontSize: 10, color: Colors.grey.shade700),
+              style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ),
         ),
@@ -566,7 +582,7 @@ class _LegendItem extends StatelessWidget {
         const SizedBox(width: 4),
         Text(
           label,
-          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+          style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
       ],
     );
@@ -597,7 +613,7 @@ class _PomodoroCard extends StatelessWidget {
                 '专注时长',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: Colors.grey.shade700,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
               const SizedBox(height: 4),
@@ -620,7 +636,7 @@ class _PomodoroCard extends StatelessWidget {
                 children: [
                   Text(
                     '共 ${days.values.length} 天有专注记录',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 12),
                   ),
                   const Spacer(),
                   Text(
@@ -687,7 +703,7 @@ class _HabitHeatmap extends StatelessWidget {
                     '$habitName · 打卡热力图',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey.shade700,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -759,9 +775,11 @@ class _HabitHeatmap extends StatelessWidget {
 }
 
 class _YearHeatmap extends ConsumerStatefulWidget {
-  const _YearHeatmap({super.key, required this.db});
+  const _YearHeatmap({required this.db, this.version = 0});
 
   final AppDatabase db;
+  /// 数据版本：变化时重新加载（不重建整棵子树）
+  final int version;
 
   @override
   ConsumerState<_YearHeatmap> createState() => _YearHeatmapState();
@@ -769,6 +787,7 @@ class _YearHeatmap extends ConsumerStatefulWidget {
 
 class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
   Map<DateTime, int>? _counts;
+  int _seq = 0;
 
   @override
   void initState() {
@@ -779,15 +798,17 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
   @override
   void didUpdateWidget(_YearHeatmap old) {
     super.didUpdateWidget(old);
-    if (old.db != widget.db) _load();
+    if (old.db != widget.db || old.version != widget.version) _load();
   }
 
   Future<void> _load() async {
+    final seq = ++_seq;
     final now = AppClock.now();
     final from = AppClock.at(now.year, 1, 1);
     final to = AppClock.at(now.year, 12, 31);
     final counts = await widget.db.getCompletedCountByDay(from, to);
-    if (mounted) setState(() => _counts = counts);
+    // 丢弃过期结果（快速连续刷新时旧请求不得覆盖新结果）
+    if (mounted && seq == _seq) setState(() => _counts = counts);
   }
 
   @override
@@ -816,7 +837,7 @@ class _YearHeatmapState extends ConsumerState<_YearHeatmap> {
               '${now.year} 年完成热力图',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: Colors.grey.shade700,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 2),

@@ -571,12 +571,28 @@ class TasksController extends StateNotifier<TasksState> {
     if (t.rrule.isNotEmpty) {
       final inst = _currentInstanceDate(t);
       final done = await _db.isInstanceCompleted(id, inst);
+      // 乐观更新：仅"今天实例"立即翻转状态让勾选/划线即时反馈，
+      // 不等写库+reload；未来实例提前完成不影响今天显示（C1-2），
+      // 写入失败时回滚。reload 落地后由库内真值覆盖
+      final optimistic = DateUtilsEx.sameDay(inst, AppClock.now());
+      if (optimistic) {
+        state = state.copyWith(
+          instanceDone: {...state.instanceDone, id: !done},
+        );
+      }
       if (done) {
         await _db.uncompleteInstance(id, inst);
       } else {
         // 命中校验统一收口——非规则命中日不写入完成记录
         final hit = await _db.completeInstanceIfHit(id, inst);
-        if (!hit) return null;
+        if (!hit) {
+          if (optimistic) {
+            state = state.copyWith(
+              instanceDone: {...state.instanceDone, id: done},
+            );
+          }
+          return null;
+        }
       }
       // 完成/撤销实例后重排：完成只取消该实例当天通知（O(1) 补丁，
       // 由下方反馈后转后台执行），其余未完成实例保留
@@ -632,6 +648,10 @@ class TasksController extends StateNotifier<TasksState> {
       await _db.reopenTask(id);
     } else {
       inst = _currentInstanceDate(t);
+      // 乐观更新：与 completeTask 对称，仅"今天实例"立即翻转显示
+      if (DateUtilsEx.sameDay(inst, AppClock.now())) {
+        state = state.copyWith(instanceDone: {...state.instanceDone, id: false});
+      }
       await _db.uncompleteInstance(id, inst);
     }
     // 反向联动：子任务恢复未完成时，父任务同步恢复未完成（含重复子任务）

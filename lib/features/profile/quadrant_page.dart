@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
+import 'package:zhuoluo/core/theme/task_colors.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
@@ -160,7 +161,7 @@ class _QuadrantPageState extends ConsumerState<QuadrantPage> {
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: InkWell(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: AppRadius.tile,
                           // C7-2：横幅可点击展开未分类任务列表
                           // （此前提示"长按拖动"但任务不可见、无法操作）
                           onTap: () => _showUnclassified(unclassified, notifier),
@@ -174,7 +175,7 @@ class _QuadrantPageState extends ConsumerState<QuadrantPage> {
                               color: Theme.of(
                                 context,
                               ).colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: AppRadius.tile,
                             ),
                             child: Row(
                               children: [
@@ -313,7 +314,7 @@ class _QuadrantCell extends StatelessWidget {
                     ),
                     decoration: BoxDecoration(
                       color: color.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: AppRadius.tile,
                     ),
                     child: Text(
                       '${tasks.length}',
@@ -353,14 +354,18 @@ class _QuadrantCell extends StatelessWidget {
                       itemCount: tasks.length,
                       itemBuilder: (context, i) {
                         final t = tasks[i];
-                        // A5：任务首次出现（如从其他象限拖入）时放大回弹
+                        // A5：任务首次出现（如从其他象限拖入）时淡入放大；
+                        // 曲线与任务列表页入场一致（easeOutCubic 家族），
+                        // 此前 easeOutBack 弹跳与全应用克制风格冲突
                         return TweenAnimationBuilder<double>(
                           key: ValueKey('quad-enter-${t.id}'),
-                          tween: Tween(begin: 0.6, end: 1.0),
-                          duration: const Duration(milliseconds: 200),
-                          curve: Curves.easeOutBack,
-                          builder: (context, v, child) =>
-                              Transform.scale(scale: v, child: child),
+                          tween: Tween(begin: 0.85, end: 1.0),
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeOutCubic,
+                          builder: (context, v, child) => Opacity(
+                            opacity: v.clamp(0.0, 1.0),
+                            child: Transform.scale(scale: v, child: child),
+                          ),
                           child: LongPressDraggable<int>(
                             data: t.id,
                             onDragStarted: () => Haptics.select(),
@@ -375,9 +380,11 @@ class _QuadrantCell extends StatelessWidget {
                                   color: color.withValues(alpha: 0.9),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
+                                // 按背景亮度自动选黑/白字（Q2 黄色底
+                                // 白字对比不足）
                                 child: Text(
                                   t.title,
-                                  style: const TextStyle(color: Colors.white),
+                                  style: TextStyle(color: TaskColors.textOn(color)),
                                 ),
                               ),
                             ),

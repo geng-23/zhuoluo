@@ -382,7 +382,7 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                   fontSize: 11,
                                   color: DateUtilsEx.sameDay(d, today)
                                       ? Theme.of(context).colorScheme.primary
-                                      : Colors.grey.shade600,
+                                      : Theme.of(context).colorScheme.onSurfaceVariant,
                                 ),
                               ),
                               Text(

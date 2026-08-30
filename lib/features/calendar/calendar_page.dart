@@ -651,7 +651,7 @@ class MonthView extends ConsumerWidget {
                       w,
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.grey.shade600,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -709,7 +709,9 @@ class MonthView extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 240),
+                            curve: Curves.easeOutBack,
                             width: 24,
                             height: 24,
                             decoration: BoxDecoration(
@@ -747,7 +749,9 @@ class MonthView extends ConsumerWidget {
                                     '+${dayItems.length - _monthMaxItems}',
                                     style: TextStyle(
                                       fontSize: 10,
-                                      color: Colors.grey.shade600,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                               ],
@@ -777,7 +781,7 @@ class _MonthTaskLine extends StatelessWidget {
     final t = item.task;
     final done = item.completed;
     final listColor = colorFromHex(item.listColor);
-    final color = done ? Colors.grey.shade400 : listColor;
+    final scheme = Theme.of(context).colorScheme; final color = done ? scheme.outline : listColor;
     const radius = 6.0;
     return Container(
       width: double.infinity,

@@ -253,7 +253,7 @@ class DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
                           visualDensity: VisualDensity.compact,
                           icon: DoneCheckIcon(
                             done: item.completed,
-                            doneColor: Colors.grey.shade400,
+                            doneColor: Theme.of(context).colorScheme.outline,
                           ),
                           onPressed: () => notifier.toggleComplete(item),
                         ),

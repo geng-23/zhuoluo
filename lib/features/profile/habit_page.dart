@@ -4,11 +4,13 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
+import 'package:zhuoluo/core/widgets/app_empty_view.dart';
 import 'package:zhuoluo/core/widgets/done_check_icon.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/reminder_scheduler.dart';
@@ -87,7 +89,11 @@ class _HabitPageState extends ConsumerState<HabitPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _habits.isEmpty
-          ? const Center(child: Text('还没有习惯，点 + 添加'))
+          ? AppEmptyView(
+              icon: Icons.emoji_events_outlined,
+              title: '还没有习惯',
+              subtitle: '好的习惯，从第一次打卡开始',
+            )
           : ListView.builder(
               controller: _scroll,
               itemExtent: _tileExtent,
@@ -518,7 +524,10 @@ class _HabitTileState extends ConsumerState<_HabitTile> {
           ? scheme.primaryContainer.withValues(alpha: 0.35)
           : null,
       child: ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.xs,
+      ),
       leading: CircleAvatar(
         radius: 24,
         backgroundColor: _doneToday

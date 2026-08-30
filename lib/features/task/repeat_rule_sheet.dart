@@ -148,7 +148,11 @@ class _RepeatRuleSheetState extends State<RepeatRuleSheet> {
                 },
                 child: Row(
                   children: [
-                    const Icon(Icons.event, size: 18, color: Colors.grey),
+                    Icon(
+                      Icons.event,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
                     const SizedBox(width: 8),
                     const Text('开始日期', style: TextStyle(fontSize: 14)),
                     const Spacer(),

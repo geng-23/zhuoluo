@@ -59,6 +59,8 @@ class SettingsController {
   static const keyAppTimezone = 'appTimezone';
   /// 回收站保留天数（默认 30；偏好设置可调）
   static const keyTrashRetentionDays = 'trashRetentionDays';
+  /// 主题色（hex 如 '#4F8EF7'；空/默认 = 默认蓝）
+  static const keyThemeColor = 'themeColor';
 
   Future<String?> get(String key) => _db.getSetting(key);
 
@@ -119,6 +121,10 @@ final settingsProvider = Provider<SettingsController>(
 /// 从 profile_page 移至 core——main.dart 启动时恢复主题，
 /// 此前 main 反向依赖 feature 页面文件
 final themeModeProvider = StateProvider<String>((ref) => 'system');
+
+/// 主题色全局状态（hex 种子色；空/null = 默认蓝）
+/// 与 themeModeProvider 同模式：启动时由 main 恢复，运行时由设置页更新
+final themeColorProvider = StateProvider<String>((ref) => '');
 
 /// 数据版本号（I3：#23 实时同步）
 /// 任何数据写操作后 +1，依赖方 watch 后自动刷新

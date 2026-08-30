@@ -272,7 +272,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 已删除：列表空 + 撤销条
-    expect(find.text('还没有习惯，点 + 添加'), findsOneWidget, reason: '列表已空');
+    expect(find.text('还没有习惯'), findsOneWidget, reason: '列表已空');
     expect(find.text('已删除「阅读」'), findsOneWidget, reason: '撤销条提示');
     expect(await db.getHabits(), isEmpty, reason: 'DB 已删除');
 

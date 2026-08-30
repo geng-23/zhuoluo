@@ -169,7 +169,9 @@ class _PlanTimeSheetState extends State<PlanTimeSheet> {
                           ? '与开始日期相同'
                           : DateUtilsEx.dateCn(_endDate!),
                       style: TextStyle(
-                        color: _endDate == null ? Colors.grey : null,
+                        color: _endDate == null
+                            ? Theme.of(context).colorScheme.outline
+                            : null,
                       ),
                     ),
                     const Icon(Icons.chevron_right, size: 18),
@@ -210,7 +212,7 @@ class _PlanTimeSheetState extends State<PlanTimeSheet> {
                     ] else
                       Text(
                         '默认 1 小时',
-                        style: TextStyle(color: Colors.grey),
+                        style: TextStyle(color: Theme.of(context).colorScheme.outline),
                       ),
                     const Icon(Icons.chevron_right, size: 18),
                   ],

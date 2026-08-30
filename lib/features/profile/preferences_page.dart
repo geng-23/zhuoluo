@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 
 /// 偏好设置页（偏好设置组，2026-08-08）：
@@ -95,7 +96,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
             title: const Text('默认清单'),
             subtitle: Text(
               _defaultListLabel,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: AppTextStyles.subtitle(context),
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: _pickDefaultList,
@@ -107,7 +108,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
             title: const Text('默认提醒提前量'),
             subtitle: Text(
               '$_defaultRemindLabel（定时任务）',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: AppTextStyles.subtitle(context),
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: _pickDefaultRemind,
@@ -117,7 +118,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
             title: const Text('全天任务默认提醒时刻'),
             subtitle: Text(
               '$_allDayAtLabel（全天任务自动提醒时刻）',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: AppTextStyles.subtitle(context),
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: _pickAllDayAt,
@@ -129,7 +130,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
             title: const Text('应用时区'),
             subtitle: Text(
               '$_timezoneLabel（出差/旅行时任务仍按家乡时间显示和提醒）',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: AppTextStyles.subtitle(context),
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: _pickTimezone,
@@ -141,7 +142,7 @@ class _PreferencesPageState extends ConsumerState<PreferencesPage> {
             title: const Text('保留期'),
             subtitle: Text(
               '$_retentionLabel（超过保留期的已删除任务自动清理）',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: AppTextStyles.subtitle(context),
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: _pickRetention,
@@ -318,9 +319,19 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-    child: Text(
-      title,
-      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+    child: Row(
+      children: [
+        Container(
+          width: 4,
+          height: 14,
+          margin: const EdgeInsets.only(right: 8),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary,
+            borderRadius: AppRadius.pill,
+          ),
+        ),
+        Text(title, style: AppTextStyles.sectionHeader(context)),
+      ],
     ),
   );
 }
@@ -516,7 +527,7 @@ class _GroupLabel extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
     child: Text(
       text,
-      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+      style: AppTextStyles.subtitle(context),
     ),
   );
 }

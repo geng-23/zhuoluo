@@ -446,7 +446,7 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
                   style: TextStyle(
                     fontSize: 12,
                     color: _failed.isEmpty
-                        ? Colors.grey.shade600
+                        ? Theme.of(context).colorScheme.onSurfaceVariant
                         : Colors.orange.shade700,
                   ),
                 ),
@@ -473,19 +473,23 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
             ),
           ),
           if (_saved == null || !_saved!.connectable)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
                 '填写并保存上方配置后，即可查看与管理云端备份',
-                style: TextStyle(color: Colors.grey),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.outline,
+                ),
               ),
             )
           else if (_remote.isEmpty && !_loadingList)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
                 '云端暂无备份文件',
-                style: TextStyle(color: Colors.grey),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.outline,
+                ),
               ),
             )
           else

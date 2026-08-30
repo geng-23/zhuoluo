@@ -182,7 +182,7 @@ class _QuadrantPageState extends ConsumerState<QuadrantPage> {
                                 Icon(
                                   Icons.label_off_outlined,
                                   size: 18,
-                                  color: Colors.grey.shade600,
+                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
@@ -190,14 +190,16 @@ class _QuadrantPageState extends ConsumerState<QuadrantPage> {
                                     '${unclassified.length} 个任务未分类，点击查看',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.grey.shade700,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                 ),
-                                const Icon(
+                                Icon(
                                   Icons.chevron_right,
                                   size: 16,
-                                  color: Colors.grey,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.outline,
                                 ),
                               ],
                             ),
@@ -343,7 +345,7 @@ class _QuadrantCell extends StatelessWidget {
                           Text(
                             '拖任务到这里',
                             style: TextStyle(
-                              color: Colors.grey.shade400,
+                              color: Theme.of(context).colorScheme.outline,
                               fontSize: 12,
                             ),
                           ),

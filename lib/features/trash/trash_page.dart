@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
+import 'package:zhuoluo/core/widgets/app_empty_view.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/trash/trash_providers.dart';
@@ -297,8 +299,15 @@ class _TrashPageState extends ConsumerState<TrashPage> {
               children: [
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                  color: scheme.surfaceContainerLow,
+                  margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerLow,
+                    borderRadius: AppRadius.tile,
+                  ),
                   child: Text(
                     '超过 $retention 天的条目将自动清理',
                     style: TextStyle(
@@ -380,28 +389,10 @@ class _TrashPageState extends ConsumerState<TrashPage> {
 class _EmptyTrash extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.delete_outline,
-            size: 64,
-            color: scheme.outline.withValues(alpha: 0.6),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '回收站为空',
-            style: TextStyle(fontSize: 15, color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '删除的任务会先进入这里，可恢复或彻底删除',
-            style: TextStyle(fontSize: 12, color: scheme.outline),
-          ),
-        ],
-      ),
+    return const AppEmptyView(
+      icon: Icons.delete_outline,
+      title: '回收站为空',
+      subtitle: '删除的任务会先进入这里，可恢复或彻底删除',
     );
   }
 }

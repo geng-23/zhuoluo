@@ -18,6 +18,7 @@ import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
 import 'package:zhuoluo/features/trash/trash_page.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
+import 'package:zhuoluo/core/widgets/app_empty_view.dart';
 import 'package:zhuoluo/core/widgets/done_check_icon.dart';
 
 /// 任务页：抽屉侧栏 + 任务列表
@@ -424,6 +425,12 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     };
     return Column(
       children: [
+        // 头部概览：日期 + 当前视图（非搜索、非多选时展示）
+        if (!searching && !_multiSelect)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+            child: _TaskHeader(title: _titleFor(state)),
+          ),
         // 搜索模式：结果计数提示
         if (searching)
           Padding(
@@ -1326,11 +1333,12 @@ class _TaskTile extends StatelessWidget {
         borderRadius: AppRadius.tile,
         child: Container(
           // 拟物卡片：圆角 + 背景 + 细边框 + 轻微阴影
+          // 卡片用 surfaceContainerLow 抬升一档，与列表底面 surface 形成层次
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
           decoration: BoxDecoration(
             color: selected
                 ? Theme.of(context).colorScheme.primaryContainer
-                : Theme.of(context).colorScheme.surface,
+                : Theme.of(context).colorScheme.surfaceContainerLow,
             borderRadius: AppRadius.tile,
             border: Border.all(
               color: selected
@@ -1888,6 +1896,71 @@ class _TaskDrawer extends ConsumerWidget {
   }
 }
 
+/// 任务页头部概览：大日期 + 当前视图名（纯展示，零 DB 查询）
+class _TaskHeader extends StatelessWidget {
+  const _TaskHeader({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final now = AppClock.now();
+    final dateStr = '${now.month}月${now.day}日';
+    final weekStr = DateUtilsEx.weekdayCn[now.weekday - 1];
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                dateStr,
+                style: const TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w700,
+                  height: 1.2,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                weekStr,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 「今天」徽章：未来/今天视图下才显示（表示当前视图范围起点）
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: scheme.primaryContainer.withValues(alpha: 0.45),
+            borderRadius: AppRadius.pill,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.calendar_today, size: 13, color: scheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _EmptyView extends StatelessWidget {
   const _EmptyView({
     required this.searching,
@@ -1906,53 +1979,26 @@ class _EmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            searching ? Icons.search_off : Icons.task_alt,
-            size: 64,
-            color: scheme.outline.withValues(alpha: 0.6),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            searching
-                ? (query.isEmpty
-                      ? '没有找到相关任务'
-                      : '没有找到与「$query」相关的任务')
-                : '还没有任务',
-            style: TextStyle(
-              fontSize: 15,
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-          if (!searching) ...[
-            const SizedBox(height: 4),
-            Text(
-              '让事事有着落，从一个小任务开始',
-              style: TextStyle(fontSize: 12, color: scheme.outline),
-            ),
-          ],
-          if (onClearSearch != null) ...[
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: onClearSearch,
-              icon: const Icon(Icons.close, size: 16),
-              label: const Text('清除搜索'),
-            ),
-          ],
-          if (!searching && onAddFirst != null) ...[
-            const SizedBox(height: 16),
-            FilledButton.icon(
+    return AppEmptyView(
+      icon: searching ? Icons.search_off : Icons.task_alt,
+      title: searching
+          ? (query.isEmpty ? '没有找到相关任务' : '没有找到与「$query」相关的任务')
+          : '还没有任务',
+      subtitle: searching ? null : '让事事有着落，从一个小任务开始',
+      action: !searching && onAddFirst != null
+          ? FilledButton.icon(
               onPressed: onAddFirst,
               icon: const Icon(Icons.add),
               label: const Text('添加第一个任务'),
-            ),
-          ],
-        ],
-      ),
+            )
+          : null,
+      actions: [if (onClearSearch != null) ...[
+        TextButton.icon(
+          onPressed: onClearSearch,
+          icon: const Icon(Icons.close, size: 16),
+          label: const Text('清除搜索'),
+        ),
+      ]],
     );
   }
 }

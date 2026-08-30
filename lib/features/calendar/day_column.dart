@@ -1500,7 +1500,9 @@ class TaskBlock extends ConsumerWidget {
     final baseColor =
         TaskColors.colorOf(item.task.color, brightness) ??
         colorFromHex(item.listColor);
-    final color = done ? Colors.grey : baseColor;
+    final color = done
+        ? Theme.of(context).colorScheme.outline
+        : baseColor;
     final block = _blockBody(context, color, done, notifier, ref);
     // 全天任务同样可长按拖动：拖到置顶区另一天=改期保持全天（AllDayBar
     // DragTarget 处理），拖进时间轴=转 1 小时时段任务（本列 onAccept 处理）

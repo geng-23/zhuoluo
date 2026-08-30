@@ -21,14 +21,19 @@ Future<void> main() async {
   await container.read(dbProvider).ensureDefaultList();
   // 轻量设置并行读取，runApp 前应用（主题/时区影响首帧渲染，音效/震动影响交互反馈）
   final settings = container.read(settingsProvider);
-  final (savedTheme, appTimezone, soundEnabled, hapticsEnabled) = await (
-    container.read(dbProvider).getSetting('themeMode'),
-    settings.getAppTimezone(),
-    settings.getSoundEnabled(),
-    settings.getHapticsEnabled(),
-  ).wait;
+  final (savedTheme, appTimezone, soundEnabled, hapticsEnabled, savedColor) =
+      await (
+        container.read(dbProvider).getSetting('themeMode'),
+        settings.getAppTimezone(),
+        settings.getSoundEnabled(),
+        settings.getHapticsEnabled(),
+        container.read(dbProvider).getSetting('themeColor'),
+      ).wait;
   if (savedTheme != null && savedTheme.isNotEmpty) {
     container.read(themeModeProvider.notifier).state = savedTheme;
+  }
+  if (savedColor != null && savedColor.isNotEmpty) {
+    container.read(themeColorProvider.notifier).state = savedColor;
   }
   SoundService.soundsEnabled = soundEnabled;
   Haptics.hapticsEnabled = hapticsEnabled;
@@ -84,11 +89,12 @@ class ZhuoluoApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
+    final themeColor = ThemePalette.fromHex(ref.watch(themeColorProvider));
     return MaterialApp(
       title: '着落',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
+      theme: AppTheme.light(themeColor),
+      darkTheme: AppTheme.dark(themeColor),
       // A7：主题切换过渡动画
       themeAnimationDuration: const Duration(milliseconds: 350),
       themeAnimationCurve: Curves.easeInOut,

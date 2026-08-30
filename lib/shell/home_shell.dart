@@ -205,16 +205,93 @@ class _HomeShellState extends ConsumerState<HomeShell>
           ],
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: _switchTo,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.checklist), label: '任务'),
-          NavigationDestination(icon: Icon(Icons.calendar_month), label: '日历'),
-          NavigationDestination(icon: Icon(Icons.grid_view), label: '四象限'),
-          NavigationDestination(icon: Icon(Icons.person_outline), label: '我的'),
-        ],
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            border: Border(
+              top: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant.withValues(
+                  alpha: 0.5,
+                ),
+              ),
+            ),
+          ),
+          child: NavigationBar(
+            selectedIndex: _tab,
+            onDestinationSelected: _switchTo,
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.checklist_outlined),
+                selectedIcon: _NavIconPop(Icons.checklist_rounded),
+                label: '任务',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.calendar_month_outlined),
+                selectedIcon: _NavIconPop(Icons.calendar_month_rounded),
+                label: '日历',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.grid_view_outlined),
+                selectedIcon: _NavIconPop(Icons.grid_view_rounded),
+                label: '四象限',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.person_outline),
+                selectedIcon: _NavIconPop(Icons.person_rounded),
+                label: '我的',
+              ),
+            ],
+          ),
+        ),
       ),
+    );
+  }
+}
+
+/// 导航选中图标：冒入动画（轻弹 + 淡入，遵循 DoneCheckIcon 的 easeOutBack 语言）
+class _NavIconPop extends StatefulWidget {
+  const _NavIconPop(this.icon);
+
+  final IconData icon;
+
+  @override
+  State<_NavIconPop> createState() => _NavIconPopState();
+}
+
+class _NavIconPopState extends State<_NavIconPop>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 240),
+  );
+  late final Animation<double> _scale = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeOutBack,
+  );
+  late final Animation<double> _opacity = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeOut,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _scale,
+      child: FadeTransition(opacity: _opacity, child: Icon(widget.icon)),
     );
   }
 }

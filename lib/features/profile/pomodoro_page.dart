@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/features/profile/pomodoro_controller.dart';
 import 'package:zhuoluo/features/task/providers.dart';
@@ -89,7 +90,7 @@ class _DurationLabel extends ConsumerWidget {
     );
     return Text(
       '$minutes 分钟',
-      style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+      style: TextStyle(fontSize: AppTextSizes.title, color: Theme.of(context).colorScheme.onSurfaceVariant),
     );
   }
 }
@@ -283,15 +284,15 @@ class _LinkedTaskCard extends ConsumerWidget {
         color: Theme.of(
           context,
         ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: AppRadius.tile,
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: AppRadius.tile,
           onTap: canEdit ? () => _pickTask(ref, context) : null,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                Icon(Icons.link, size: 18, color: Colors.grey.shade600),
+                Icon(Icons.link, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -299,14 +300,14 @@ class _LinkedTaskCard extends ConsumerWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: linked == null ? Colors.grey.shade600 : null,
+                      color: linked == null ? Theme.of(context).colorScheme.onSurfaceVariant : null,
                     ),
                   ),
                 ),
                 Icon(
                   Icons.chevron_right,
                   size: 18,
-                  color: Colors.grey.shade400,
+                  color: Theme.of(context).colorScheme.outline,
                 ),
               ],
             ),
@@ -346,7 +347,7 @@ Future<void> _pickTask(WidgetRef ref, BuildContext context) async {
                   : Icons.radio_button_unchecked,
               color: currentTaskId == null
                   ? Theme.of(c).colorScheme.primary
-                  : Colors.grey.shade400,
+                  : Theme.of(c).colorScheme.outline,
             ),
             title: const Text('不关联任务'),
             onTap: () => Navigator.pop(c, -1),
@@ -365,7 +366,7 @@ Future<void> _pickTask(WidgetRef ref, BuildContext context) async {
                           : Icons.radio_button_unchecked,
                       color: currentTaskId == t.id
                           ? Theme.of(c).colorScheme.primary
-                          : Colors.grey.shade400,
+                          : Theme.of(c).colorScheme.outline,
                     ),
                     title: Text(
                       t.title,

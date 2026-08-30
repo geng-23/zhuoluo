@@ -4,6 +4,7 @@ import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
+import 'package:zhuoluo/core/widgets/app_empty_view.dart';
 import 'package:zhuoluo/data/services/backup_types.dart';
 import 'package:zhuoluo/features/profile/restore_flow.dart';
 
@@ -74,8 +75,10 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _files.isEmpty
-          ? const Center(
-              child: Text('暂无备份文件', style: TextStyle(color: Colors.grey)),
+          ? const AppEmptyView(
+              icon: Icons.inventory_2_outlined,
+              title: '暂无备份文件',
+              subtitle: '数据备份之后，换机/重装也能恢复如初',
             )
           : Column(
               children: [

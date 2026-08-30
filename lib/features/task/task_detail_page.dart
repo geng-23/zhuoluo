@@ -257,15 +257,23 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
     if (t == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('任务详情')),
-        body: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.help_outline, size: 48, color: Colors.grey),
-              SizedBox(height: 12),
-              Text('任务不存在或已被删除', style: TextStyle(color: Colors.grey)),
-            ],
-          ),
+        body: Builder(
+          builder: (context) {
+            final c = Theme.of(context).colorScheme;
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.help_outline, size: 48, color: c.outline),
+                  SizedBox(height: 12),
+                  Text(
+                    '任务不存在或已被删除',
+                    style: TextStyle(color: c.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
       );
     }
@@ -393,10 +401,15 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
             child: Text('提醒', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
           if (_reminders.isEmpty)
-            const ListTile(
+            ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              title: Text('无提醒', style: TextStyle(color: Colors.grey)),
+              title: Text(
+                '无提醒',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.outline,
+                ),
+              ),
             )
           else
             for (final r in _reminders)
@@ -918,7 +931,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                         border: Border.all(
                           color: t.color.isEmpty
                               ? Theme.of(c).colorScheme.primary
-                              : Colors.grey.shade400,
+                              : Theme.of(c).colorScheme.outlineVariant,
                           width: 2,
                         ),
                       ),
@@ -927,7 +940,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                         size: 18,
                         color: t.color.isEmpty
                             ? Theme.of(c).colorScheme.primary
-                            : Colors.grey,
+                            : Theme.of(c).colorScheme.outline,
                       ),
                     ),
                   ),
@@ -943,7 +956,7 @@ class _TaskDetailPageState extends ConsumerState<TaskDetailPage>
                           border: Border.all(
                             color: t.color == key
                                 ? Theme.of(c).colorScheme.primary
-                                : Colors.grey.shade400,
+                                : Theme.of(c).colorScheme.outlineVariant,
                             width: 2,
                           ),
                         ),
@@ -1889,7 +1902,10 @@ class _ListTileRow extends StatelessWidget {
             ),
           Text(
             value,
-            style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+            style: TextStyle(
+            fontSize: AppTextSizes.body,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
           ),
           const Icon(Icons.chevron_right, size: 18),
         ],

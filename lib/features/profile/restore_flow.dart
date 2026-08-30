@@ -48,6 +48,10 @@ Future<void> reloadRuntimeSettings(AppDatabase db, WidgetRef ref) async {
   if (savedTheme != null && savedTheme.isNotEmpty) {
     ref.read(themeModeProvider.notifier).state = savedTheme;
   }
+  final savedColor = await db.getSetting('themeColor');
+  if (savedColor != null && savedColor.isNotEmpty) {
+    ref.read(themeColorProvider.notifier).state = savedColor;
+  }
   final settings = ref.read(settingsProvider);
   SoundService.soundsEnabled = await settings.getSoundEnabled();
   Haptics.hapticsEnabled = await settings.getHapticsEnabled();

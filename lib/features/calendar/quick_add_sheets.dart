@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
+import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
@@ -67,7 +68,10 @@ class _QuickAddSheetWithRangeState
                 '计划时间 ${DateUtilsEx.dateCn(s)} '
                 '${DateUtilsEx.timeCn(s)}-${DateUtilsEx.timeCn(e)}'
                 '${DateUtilsEx.sameDay(s, e) ? '' : '（${DateUtilsEx.dateCn(e)}）'}',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                style: TextStyle(
+                  fontSize: AppTextSizes.bodySm,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -210,7 +214,10 @@ class _QuickAddSheetWithDefaultsState
                     : '添加到 ${DateUtilsEx.dateCn(widget.start!)} '
                           '${DateUtilsEx.timeCn(widget.start!)}-'
                           '${DateUtilsEx.timeCn(widget.end ?? widget.start!.add(const Duration(hours: 1)))}',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                style: TextStyle(
+                  fontSize: AppTextSizes.bodySm,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 8),
               TextField(

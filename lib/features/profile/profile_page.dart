@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
+import 'package:zhuoluo/core/theme/task_colors.dart';
+import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/data/services/backup_service.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
@@ -45,143 +47,170 @@ class ProfilePage extends ConsumerWidget {
           // 截图③：底部留足 Tab Bar 高度，列表项/副标题不被遮挡
           padding: const EdgeInsets.only(bottom: 140),
           children: [
-            const _SectionHeader('效率工具'),
-            ListTile(
-              leading: const Icon(Icons.timer_outlined),
-              title: const Text('番茄专注'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _push(context, const PomodoroPage()),
-            ),
-            ListTile(
-              leading: const Icon(Icons.flag_outlined),
-              title: const Text('习惯打卡'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _push(context, const HabitPage()),
-            ),
-            const Divider(),
-            const _SectionHeader('统计'),
-            ListTile(
-              leading: const Icon(Icons.bar_chart),
-              title: const Text('统计'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _push(context, const StatisticsPage()),
-            ),
-            const Divider(),
-            const _SectionHeader('数据管理'),
-            // 截图④：数据管理组统一右箭头（与其余入口一致）
-            ListTile(
-              leading: const Icon(Icons.backup_outlined),
-              title: const Text('导出备份'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _export(context, ref),
-            ),
-            ListTile(
-                leading: Icon(
-                  backupFail.isEmpty
-                      ? Icons.folder_open
-                      : Icons.error_outline,
-                  color: backupFail.isEmpty ? null : Colors.orange,
+            _SectionGroup(
+              header: const _SectionHeader('效率工具'),
+              children: [
+                ListTile(
+                  leading: const _IconLeading(Icons.timer_outlined),
+                  title: const Text('番茄专注'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _push(context, const PomodoroPage()),
                 ),
-                title: const Text('备份管理'),
-                subtitle: backupFail.isEmpty
-                    ? null
-                    : Text(
-                        '上次自动备份失败（$failTime），点此查看',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.orange.shade700,
-                        ),
-                      ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () async {
-                  // 进入备份管理页后清除失败标志（备份方案设计 3.3）
-                  await _clearAutoBackupFailed(ref);
-                  if (context.mounted) {
-                    _push(context, const BackupManagePage());
-                  }
-                },
-              ),
-            ListTile(
-              leading: const Icon(Icons.restore),
-              title: const Text('导入备份'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _import(context, ref),
+                ListTile(
+                  leading: const _IconLeading(Icons.flag_outlined),
+                  title: const Text('习惯打卡'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _push(context, const HabitPage()),
+                ),
+              ],
             ),
-            ListTile(
-              leading: Icon(
-                webdavFail.isEmpty ? Icons.cloud_outlined : Icons.cloud_off,
-                color: webdavFail.isEmpty ? null : Colors.orange,
-              ),
-              title: const Text('WebDAV 云备份'),
-              subtitle: webdavFail.isNotEmpty
-                  ? Text(
-                      '上次云端同步失败，点此查看',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.orange.shade700,
-                      ),
-                    )
-                  : Text(
-                      webdavLast.isEmpty
-                          ? '通过 WebDAV 把备份同步到你自己的服务器'
-                          : '上次云端同步 ${_fmtWebdavTime(webdavLast)}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
-                      ),
+            _SectionGroup(
+              header: const _SectionHeader('统计'),
+              children: [
+                ListTile(
+                  leading: const _IconLeading(Icons.bar_chart),
+                  title: const Text('统计'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _push(context, const StatisticsPage()),
+                ),
+              ],
+            ),
+            _SectionGroup(
+              header: const _SectionHeader('数据管理'),
+              // 截图④：数据管理组统一右箭头（与其余入口一致）
+              children: [
+                ListTile(
+                  leading: const _IconLeading(Icons.backup_outlined),
+                  title: const Text('导出备份'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _export(context, ref),
+                ),
+                ListTile(
+                    leading: Icon(
+                      backupFail.isEmpty
+                          ? Icons.folder_open
+                          : Icons.error_outline,
+                      color: backupFail.isEmpty
+                          ? Theme.of(context).colorScheme.onSurfaceVariant
+                          : Colors.orange,
                     ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _push(context, const WebdavPage()),
+                    title: const Text('备份管理'),
+                    subtitle: backupFail.isEmpty
+                        ? null
+                        : Text(
+                            '上次自动备份失败（$failTime），点此查看',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.orange.shade700,
+                            ),
+                          ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () async {
+                      // 进入备份管理页后清除失败标志（备份方案设计 3.3）
+                      await _clearAutoBackupFailed(ref);
+                      if (context.mounted) {
+                        _push(context, const BackupManagePage());
+                      }
+                    },
+                  ),
+                ListTile(
+                  leading: const _IconLeading(Icons.restore),
+                  title: const Text('导入备份'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _import(context, ref),
+                ),
+                ListTile(
+                  leading: Icon(
+                    webdavFail.isEmpty
+                        ? Icons.cloud_outlined
+                        : Icons.cloud_off,
+                    color: webdavFail.isEmpty
+                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                        : Colors.orange,
+                  ),
+                  title: const Text('WebDAV 云备份'),
+                  subtitle: webdavFail.isNotEmpty
+                      ? Text(
+                          '上次云端同步失败，点此查看',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.orange.shade700,
+                          ),
+                        )
+                      : Text(
+                          webdavLast.isEmpty
+                              ? '通过 WebDAV 把备份同步到你自己的服务器'
+                              : '上次云端同步 ${_fmtWebdavTime(webdavLast)}',
+                          style: AppTextStyles.subtitle(context),
+                        ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _push(context, const WebdavPage()),
+                ),
+              ],
             ),
-            const Divider(),
-            const _SectionHeader('通知'),
-            const _NotificationPermissionTile(),
-            ListTile(
-              leading: const Icon(Icons.notifications_active_outlined),
-              title: const Text('发送测试通知'),
-              subtitle: Text(
-                '立即弹出一条通知，验证提醒是否正常',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _sendTestNotification(context, ref),
+            _SectionGroup(
+              header: const _SectionHeader('通知'),
+              children: [
+                const _NotificationPermissionTile(),
+                ListTile(
+                  leading: const _IconLeading(
+                    Icons.notifications_active_outlined,
+                  ),
+                  title: const Text('发送测试通知'),
+                  subtitle: Text(
+                    '立即弹出一条通知，验证提醒是否正常',
+                    style: AppTextStyles.subtitle(context),
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _sendTestNotification(context, ref),
+                ),
+              ],
             ),
-            const Divider(),
-            const _SectionHeader('外观'),
-            const _ThemeTile(),
-            const _FeedbackTile(
-              icon: Icons.music_note_outlined,
-              title: '音效',
-              settingKey: SettingsController.keySound,
-              loadValue: _loadSound,
-              applyValue: _applySound,
+            _SectionGroup(
+              header: const _SectionHeader('外观'),
+              children: [
+                const _ThemeTile(),
+                const _FeedbackTile(
+                  icon: Icons.music_note_outlined,
+                  title: '音效',
+                  settingKey: SettingsController.keySound,
+                  loadValue: _loadSound,
+                  applyValue: _applySound,
+                ),
+                const _FeedbackTile(
+                  icon: Icons.vibration,
+                  title: '震动',
+                  settingKey: SettingsController.keyHaptics,
+                  loadValue: _loadHaptics,
+                  applyValue: _applyHaptics,
+                ),
+              ],
             ),
-            const _FeedbackTile(
-              icon: Icons.vibration,
-              title: '震动',
-              settingKey: SettingsController.keyHaptics,
-              loadValue: _loadHaptics,
-              applyValue: _applyHaptics,
+            _SectionGroup(
+              header: const _SectionHeader('偏好设置'),
+              children: [
+                ListTile(
+                  leading: const _IconLeading(Icons.tune),
+                  title: const Text('偏好设置'),
+                  subtitle: Text(
+                    '默认清单 · 默认提醒 · 时区',
+                    style: AppTextStyles.subtitle(context),
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _push(context, const PreferencesPage()),
+                ),
+              ],
             ),
-            const Divider(),
-            const _SectionHeader('偏好设置'),
-            ListTile(
-              leading: const Icon(Icons.tune),
-              title: const Text('偏好设置'),
-              subtitle: Text(
-                '默认清单 · 默认提醒 · 时区',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _push(context, const PreferencesPage()),
-            ),
-            const Divider(),
-            const _SectionHeader('关于'),
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text('着落 v1.3.3+34'),
-              subtitle: const Text('事事有着落 · 本地数据'),
-              onTap: () => _showAbout(context),
+            _SectionGroup(
+              header: const _SectionHeader('关于'),
+              children: [
+                ListTile(
+                  leading: const _IconLeading(Icons.info_outline),
+                  title: const Text('着落 v1.3.3+34'),
+                  subtitle: const Text('事事有着落 · 本地数据'),
+                  onTap: () => _showAbout(context),
+                ),
+              ],
             ),
             const SizedBox(height: 24),
           ],
@@ -364,6 +393,47 @@ class ProfilePage extends ConsumerWidget {
   }
 }
 
+/// 我的页分组：标题 + 圆角容器包裹的列表项组
+class _SectionGroup extends StatelessWidget {
+  const _SectionGroup({required this.header, required this.children});
+
+  final Widget header;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        header,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: ClipRRect(
+            borderRadius: AppRadius.card,
+            child: Material(
+              color: scheme.surfaceContainerLow,
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  for (var i = 0; i < children.length; i++) ...[
+                    if (i > 0)
+                      Divider(
+                        indent: 56,
+                        color: scheme.outlineVariant.withValues(alpha: 0.5),
+                      ),
+                    children[i],
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader(this.title);
 
@@ -373,14 +443,45 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.bold,
-          color: Theme.of(context).colorScheme.primary,
-        ),
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 14,
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary,
+              borderRadius: AppRadius.pill,
+            ),
+          ),
+          Text(
+            title,
+            style: AppTextStyles.sectionHeader(context),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// 我的页列表图标：圆底容器 + outlined 图标（统一入口视觉）
+class _IconLeading extends StatelessWidget {
+  const _IconLeading(this.icon);
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final c = scheme.primary;
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Icon(icon, size: 20, color: c),
     );
   }
 }
@@ -488,7 +589,7 @@ class _NotificationPermissionTileState
             '应用未运行时也会按时提醒（系统闹钟服务触发）',
             style: TextStyle(
               fontSize: 12,
-              color: Colors.grey.shade600,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
           onTap: _check,
@@ -499,7 +600,9 @@ class _NotificationPermissionTileState
           leading: Icon(
             Icons.notifications_outlined,
             size: 20,
-            color: notif == false ? Colors.orange : Colors.grey.shade600,
+            color: notif == false
+                ? Colors.orange
+                : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
           title: const Text('通知权限', style: TextStyle(fontSize: 14)),
           trailing: _statusIcon(notif),
@@ -513,7 +616,9 @@ class _NotificationPermissionTileState
           leading: Icon(
             Icons.timer_outlined,
             size: 20,
-            color: exact == false ? Colors.orange : Colors.grey.shade600,
+            color: exact == false
+                ? Colors.orange
+                : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
           title: const Text('精确闹钟权限', style: TextStyle(fontSize: 14)),
           subtitle: const Text(
@@ -533,7 +638,9 @@ class _NotificationPermissionTileState
           leading: Icon(
             Icons.battery_saver_outlined,
             size: 20,
-            color: battery == false ? Colors.orange : Colors.grey.shade600,
+            color: battery == false
+                ? Colors.orange
+                : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
           title: const Text('电池优化豁免', style: TextStyle(fontSize: 14)),
           subtitle: const Text(
@@ -553,7 +660,7 @@ class _NotificationPermissionTileState
           leading: Icon(
             Icons.power_settings_new,
             size: 20,
-            color: Colors.grey.shade600,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
           title: const Text('自启动', style: TextStyle(fontSize: 14)),
           subtitle: const Text(
@@ -570,11 +677,11 @@ class _NotificationPermissionTileState
         // 提醒渠道设置：通知声音/悬浮通知/振动默认开启（渠道创建时已尽力断言）；
         // 部分 ROM 可能未生效，此处展示真实状态并一键跳转系统对应渠道设置页
         // 引导开启。锁屏显示按系统默认，不纳入引导范围。
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: Text(
             '提醒渠道',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
+            style: AppTextStyles.hint(context),
           ),
         ),
         if (_anyChannelNeedsAttention)
@@ -613,14 +720,18 @@ class _NotificationPermissionTileState
       leading: Icon(
         Icons.campaign_outlined,
         size: 20,
-        color: needsAttention ? Colors.orange : Colors.grey.shade600,
+        color: needsAttention
+            ? Colors.orange
+            : Theme.of(context).colorScheme.onSurfaceVariant,
       ),
       title: Text('$name渠道设置', style: const TextStyle(fontSize: 14)),
       subtitle: Text(
         _channelStatusText(status),
         style: TextStyle(
           fontSize: 11,
-          color: needsAttention ? Colors.orange.shade800 : Colors.grey.shade600,
+          color: needsAttention
+            ? Colors.orange.shade800
+            : Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       ),
       trailing: const Icon(Icons.chevron_right),
@@ -744,7 +855,7 @@ class _FeedbackTileState extends ConsumerState<_FeedbackTile> {
   }
 }
 
-/// 主题切换（跟随系统/亮/暗）
+/// 主题切换（跟随系统/亮/暗）+ 主题色色板选择
 class _ThemeTile extends ConsumerStatefulWidget {
   const _ThemeTile();
 
@@ -754,6 +865,7 @@ class _ThemeTile extends ConsumerStatefulWidget {
 
 class _ThemeTileState extends ConsumerState<_ThemeTile> {
   String _mode = 'system';
+  String _hex = '';
 
   @override
   void initState() {
@@ -763,28 +875,152 @@ class _ThemeTileState extends ConsumerState<_ThemeTile> {
 
   Future<void> _load() async {
     final v = await ref.read(settingsProvider).get('themeMode');
-    if (mounted) setState(() => _mode = v ?? 'system');
+    final c = await ref.read(settingsProvider).get('themeColor');
+    if (mounted) {
+      setState(() {
+        _mode = v ?? 'system';
+        _hex = c ?? '';
+      });
+    }
+  }
+
+  Color get _color => ThemePalette.fromHex(_hex);
+
+  void _openColorSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final e in ThemePalette.colors.entries)
+                _ColorDot(
+                  name: e.key,
+                  color: e.value,
+                  selected: e.key == '默认蓝' ? _hex.isEmpty : e.value == _color,
+                  onTap: () async {
+                    final hex =
+                        e.key == '默认蓝' ? '' : ThemePalette.toStore(e.value);
+                    setState(() => _hex = hex);
+                    await ref
+                        .read(settingsProvider)
+                        .set('themeColor', hex);
+                    ref.read(themeColorProvider.notifier).state = hex;
+                    if (c.mounted) Navigator.pop(c);
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      leading: const Icon(Icons.brightness_6_outlined),
-      title: const Text('主题模式'),
-      trailing: DropdownButton<String>(
-        value: _mode,
-        underline: const SizedBox.shrink(),
-        items: const [
-          DropdownMenuItem(value: 'system', child: Text('跟随系统')),
-          DropdownMenuItem(value: 'light', child: Text('亮色')),
-          DropdownMenuItem(value: 'dark', child: Text('暗色')),
-        ],
-        onChanged: (v) async {
-          if (v == null) return;
-          setState(() => _mode = v);
-          await ref.read(settingsProvider).set('themeMode', v);
-          ref.read(themeModeProvider.notifier).state = v;
-        },
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.brightness_6_outlined),
+          title: const Text('主题模式'),
+          trailing: DropdownButton<String>(
+            value: _mode,
+            underline: const SizedBox.shrink(),
+            items: const [
+              DropdownMenuItem(value: 'system', child: Text('跟随系统')),
+              DropdownMenuItem(value: 'light', child: Text('亮色')),
+              DropdownMenuItem(value: 'dark', child: Text('暗色')),
+            ],
+            onChanged: (v) async {
+              if (v == null) return;
+              setState(() => _mode = v);
+              await ref.read(settingsProvider).set('themeMode', v);
+              ref.read(themeModeProvider.notifier).state = v;
+            },
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.palette_outlined),
+          title: const Text('主题色'),
+          subtitle: const Text('选择一个专属主题色'),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: _color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: scheme.outlineVariant,
+                    width: 1,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
+          onTap: _openColorSheet,
+        ),
+      ],
+    );
+  }
+}
+
+/// 主题色色卡圆点（底部弹层内）
+class _ColorDot extends StatelessWidget {
+  const _ColorDot({
+    required this.name,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String name;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: name,
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: selected ? scheme.primary : scheme.outlineVariant,
+              width: selected ? 3 : 1,
+            ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.45),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
+          ),
+          child: selected
+              ? Icon(Icons.check, color: TaskColors.textOn(color))
+              : null,
+        ),
       ),
     );
   }

@@ -162,6 +162,13 @@ class AppTheme {
       ),
       chipTheme: ChipThemeData(
         shape: RoundedRectangleBorder(borderRadius: AppRadius.tile),
+        // 未选中背景抬升一档：M3 默认 surfaceContainerLow 与页面 surface 背景
+        // 色差极小（如番茄钟 15/25/45 分钟 chips 几乎不可见），
+        // 改用 surfaceContainerHigh 拉开对比
+        backgroundColor: s.surfaceContainerHigh,
+        disabledColor: s.surfaceContainerHighest,
+        // 选中态用 secondaryContainer（M3 默认语义），选中明显可辨
+        selectedColor: s.secondaryContainer,
         side: BorderSide(color: s.outlineVariant),
         labelStyle: TextStyle(fontSize: AppTextSizes.bodySm),
       ),

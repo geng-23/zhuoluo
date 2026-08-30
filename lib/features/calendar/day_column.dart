@@ -1604,29 +1604,25 @@ class TaskBlock extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          t.title,
-                          maxLines: allDay
-                              ? 2
-                              : _blockLineCount(ref.read(pixelPerHourProvider)),
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                            decoration: done
-                                ? TextDecoration.lineThrough
-                                : null,
-                            color: textColor,
+                          // 标题按块高自适应换行（10px 字约 14dp 行高）
+                          Text(
+                            t.title,
+                            maxLines: allDay
+                                ? 2
+                                : _blockLineCount(ref.read(pixelPerHourProvider)),
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                              decoration: done
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              color: textColor,
+                            ),
                           ),
-                        ),
-                        // 谷歌日历风格：时间轴任务块显示起止时刻
-                        // （标题下方小字，块高足够时）；置顶区跨天任务始终显示
-                        if (!allDay && t.planStart != null)
-                          if (showTime ||
-                              _blockLineCount(
-                                ref.read(pixelPerHourProvider),
-                              ) >
-                                  1)
+                          // 仅置顶区跨天定时任务显示起止时刻小字
+                          // （时间轴内定时任务用户要求不显示时间，标题占满全块）
+                          if (showTime && t.planStart != null)
                             Text(
                               // 跨天任务：起止两端都带日期（"8月10日 22:00 到
                               // 8月11日 06:00"），避免只显示时分产生跨天歧义
@@ -1653,6 +1649,7 @@ class TaskBlock extends ConsumerWidget {
   }
 
   /// 按块高计算可显示的文字行数（10px 字约 14dp 行高）
+  /// 上限 4：标题尽量显示完全（用户要求，超出显示省略号）
   int _blockLineCount(double pp) {
     final ps = item.task.planStart;
     final pe = item.task.planEnd;
@@ -1662,7 +1659,7 @@ class TaskBlock extends ConsumerWidget {
         : pe.difference(ps).inMinutes.clamp(1, 1440);
     final heightDp = durMinutes / 60 * pp;
     final lines = (heightDp / 14).floor();
-    return lines.clamp(1, 3);
+    return lines.clamp(1, 4);
   }
 }
 

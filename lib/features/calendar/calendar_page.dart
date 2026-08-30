@@ -826,22 +826,31 @@ class _MonthTaskLine extends StatelessWidget {
         color: color,
         borderRadius: BorderRadius.circular(radius),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            t.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w500,
-              color: textColor,
-              decoration: done ? TextDecoration.lineThrough : null,
+      // LayoutBuilder：按格子均分高度尽量多行显示标题
+      // （月视图格子小，通常 1-2 行，长标题不再过早截断）
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final h = constraints.maxHeight.isFinite
+              ? constraints.maxHeight
+              : 28.0;
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                t.title,
+                maxLines: (h / 14).floor().clamp(1, 2),
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: textColor,
+                  decoration: done ? TextDecoration.lineThrough : null,
+                ),
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }

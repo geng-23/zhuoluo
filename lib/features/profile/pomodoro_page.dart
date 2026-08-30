@@ -151,6 +151,16 @@ class _DurationChips extends ConsumerWidget {
               label: Text('$m 分'),
               selected: minutes == m,
               onSelected: canEdit ? (v) => controller.setMinutes(m) : null,
+              // 显式 label 颜色：chip.dart 中 labelStyle.merge 为继承语义，
+              // 全局 chipTheme.labelStyle 只定 fontSize 无 color 时
+              // 状态化颜色（onSurfaceVariant/onSecondaryContainer）失效、
+              // 文字继承外层 DefaultTextStyle（暗色白/亮色浅——亮色下
+              // 浅橙背景灰底配白字对比异常）。显式 onSurfaceVariant：
+              // 亮色深灰/暗色浅灰，随主题自适应
+              labelStyle: TextStyle(
+                fontSize: AppTextSizes.bodySm,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
       ],

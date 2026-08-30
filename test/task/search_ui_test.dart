@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,11 +31,15 @@ void main() {
       await db.insertTask(TasksCompanion.insert(
         listId: list.id,
         title: '交报告',
+        planStart: Value(now),
+        planEnd: Value(now.add(const Duration(hours: 1))),
         createdAt: now,
       ));
       await db.insertTask(TasksCompanion.insert(
         listId: list.id,
         title: '买牛奶',
+        planStart: Value(now),
+        planEnd: Value(now.add(const Duration(hours: 1))),
         createdAt: now,
       ));
 
@@ -72,7 +77,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('搜索标题或备注'), findsNothing);
       expect(find.text('买牛奶'), findsOneWidget,
-          reason: '退出搜索回到全部视图');
+          reason: '退出搜索回到未来 7 天视图');
     });
 
     testWidgets('搜索结果为空时显示关键词与清除按钮', (tester) async {

@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -48,10 +49,14 @@ void main() {
   testWidgets('完成任务后 Snackbar 应在 5 秒内自动消失', (tester) async {
     await db.ensureDefaultList();
     final def = await db.getDefaultList();
+    // 默认视图为"未来 7 天"：任务需带今天计划时段才会显示在列表中
+    final start = DateTime.now();
     await db.insertTask(TasksCompanion.insert(
       listId: def.id,
       title: '测试任务',
-      createdAt: DateTime.now(),
+      planStart: Value(start),
+      planEnd: Value(start.add(const Duration(hours: 1))),
+      createdAt: start,
     ));
 
     final container = ProviderContainer(
@@ -101,10 +106,14 @@ void main() {
   testWidgets('完成动作立即执行（5.6：不再等退出动画）', (tester) async {
     await db.ensureDefaultList();
     final def = await db.getDefaultList();
+    // 默认视图为"未来 7 天"：任务需带今天计划时段才会显示在列表中
+    final start = DateTime.now();
     final taskId = await db.insertTask(TasksCompanion.insert(
       listId: def.id,
       title: '动画任务',
-      createdAt: DateTime.now(),
+      planStart: Value(start),
+      planEnd: Value(start.add(const Duration(hours: 1))),
+      createdAt: start,
     ));
 
     final container = ProviderContainer(

@@ -35,7 +35,7 @@ class TasksState {
   const TasksState({
     this.lists = const [],
     this.currentListId,
-    this.smartView = 'all',
+    this.smartView = 'week7',
     this.tasks = const [],
     this.searchQuery = '',
     this.sortMode = 'time',
@@ -150,13 +150,15 @@ class TasksController extends StateNotifier<TasksState> {
     // 辅助状态加载是异步的，每个 await 之后都要再检查序号——
     // 否则旧请求在辅助加载期间被新请求覆盖后，仍会用它自己的
     // 结果覆盖新状态（竞态仍存在）
-    if (seq != _reloadSeq) return;
+    // mounted 检查：数据版本触发重载时容器可能已关闭，禁止向
+    // 已 dispose 的控制器写 state（否则 state_notifier 断言崩溃）
+    if (!mounted || seq != _reloadSeq) return;
     final instanceDone = await _loadInstanceDone(tasks);
-    if (seq != _reloadSeq) return;
+    if (!mounted || seq != _reloadSeq) return;
     final nextInstance = await _loadNextInstances(tasks);
-    if (seq != _reloadSeq) return;
+    if (!mounted || seq != _reloadSeq) return;
     final todayHas = await _loadTodayHas(tasks);
-    if (seq != _reloadSeq) return;
+    if (!mounted || seq != _reloadSeq) return;
     state = state.copyWith(
       tasks: _sort(tasks),
       loading: false,
@@ -382,7 +384,7 @@ class TasksController extends StateNotifier<TasksState> {
   void clearSearch() {
     state = state.copyWith(searchQuery: '');
     state = state.copyWith(
-      smartView: 'all',
+      smartView: 'week7',
       currentListId: TasksState._clearCurrentListId,
     );
     _reloadTasks();

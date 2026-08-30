@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -38,9 +40,6 @@ class _TaskPageState extends ConsumerState<TaskPage> {
   /// 搜索模式（AppBar 内嵌搜索框）
   bool _searchMode = false;
   final _searchController = TextEditingController();
-  /// 列表底部 FAB 避让高度：约两个任务条高度（任务条约 54-70px），
-  /// 保证任务数量超一屏时最后一个任务可滚动到右下角"添加"按钮上方完整可见。
-  static const double _listBottomClearance = 120;
 
   @override
   void initState() {
@@ -451,10 +450,14 @@ class _TaskPageState extends ConsumerState<TaskPage> {
             },
             child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
-              // 底部预留 FAB 避让空白，防止右下角"添加"按钮遮挡最后一项任务
+              // 底部留白 = 屏高一半：最后一项可滚动到屏幕中央，方便在手势
+              // 区中点按；下限 120 保证右下角"添加" FAB 不遮挡最后一项
               padding: EdgeInsets.only(
                 top: 4,
-                bottom: _listBottomClearance,
+                bottom: math.max(
+                  120.0,
+                  MediaQuery.sizeOf(context).height * 0.5,
+                ),
               ),
               itemCount: visible.length,
               // 任务 id → index 映射：完成/删除/插入导致条目位移时按 key

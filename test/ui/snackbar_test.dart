@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,10 +22,14 @@ void main() {
   Future<void> pumpApp(WidgetTester tester, {required String title}) async {
     await db.ensureDefaultList();
     final def = await db.getDefaultList();
+    // 默认视图为"未来 7 天"：任务需带今天计划时段才会显示在列表中
+    final start = DateTime.now();
     await db.insertTask(TasksCompanion.insert(
       listId: def.id,
       title: title,
-      createdAt: DateTime.now(),
+      planStart: Value(start),
+      planEnd: Value(start.add(const Duration(hours: 1))),
+      createdAt: start,
     ));
     final container = ProviderContainer(
       overrides: [dbProvider.overrideWithValue(db)],

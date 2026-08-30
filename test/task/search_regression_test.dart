@@ -123,17 +123,17 @@ void main() {
     );
   });
 
-  test('clearSearch 回到"全部"视图', () async {
+  test('clearSearch 回到"未来 7 天"视图', () async {
     final container = await makeContainer();
     final notifier = container.read(tasksControllerProvider.notifier);
-    await insertTask(title: '测试任务');
+    await insertTask(title: '测试任务', planStart: today);
 
     notifier.search('测试');
     await drain();
     notifier.clearSearch();
     await drain();
     expect(container.read(tasksControllerProvider).searchQuery, isEmpty);
-    expect(container.read(tasksControllerProvider).smartView, 'all');
+    expect(container.read(tasksControllerProvider).smartView, 'week7');
     expect(container.read(tasksControllerProvider).tasks, hasLength(1));
   });
 

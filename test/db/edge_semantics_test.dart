@@ -218,6 +218,9 @@ void main() {
       final container = makeContainer();
       await settle(container);
       final notifier = container.read(tasksControllerProvider.notifier);
+      // 排序语义针对"全部"视图：无时间任务不在默认"未来 7 天"视图显示
+      notifier.selectSmartView('all');
+      await drain();
       // 先添加晚时间任务，再添加早时间任务：排序应无视添加顺序
       await notifier.addTask(
         title: '晚任务',
@@ -243,6 +246,9 @@ void main() {
       final container = makeContainer();
       await settle(container);
       final notifier = container.read(tasksControllerProvider.notifier);
+      // 切到"全部"视图：排序语义与"未来 7 天"默认视图过滤互不干扰
+      notifier.selectSmartView('all');
+      await drain();
       final a = await notifier.addTask(
         title: 'A',
         planStart: AppClock.at(today.year, today.month, today.day, 10, 0),

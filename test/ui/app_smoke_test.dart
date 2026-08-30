@@ -56,8 +56,8 @@ void main() {
     expect(find.text('四象限'), findsOneWidget);
     expect(find.text('我的'), findsOneWidget);
 
-    // 默认任务页显示"全部"
-    expect(find.text('全部'), findsWidgets);
+    // 默认任务页显示"未来 7 天"
+    expect(find.text('未来 7 天'), findsWidgets);
 
     // 切到日历（E12：功能在侧边栏，主区默认周视图）
     await tester.tap(find.text('日历'));

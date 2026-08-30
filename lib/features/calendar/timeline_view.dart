@@ -385,16 +385,29 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                       : Theme.of(context).colorScheme.onSurfaceVariant,
                                 ),
                               ),
-                              Text(
-                                '${d.day}',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: DateUtilsEx.sameDay(d, today)
-                                      ? FontWeight.bold
-                                      : null,
+                              // 今天彩底圆（谷歌日历风格）：与月视图 today 同步，
+                              // 此前仅有文字高亮
+                              Container(
+                                width: 28,
+                                height: 28,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
                                   color: DateUtilsEx.sameDay(d, today)
                                       ? Theme.of(context).colorScheme.primary
                                       : null,
+                                ),
+                                child: Text(
+                                  '${d.day}',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: DateUtilsEx.sameDay(d, today)
+                                        ? FontWeight.bold
+                                        : null,
+                                    color: DateUtilsEx.sameDay(d, today)
+                                        ? Theme.of(context).colorScheme.onPrimary
+                                        : null,
+                                  ),
                                 ),
                               ),
                             ] else
@@ -526,7 +539,7 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                       child: Stack(
                                         children: [
                                           // 时间网格线（暗色适配）
-                                          for (var h = 0; h <= totalHours; h++)
+                                          for (var h = 0; h <= totalHours; h++) ...[
                                             Positioned(
                                               top: h * pp - 0.5,
                                               left: 0,
@@ -539,6 +552,28 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                                     .withValues(alpha: 0.5),
                                               ),
                                             ),
+                                            // 30 分钟虚刻线（谷歌日历风格）：
+                                            // 位于每个整点下方半格，更淡且分段虚线
+                                            if (h < totalHours)
+                                              Positioned(
+                                                top: h * pp + pp * 0.5 - 0.5,
+                                                left: 0,
+                                                right: 0,
+                                                child: CustomPaint(
+                                                  size: const Size(
+                                                    double.infinity,
+                                                    1,
+                                                  ),
+                                                  painter: _HalfHourLinePainter(
+                                                    color: Theme.of(
+                                                      context,
+                                                    ).colorScheme
+                                                        .outlineVariant
+                                                        .withValues(alpha: 0.3),
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
                                           // 日期列 + 任务块
                                           Row(
                                             crossAxisAlignment:
@@ -1229,4 +1264,28 @@ class _ImmediateScaleRecognizer extends ScaleGestureRecognizer {
       resolve(GestureDisposition.accepted);
     }
   }
+}
+
+/// 30 分钟虚刻线绘制：等距短划线，淡色不干扰主网格
+class _HalfHourLinePainter extends CustomPainter {
+  _HalfHourLinePainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    const dash = 4.0;
+    const gap = 3.0;
+    var x = 0.0;
+    while (x < size.width) {
+      canvas.drawLine(Offset(x, 0), Offset(x + dash, 0), paint);
+      x += dash + gap;
+    }
+  }
+
+  @override
+  bool shouldRepaint(_HalfHourLinePainter old) => old.color != color;
 }

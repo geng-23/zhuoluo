@@ -341,6 +341,11 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       drawer: _TaskDrawer(
         onMultiSelectChange: (v) => setState(() => _multiSelect = v),
       ),
+      // 禁用 Scaffold 自带的边缘拖拽（默认 20px 左缘区）：任务页已有全局
+      // GestureDetector 右滑开抽屉（_navDragDx），且横屏下左缘约 100px 为
+      // 系统返回手势区，Scaffold 默认边缘拖拽会与系统手势竞争导致
+      // "左滑想开抽屉却退出 App"（与日历页 drawerEdgeDragWidth: 0 对齐）
+      drawerEdgeDragWidth: 0,
       // 空白处左右滑导航：从左向右滑打开抽屉、从右向左滑切日历（翻页式：下一个 tab）
       // 5.5 手势优先级：任务卡片上的水平滑动由 Dismissible 赢得（完成/更多操作），
       // 空白/列表间隙处由本 GestureDetector 接管（切 tab/开抽屉），区域天然隔离。
@@ -1524,100 +1529,111 @@ class _TaskDrawer extends ConsumerWidget {
       child: SafeArea(
         child: Column(
           children: [
-            ListTile(
-              leading: const Icon(Icons.home),
-              title: Text(
-                '全部',
-                style: TextStyle(
-                  fontWeight: state.smartView == 'all' ? FontWeight.bold : null,
-                ),
-              ),
-              selected: state.smartView == 'all',
-              onTap: () => selectAndClose(() => notifier.selectSmartView('all')),
-            ),
-            ListTile(
-              leading: const Icon(Icons.today),
-              title: Text(
-                '今天',
-                style: TextStyle(
-                  fontWeight: state.smartView == 'today'
-                      ? FontWeight.bold
-                      : null,
-                ),
-              ),
-              selected: state.smartView == 'today',
-              onTap: () => selectAndClose(
-                () => notifier.selectSmartView('today'),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.date_range),
-              title: Text(
-                '未来 7 天',
-                style: TextStyle(
-                  fontWeight: state.smartView == 'week7'
-                      ? FontWeight.bold
-                      : null,
-                ),
-              ),
-              selected: state.smartView == 'week7',
-              onTap: () => selectAndClose(
-                () => notifier.selectSmartView('week7'),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.check_circle_outline),
-              title: Text(
-                '已完成',
-                style: TextStyle(
-                  fontWeight: state.smartView == 'done'
-                      ? FontWeight.bold
-                      : null,
-                ),
-              ),
-              selected: state.smartView == 'done',
-              onTap: () => selectAndClose(
-                () => notifier.selectSmartView('done'),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline),
-              title: const Text('回收站'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const TrashPage()),
-                );
-              },
-            ),
-            // 搜索入口在右上角（AppBar 图标），侧边栏不再重复
-            const Divider(),
-            Expanded(
-              child: ListView(
-                children: [
-                  // 收件箱（默认清单）与其他清单一起显示，sortOrder=0 排最前
-                  for (final l in state.lists)
+            // 横屏/小屏：抽屉内容超出视口溢出（BOTTOM OVERFLOWED 100px），
+            // 智能视图 + 清单区改为可滚动（Flexible + SingleChildScrollView），
+            // 新建清单固定在底部
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
                     ListTile(
-                      dense: true,
-                      leading: Icon(
-                        Icons.circle,
-                        color: colorFromHex(l.color),
-                        size: 18,
-                      ),
+                      leading: const Icon(Icons.home),
                       title: Text(
-                        l.name,
+                        '全部',
                         style: TextStyle(
-                          fontWeight: state.currentListId == l.id
+                          fontWeight: state.smartView == 'all'
                               ? FontWeight.bold
                               : null,
                         ),
                       ),
-                      selected: state.currentListId == l.id,
-                      onTap: () => selectAndClose(() => notifier.selectList(l.id)),
-                      onLongPress: () =>
-                          _showListActions(context, ref, l, notifier),
+                      selected: state.smartView == 'all',
+                      onTap: () =>
+                          selectAndClose(() => notifier.selectSmartView('all')),
                     ),
-                ],
+                    ListTile(
+                      leading: const Icon(Icons.today),
+                      title: Text(
+                        '今天',
+                        style: TextStyle(
+                          fontWeight: state.smartView == 'today'
+                              ? FontWeight.bold
+                              : null,
+                        ),
+                      ),
+                      selected: state.smartView == 'today',
+                      onTap: () => selectAndClose(
+                        () => notifier.selectSmartView('today'),
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.date_range),
+                      title: Text(
+                        '未来 7 天',
+                        style: TextStyle(
+                          fontWeight: state.smartView == 'week7'
+                              ? FontWeight.bold
+                              : null,
+                        ),
+                      ),
+                      selected: state.smartView == 'week7',
+                      onTap: () => selectAndClose(
+                        () => notifier.selectSmartView('week7'),
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.check_circle_outline),
+                      title: Text(
+                        '已完成',
+                        style: TextStyle(
+                          fontWeight: state.smartView == 'done'
+                              ? FontWeight.bold
+                              : null,
+                        ),
+                      ),
+                      selected: state.smartView == 'done',
+                      onTap: () => selectAndClose(
+                        () => notifier.selectSmartView('done'),
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.delete_outline),
+                      title: const Text('回收站'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const TrashPage(),
+                          ),
+                        );
+                      },
+                    ),
+                    // 搜索入口在右上角（AppBar 图标），侧边栏不再重复
+                    const Divider(),
+                    // 收件箱（默认清单）与其他清单一起显示，sortOrder=0 排最前
+                    for (final l in state.lists)
+                      ListTile(
+                        dense: true,
+                        leading: Icon(
+                          Icons.circle,
+                          color: colorFromHex(l.color),
+                          size: 18,
+                        ),
+                        title: Text(
+                          l.name,
+                          style: TextStyle(
+                            fontWeight: state.currentListId == l.id
+                                ? FontWeight.bold
+                                : null,
+                          ),
+                        ),
+                        selected: state.currentListId == l.id,
+                        onTap: () =>
+                            selectAndClose(() => notifier.selectList(l.id)),
+                        onLongPress: () =>
+                            _showListActions(context, ref, l, notifier),
+                      ),
+                  ],
+                ),
               ),
             ),
             ListTile(

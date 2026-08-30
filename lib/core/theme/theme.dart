@@ -260,20 +260,14 @@ class ThemePalette {
   ThemePalette._();
 
   /// 名称（UI 展示用）→ 种子色；首项为默认蓝
+  /// 6 色精选：冷（蓝/紫/青碧）暖（红/橙/绿）各半，色相差异明显无相近色
   static const colors = <String, Color>{
     '默认蓝': Color(0xFF4F8EF7),
     '紫罗兰': Color(0xFF8E4F8C),
-    '玫红': Color(0xFFC2185B),
     '珊瑚红': Color(0xFFE53935),
     '活力橙': Color(0xFFFB8C00),
     '森林绿': Color(0xFF2E7D32),
     '青碧': Color(0xFF00897B),
-    '湖畔蓝': Color(0xFF0277BD),
-    '藏青': Color(0xFF303F9F),
-    '烟灰': Color(0xFF616161),
-    '暖棕': Color(0xFF6D4C41),
-    '橄榄绿': Color(0xFF827717),
-    '石板': Color(0xFF546E7A),
   };
 
   /// 按 hex 字符串取色；未知/空回退默认蓝

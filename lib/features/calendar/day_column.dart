@@ -1619,20 +1619,27 @@ class TaskBlock extends ConsumerWidget {
                             color: textColor,
                           ),
                         ),
-                        if (showTime && t.planStart != null)
-                          Text(
-                            // 跨天任务：起止两端都带日期（"8月10日 22:00 到
-                            // 8月11日 06:00"），避免只显示时分产生跨天歧义
-                            DateUtilsEx.timeRangeText(
-                              t.planStart!,
-                              t.planEnd ??
-                                  t.planStart!.add(const Duration(hours: 1)),
+                        // 谷歌日历风格：时间轴任务块显示起止时刻
+                        // （标题下方小字，块高足够时）；置顶区跨天任务始终显示
+                        if (!allDay && t.planStart != null)
+                          if (showTime ||
+                              _blockLineCount(
+                                ref.read(pixelPerHourProvider),
+                              ) >
+                                  1)
+                            Text(
+                              // 跨天任务：起止两端都带日期（"8月10日 22:00 到
+                              // 8月11日 06:00"），避免只显示时分产生跨天歧义
+                              DateUtilsEx.timeRangeText(
+                                t.planStart!,
+                                t.planEnd ??
+                                    t.planStart!.add(const Duration(hours: 1)),
+                              ),
+                              style: TextStyle(
+                                fontSize: 8,
+                                color: textColor.withValues(alpha: 0.85),
+                              ),
                             ),
-                            style: TextStyle(
-                              fontSize: 8,
-                              color: textColor.withValues(alpha: 0.85),
-                            ),
-                          ),
                       ],
                     ),
                   ),

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zhuoluo/core/theme/task_colors.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
@@ -680,18 +681,24 @@ class MonthView extends ConsumerWidget {
                 itemCount: totalCells,
                 itemBuilder: (context, index) {
                   final dayNum = index - leadingBlanks + 1;
-                  if (dayNum < 1 || dayNum > daysInMonth) {
-                    return const SizedBox.shrink();
-                  }
-                  final date = AppClock.at(
-                    displayedMonth.year,
-                    displayedMonth.month,
-                    dayNum,
-                  );
+                  // 相邻月灰化（谷歌日历风格）：前后补位显示上月/下月的日期数字，
+                  // 点击跳转到对应月；不再是空白占位
+                  final isCurrentMonth = dayNum >= 1 && dayNum <= daysInMonth;
+                  final date = isCurrentMonth
+                      ? AppClock.at(
+                          displayedMonth.year,
+                          displayedMonth.month,
+                          dayNum,
+                        )
+                      : AppClock.addCalendarDays(
+                          AppClock.at(displayedMonth.year, displayedMonth.month, 1),
+                          dayNum - 1,
+                        );
                   final isToday = DateUtilsEx.sameDay(date, AppClock.now());
                   final isSelected = DateUtilsEx.sameDay(date, selectedDay);
-                  final dayItems = byDay[date.year * 10000 + date.month * 100 + date.day] ??
-                      const [];
+                  final dayKey =
+                      date.year * 10000 + date.month * 100 + date.day;
+                  final dayItems = byDay[dayKey] ?? const [];
                   return InkWell(
                     onTap: () => onDayTap(date),
                     onLongPress: () => onDayLongPress(date),
@@ -722,12 +729,16 @@ class MonthView extends ConsumerWidget {
                             ),
                             alignment: Alignment.center,
                             child: Text(
-                              '$dayNum',
+                              '${date.day}',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: isToday
                                     ? Theme.of(context).colorScheme.onPrimary
-                                    : null,
+                                    : isCurrentMonth
+                                    ? null
+                                    : Theme.of(
+                                        context,
+                                      ).colorScheme.outlineVariant,
                                 fontWeight: isToday ? FontWeight.bold : null,
                               ),
                             ),
@@ -745,13 +756,33 @@ class MonthView extends ConsumerWidget {
                                     ),
                                   ),
                                 if (dayItems.length > _monthMaxItems)
-                                  Text(
-                                    '+${dayItems.length - _monthMaxItems}',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2),
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 5,
+                                          vertical: 1,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.primaryContainer
+                                              .withValues(alpha: 0.6),
+                                          borderRadius: AppRadius.pill,
+                                        ),
+                                        child: Text(
+                                          '+${dayItems.length - _monthMaxItems}',
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.w700,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onPrimaryContainer,
+                                          ),
+                                        ),
+                                      ),
                                     ),
                                   ),
                               ],
@@ -781,45 +812,36 @@ class _MonthTaskLine extends StatelessWidget {
     final t = item.task;
     final done = item.completed;
     final listColor = colorFromHex(item.listColor);
-    final scheme = Theme.of(context).colorScheme; final color = done ? scheme.outline : listColor;
+    final scheme = Theme.of(context).colorScheme;
+    // 谷歌日历风格：实心色块（任务色）+ 自动黑白文字；
+    // 完成态用主题容器灰并划线降权
+    final color = done ? scheme.surfaceContainerHighest : listColor;
+    final textColor = done
+        ? scheme.onSurfaceVariant
+        : TaskColors.textOn(listColor);
     const radius = 6.0;
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: done ? Theme.of(context).colorScheme.surfaceContainerHighest : listColor.withValues(alpha: 0.15),
+        color: color,
         borderRadius: BorderRadius.circular(radius),
       ),
-      child: Stack(
-        children: [
-          // 清单色线：紧贴块左边缘，与圆角直边同高
-          Positioned(
-            left: 0,
-            top: radius,
-            bottom: radius,
-            child: Container(width: 1, color: color),
-          ),
-          Positioned.fill(
-            child: Padding(
-              padding: const EdgeInsets.only(left: 4, right: 2),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      t.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: done ? Theme.of(context).colorScheme.onSurfaceVariant : null,
-                        decoration: done ? TextDecoration.lineThrough : null,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            t.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+              color: textColor,
+              decoration: done ? TextDecoration.lineThrough : null,
             ),
           ),
-        ],
+        ),
       ),
     );
   }

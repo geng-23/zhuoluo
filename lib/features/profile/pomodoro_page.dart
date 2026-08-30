@@ -61,19 +61,29 @@ class _PomodoroPageState extends ConsumerState<PomodoroPage> {
       appBar: AppBar(title: const Text('番茄专注')),
       // 拆分为独立小块按需 watch：每秒 tick 只重建倒计时文本本身，
       // 不再整页（含按钮/关联卡）每秒重建（此前 watch 整个状态对象）
-      body: const Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _DurationLabel(),
-          SizedBox(height: 16),
-          _CountdownText(),
-          SizedBox(height: 24),
-          _DurationChips(),
-          SizedBox(height: 24),
-          _ControlButtons(),
-          SizedBox(height: 24),
-          _LinkedTaskCard(),
-        ],
+      // LayoutBuilder + SingleChildScrollView：横屏/小屏内容（72 号倒计时
+      // + chips + 按钮组 + 关联卡 ≈330dp）超出视口时改为可滚动，
+      // 不再溢出；正常屏幕 minHeight=视口，Column 居中视觉不变
+      body: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: const Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _DurationLabel(),
+                SizedBox(height: 16),
+                _CountdownText(),
+                SizedBox(height: 24),
+                _DurationChips(),
+                SizedBox(height: 24),
+                _ControlButtons(),
+                SizedBox(height: 24),
+                _LinkedTaskCard(),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -106,7 +116,12 @@ class _CountdownText extends ConsumerWidget {
     final ss = (status.remainingSeconds % 60).toString().padLeft(2, '0');
     return Text(
       '$mm:$ss',
-      style: const TextStyle(fontSize: 72, fontWeight: FontWeight.bold),
+      style: TextStyle(
+        fontSize: 72,
+        fontWeight: FontWeight.bold,
+        // 亮色黑字 / 暗色白字，随主题联动（此前未显式指定颜色）
+        color: Theme.of(context).colorScheme.onSurface,
+      ),
     );
   }
 }

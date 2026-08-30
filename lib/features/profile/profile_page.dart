@@ -86,12 +86,12 @@ class ProfilePage extends ConsumerWidget {
                   onTap: () => _export(context, ref),
                 ),
                 ListTile(
-                    leading: Icon(
+                    leading: _IconLeading(
                       backupFail.isEmpty
                           ? Icons.folder_open
                           : Icons.error_outline,
                       color: backupFail.isEmpty
-                          ? Theme.of(context).colorScheme.onSurfaceVariant
+                          ? Theme.of(context).colorScheme.primary
                           : Colors.orange,
                     ),
                     title: const Text('备份管理'),
@@ -120,12 +120,12 @@ class ProfilePage extends ConsumerWidget {
                   onTap: () => _import(context, ref),
                 ),
                 ListTile(
-                  leading: Icon(
+                  leading: _IconLeading(
                     webdavFail.isEmpty
                         ? Icons.cloud_outlined
                         : Icons.cloud_off,
                     color: webdavFail.isEmpty
-                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                        ? Theme.of(context).colorScheme.primary
                         : Colors.orange,
                   ),
                   title: const Text('WebDAV 云备份'),
@@ -465,23 +465,27 @@ class _SectionHeader extends StatelessWidget {
 }
 
 /// 我的页列表图标：圆底容器 + outlined 图标（统一入口视觉）
+/// [size] 默认 36（主列表行）；通知权限等 dense 行用 30
+/// [color] 默认 primary；异常态（失败/未开启）传橙色保持语义
 class _IconLeading extends StatelessWidget {
-  const _IconLeading(this.icon);
+  const _IconLeading(this.icon, {this.size = 36, this.color});
 
   final IconData icon;
+  final double size;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final c = scheme.primary;
+    final c = color ?? scheme.primary;
     return Container(
-      width: 36,
-      height: 36,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         color: c.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(size * 10 / 36),
       ),
-      child: Icon(icon, size: 20, color: c),
+      child: Icon(icon, size: size * 20 / 36, color: c),
     );
   }
 }
@@ -583,7 +587,7 @@ class _NotificationPermissionTileState
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ListTile(
-          leading: const Icon(Icons.alarm),
+          leading: const _IconLeading(Icons.alarm, size: 30),
           title: const Text('通知权限中心'),
           subtitle: Text(
             '应用未运行时也会按时提醒（系统闹钟服务触发）',
@@ -597,12 +601,12 @@ class _NotificationPermissionTileState
         // 通知权限（Android 13+）
         ListTile(
           dense: true,
-          leading: Icon(
+          leading: _IconLeading(
             Icons.notifications_outlined,
-            size: 20,
+            size: 30,
             color: notif == false
                 ? Colors.orange
-                : Theme.of(context).colorScheme.onSurfaceVariant,
+                : Theme.of(context).colorScheme.primary,
           ),
           title: const Text('通知权限', style: TextStyle(fontSize: 14)),
           trailing: _statusIcon(notif),
@@ -613,12 +617,12 @@ class _NotificationPermissionTileState
         // 精确闹钟（Android 12+ 默认拒绝）
         ListTile(
           dense: true,
-          leading: Icon(
+          leading: _IconLeading(
             Icons.timer_outlined,
-            size: 20,
+            size: 30,
             color: exact == false
                 ? Colors.orange
-                : Theme.of(context).colorScheme.onSurfaceVariant,
+                : Theme.of(context).colorScheme.primary,
           ),
           title: const Text('精确闹钟权限', style: TextStyle(fontSize: 14)),
           subtitle: const Text(
@@ -635,12 +639,12 @@ class _NotificationPermissionTileState
         // 电池优化豁免
         ListTile(
           dense: true,
-          leading: Icon(
+          leading: _IconLeading(
             Icons.battery_saver_outlined,
-            size: 20,
+            size: 30,
             color: battery == false
                 ? Colors.orange
-                : Theme.of(context).colorScheme.onSurfaceVariant,
+                : Theme.of(context).colorScheme.primary,
           ),
           title: const Text('电池优化豁免', style: TextStyle(fontSize: 14)),
           subtitle: const Text(
@@ -657,10 +661,10 @@ class _NotificationPermissionTileState
         // 自启动（HyperOS：进程被清理后系统才会恢复闹钟通知）
         ListTile(
           dense: true,
-          leading: Icon(
+          leading: _IconLeading(
             Icons.power_settings_new,
-            size: 20,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            size: 30,
+            color: Theme.of(context).colorScheme.primary,
           ),
           title: const Text('自启动', style: TextStyle(fontSize: 14)),
           subtitle: const Text(
@@ -717,12 +721,12 @@ class _NotificationPermissionTileState
     final needsAttention = status != null && status.exists && !status.allOn;
     return ListTile(
       dense: true,
-      leading: Icon(
+      leading: _IconLeading(
         Icons.campaign_outlined,
-        size: 20,
+        size: 30,
         color: needsAttention
             ? Colors.orange
-            : Theme.of(context).colorScheme.onSurfaceVariant,
+            : Theme.of(context).colorScheme.primary,
       ),
       title: Text('$name渠道设置', style: const TextStyle(fontSize: 14)),
       subtitle: Text(
@@ -839,7 +843,7 @@ class _FeedbackTileState extends ConsumerState<_FeedbackTile> {
   @override
   Widget build(BuildContext context) {
     return SwitchListTile(
-      secondary: Icon(widget.icon),
+      secondary: _IconLeading(widget.icon, size: 32),
       title: Text(widget.title),
       value: _on,
       onChanged: (v) async {
@@ -925,7 +929,7 @@ class _ThemeTileState extends ConsumerState<_ThemeTile> {
     return Column(
       children: [
         ListTile(
-          leading: const Icon(Icons.brightness_6_outlined),
+          leading: const _IconLeading(Icons.brightness_6_outlined),
           title: const Text('主题模式'),
           trailing: DropdownButton<String>(
             value: _mode,
@@ -944,7 +948,7 @@ class _ThemeTileState extends ConsumerState<_ThemeTile> {
           ),
         ),
         ListTile(
-          leading: const Icon(Icons.palette_outlined),
+          leading: const _IconLeading(Icons.palette_outlined),
           title: const Text('主题色'),
           subtitle: const Text('选择一个专属主题色'),
           trailing: Row(

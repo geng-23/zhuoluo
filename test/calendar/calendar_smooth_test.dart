@@ -1293,6 +1293,21 @@ void main() {
         rolling,
         reason: '松手后自动滚动应停止',
       );
+
+      // 选区应随滚动持续延伸（每 tick 按手指内容位置重算端点）：
+      // 松手弹出的快建区间结束时间应晚于最后 move 时刻（约 13:20）
+      final text = tester.widget<Text>(find.textContaining('计划时间')).data!;
+      final match =
+          RegExp(r'(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})').firstMatch(text);
+      expect(match, isNotNull, reason: '松手后应弹出区间快建（实际文案=$text）');
+      final endMins =
+          int.parse(match!.group(3)!) * 60 + int.parse(match.group(4)!);
+      expect(
+        endMins,
+        greaterThanOrEqualTo(16 * 60),
+        reason: '选区应跟随自动滚动延伸（结束时间=${match.group(3)!}:${match.group(4)!}，'
+            '滚动 250px≈234 分钟，应远晚于 13:20）',
+      );
     });
 
     testWidgets('长按选时拖到视口顶部：时间轴自动向上滚动', (tester) async {

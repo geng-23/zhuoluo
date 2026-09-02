@@ -243,6 +243,10 @@ class DayColumnState extends ConsumerState<DayColumn> {
   double? _selectionStartGlobalX;
   double? _selectionStartGlobalY;
 
+  /// 最后一次 move 的手指全局位置（自动滚动 tick 时据此重算选区端点，
+  /// 滚动无 move 事件期间选区仍与手指指向的内容位置保持一致）
+  Offset? _selectionLastGlobal;
+
   /// 选时选区共享 notifier（null 兜底：无共享状态时不渲染选区）
   static final ValueNotifier<SelectionRange?> _noopSel =
       ValueNotifier<SelectionRange?>(null);
@@ -315,7 +319,39 @@ class DayColumnState extends ConsumerState<DayColumn> {
         return;
       }
       scroll.jumpTo(target);
+      // 滚动期间无 move 事件：按手指当前内容位置重算选区端点，
+      // 选区持续跟随（向下滚下界延伸 / 向上滚反转为上界延伸）
+      _refreshSelectionRangeFromFinger();
     });
+  }
+
+  /// 自动滚动 tick 后重算选区端点：手指 global → 列内 y，锚点与吸附逻辑
+  /// 与移动时一致。换算用「视口顶 + 轴顶 padding - 滚动 offset」公式——
+  /// 不用 RenderBox.globalToLocal（jumpTo 后位置要下一帧 layout 才更新，
+  /// tick 内读到的总是旧位置，选区永远滞后一轮）
+  void _refreshSelectionRangeFromFinger() {
+    if (!_dragSelecting) return;
+    final g = _selectionLastGlobal;
+    if (g == null) return;
+    final scrollable = Scrollable.of(context);
+    final scrollBox = scrollable.context.findRenderObject() as RenderBox?;
+    if (scrollBox == null || !scrollBox.hasSize) return;
+    final viewportTop = scrollBox.localToGlobal(Offset.zero).dy;
+    final off =
+        widget.scrollController?.offset ??
+        widget.scrollOffsetShare?.value ??
+        0;
+    final columnTopGlobal = viewportTop + axisTopPadding - off;
+    final localY = g.dy - columnTopGlobal;
+    final (sy, ey) = _snappedYRange(_dragAnchorY ?? localY, localY);
+    _dragStartY = sy;
+    _dragCurrentY = ey;
+    widget.selectionRange?.value = SelectionRange(
+      start: sy,
+      end: ey,
+      active: _targetDay,
+      fingerGlobal: g,
+    );
   }
 
   void _stopAutoScroll() {
@@ -683,6 +719,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
               _selectionStartGlobalX = details.globalPosition.dx;
               _selectionStartGlobalY = details.globalPosition.dy;
             });
+            _selectionLastGlobal = details.globalPosition;
             // A13：选区/悬浮时间胶囊共享化（渲染由 selectionRange 驱动，
             // 翻页后新列据此恢复——此前胶囊为列局部状态随旧列滑走）
             widget.selectionRange?.value = SelectionRange(
@@ -709,6 +746,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
             );
             _dragStartY = sy;
             _dragCurrentY = ey;
+            _selectionLastGlobal = details.globalPosition;
             // 更新共享选区（跨页渲染：active = 目标日列，翻页后新列接管）
             widget.selectionRange?.value = SelectionRange(
               start: sy,
@@ -726,6 +764,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
             final start = _dragStartY ?? 0;
             final end = _dragCurrentY ?? start;
             widget.selectionRange?.value = null;
+            _selectionLastGlobal = null;
             setState(() {
               _dragSelecting = false;
               _dragAnchorY = null;

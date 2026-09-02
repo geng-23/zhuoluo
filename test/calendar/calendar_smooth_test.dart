@@ -1341,6 +1341,59 @@ void main() {
       await tester.pumpAndSettle();
     });
 
+    testWidgets('长按选时拖到右缘翻周：选区跟随新周渲染（不随旧列滑出）', (tester) async {
+      await db.ensureDefaultList();
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final before = container.read(calendarControllerProvider).selectedDay;
+
+      final gesture = await tester.startGesture(const Offset(400, 300));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      // 先纵向拖出选区（建立共享选区状态）
+      await gesture.moveTo(const Offset(400, 420));
+      await tester.pump();
+      // 再拖到右缘（85% 外）触发选时边缘翻周（水平意图 dx=360 > dy=120）
+      await gesture.moveTo(const Offset(760, 420));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350)); // 300ms arm → 翻周
+      await tester.pumpAndSettle();
+      expect(
+        container.read(calendarControllerProvider).selectedDay,
+        isNot(before),
+        reason: '右缘停留应翻到下一周',
+      );
+
+      // 选区 hint 文本（高亮内 + 胶囊同文本）应仍在**当前视口内**渲染——
+      // 修复前选区/胶囊为列局部状态，随滑出的旧列走（视口外）
+      final hintTexts = find.textContaining(RegExp(r'\d{1,2}:\d{2} - \d{1,2}:\d{2}'));
+      expect(hintTexts, findsWidgets, reason: '翻页后选区仍应渲染提示文本');
+      final screenW = tester.getSize(find.byType(CalendarPage)).width;
+      var inViewport = false;
+      for (final el in hintTexts.evaluate()) {
+        final render = el.renderObject! as RenderBox;
+        final rect = render.localToGlobal(Offset.zero);
+        if (rect.dx >= 0 && rect.dx + render.size.width <= screenW + 0.1) {
+          inViewport = true;
+          break;
+        }
+      }
+      expect(
+        inViewport,
+        isTrue,
+        reason: '选区应渲染在新周视口内（不应随旧列滑出）',
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('远距离跳转停在目标位置：周/日/月视图不落在中间页', (tester) async {
       await db.ensureDefaultList();
       final container = makeContainer();

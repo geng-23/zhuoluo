@@ -87,6 +87,7 @@ class TimeAxisView extends ConsumerStatefulWidget {
     this.dragViewportH,
     this.edgeTurnCtrl,
     this.onDragStartTracking,
+    this.selectionRange,
   });
 
   final int pageIndex;
@@ -133,6 +134,9 @@ class TimeAxisView extends ConsumerStatefulWidget {
 
   /// 拖动开始上报指针（WeekView/DayView 注册全局 route 用）
   final void Function(int taskId, int pointer)? onDragStartTracking;
+
+  /// 长按选时共享选区（跨页渲染，来自 WeekView/DayView）
+  final ValueNotifier<SelectionRange?>? selectionRange;
 
   @override
   ConsumerState<TimeAxisView> createState() => TimeAxisViewState();
@@ -617,6 +621,8 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                                         widget.edgeTurnCtrl,
                                                     onDragStartTracking: widget
                                                         .onDragStartTracking,
+                                                    selectionRange: widget
+                                                        .selectionRange,
                                                     // A13：列在视口内的左偏移（含分隔线）
                                                     viewportLeft:
                                                         i *

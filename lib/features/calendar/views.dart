@@ -71,6 +71,11 @@ class _WeekViewState extends ConsumerState<WeekView> {
   final ValueNotifier<DragGhostInfo?> dragGhostInfo =
       ValueNotifier<DragGhostInfo?>(null);
 
+  /// 长按选时共享选区（跨页渲染：边缘翻页后选区跟随目标日列——
+  /// 此前选区/胶囊为列局部状态，随滑出的旧列走，翻页后与手指不同步）
+  final ValueNotifier<SelectionRange?> selectionRange =
+      ValueNotifier<SelectionRange?>(null);
+
   /// 共享边缘翻页控制器（连续翻周链跨页保持）
   final EdgeTurnController _edgeTurnCtrl = EdgeTurnController();
 
@@ -226,6 +231,14 @@ class _WeekViewState extends ConsumerState<WeekView> {
     dragActiveDay.value = dx > 0
         ? AppClock.addCalendarDays(targetMonday, 6)
         : targetMonday;
+    // 选时选区跨页：翻页后挂载到新周同位列（与后续 move 的 _targetDay
+    // 一致），手指停住（无 move）时选区也在新页渲染
+    final sel = selectionRange.value;
+    if (sel != null) {
+      selectionRange.value = sel.copyWith(
+        active: AppClock.addCalendarDays(targetMonday, sel.active.weekday - 1),
+      );
+    }
   }
 
   // ---------- 全局指针事件驱动（跨页拖动） ----------
@@ -578,6 +591,7 @@ class _WeekViewState extends ConsumerState<WeekView> {
               edgeTurnCtrl: _edgeTurnCtrl,
               onDragStartTracking: (taskId, pointer) =>
                   _registerDragRoute(taskId, pointer),
+              selectionRange: selectionRange,
             ),
           );
         },
@@ -629,6 +643,10 @@ class _DayViewState extends ConsumerState<DayView> {
   /// 拖动任务显示信息（同 WeekView）
   final ValueNotifier<DragGhostInfo?> dragGhostInfo =
       ValueNotifier<DragGhostInfo?>(null);
+
+  /// 长按选时共享选区（跨页渲染：边缘翻页后选区跟随目标日列，同 WeekView）
+  final ValueNotifier<SelectionRange?> selectionRange =
+      ValueNotifier<SelectionRange?>(null);
 
   /// 共享边缘翻页控制器（连续翻日链跨页保持）
   final EdgeTurnController _edgeTurnCtrl = EdgeTurnController();
@@ -744,6 +762,11 @@ class _DayViewState extends ConsumerState<DayView> {
     );
     // 虚影跟随到新页（日视图单列即目标日）
     dragActiveDay.value = _dragDay.value;
+    // 选时选区跨页：翻页后挂载到新日列（手指停住时选区也在新页渲染）
+    final sel = selectionRange.value;
+    if (sel != null) {
+      selectionRange.value = sel.copyWith(active: _dragDay.value);
+    }
   }
 
   // ---------- 全局指针事件驱动（跨页拖动，同 WeekView） ----------
@@ -1086,6 +1109,7 @@ class _DayViewState extends ConsumerState<DayView> {
               edgeTurnCtrl: _edgeTurnCtrl,
               onDragStartTracking: (taskId, pointer) =>
                   _registerDragRoute(taskId, pointer),
+              selectionRange: selectionRange,
             ),
           );
         },

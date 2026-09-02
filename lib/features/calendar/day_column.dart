@@ -92,6 +92,40 @@ bool _taskIsCrossDay(Task t) {
   return !DateUtilsEx.sameDay(ps, pe);
 }
 
+/// 长按选时共享选区（WeekView/DayView 持有，跨页渲染）：
+/// 吸附后的列内 y 区间 + 选区挂载列 + 手指全局位置（胶囊水平定位）。
+/// 边缘翻页后旧列滑出视口，选区由目标日列据此渲染——此前选区/胶囊
+/// 是列局部状态，翻页后停留在滑走的旧列上，与手指不同步。
+class SelectionRange {
+  const SelectionRange({
+    required this.start,
+    required this.end,
+    required this.active,
+    this.fingerGlobal,
+  });
+
+  /// 选区上端（已吸附，列内 y）
+  final double start;
+
+  /// 选区下端（已吸附，列内 y）
+  final double end;
+
+  /// 选区当前挂载到的日期列（翻页后为新周/新日的目标列）
+  final DateTime active;
+
+  /// 手指全局位置（胶囊水平换算用，翻页后按渲染列 local 重算）
+  final Offset? fingerGlobal;
+
+  SelectionRange copyWith({DateTime? active, Offset? fingerGlobal}) {
+    return SelectionRange(
+      start: start,
+      end: end,
+      active: active ?? this.active,
+      fingerGlobal: fingerGlobal ?? this.fingerGlobal,
+    );
+  }
+}
+
 /// 单日列（E7：长按拖动选择时间区间创建任务）
 
 class DayColumn extends ConsumerStatefulWidget {
@@ -116,6 +150,7 @@ class DayColumn extends ConsumerStatefulWidget {
     this.scrollOffsetShare,
     this.edgeTurnCtrl,
     this.onDragStartTracking,
+    this.selectionRange,
   });
 
   final DateTime day;
@@ -173,6 +208,9 @@ class DayColumn extends ConsumerStatefulWidget {
   /// 拖动开始上报指针（WeekView 注册全局 pointerRouter route 用）
   final void Function(int taskId, int pointer)? onDragStartTracking;
 
+  /// 长按选时共享选区（跨页渲染：翻页后选区跟随目标日列）
+  final ValueNotifier<SelectionRange?>? selectionRange;
+
   @override
   ConsumerState<DayColumn> createState() => DayColumnState();
 }
@@ -205,9 +243,9 @@ class DayColumnState extends ConsumerState<DayColumn> {
   double? _selectionStartGlobalX;
   double? _selectionStartGlobalY;
 
-  /// 拖选胶囊位置（列内局部坐标；拖动任务路径的胶囊/虚影由共享状态
-  /// dragGlobalPos 驱动，见 Stack 渲染层）
-  final ValueNotifier<Offset?> _hintPos = ValueNotifier<Offset?>(null);
+  /// 选时选区共享 notifier（null 兜底：无共享状态时不渲染选区）
+  static final ValueNotifier<SelectionRange?> _noopSel =
+      ValueNotifier<SelectionRange?>(null);
 
   /// 选时目标日：
   /// - 未翻页（dragDay 与当前列同周/同日）→ 当前列 widget.day
@@ -381,7 +419,6 @@ class DayColumnState extends ConsumerState<DayColumn> {
   @override
   void dispose() {
     _stopAutoScroll();
-    _hintPos.dispose();
     // 选时路径（无全局 route 接管）：列被销毁（跨多周超 cacheExtent 被
     // evict）时取消共享连续翻页链 Timer（防 pending/幽灵翻页）。
     // 拖动任务路径的共享 timer 由全局 route 的 move/up 持续驱动与管理
@@ -646,10 +683,13 @@ class DayColumnState extends ConsumerState<DayColumn> {
               _selectionStartGlobalX = details.globalPosition.dx;
               _selectionStartGlobalY = details.globalPosition.dy;
             });
-            // A13：悬浮时间胶囊跟随手指
-            _hintPos.value = Offset(
-              details.localPosition.dx,
-              details.localPosition.dy,
+            // A13：选区/悬浮时间胶囊共享化（渲染由 selectionRange 驱动，
+            // 翻页后新列据此恢复——此前胶囊为列局部状态随旧列滑走）
+            widget.selectionRange?.value = SelectionRange(
+              start: details.localPosition.dy,
+              end: details.localPosition.dy,
+              active: widget.day,
+              fingerGlobal: details.globalPosition,
             );
           },
           onLongPressMoveUpdate: (details) {
@@ -663,18 +703,18 @@ class DayColumnState extends ConsumerState<DayColumn> {
             // 锚点固定用 _dragAnchorY（按下点）——此前以排序吸附端点的
             // _dragStartY 回写：向上滑时每次移动都把起始端换成手指位置，
             // 区间另一端被逐段吞掉（15:00→10:00 拖选只剩 10:00-12:00）
-            setState(() {
-              final (sy, ey) = _snappedYRange(
-                _dragAnchorY ?? details.localPosition.dy,
-                details.localPosition.dy,
-              );
-              _dragCurrentY = ey;
-              _dragStartY = sy;
-            });
-            // A13：悬浮时间胶囊跟随手指
-            _hintPos.value = Offset(
-              details.localPosition.dx,
+            final (sy, ey) = _snappedYRange(
+              _dragAnchorY ?? details.localPosition.dy,
               details.localPosition.dy,
+            );
+            _dragStartY = sy;
+            _dragCurrentY = ey;
+            // 更新共享选区（跨页渲染：active = 目标日列，翻页后新列接管）
+            widget.selectionRange?.value = SelectionRange(
+              start: sy,
+              end: ey,
+              active: _targetDay,
+              fingerGlobal: details.globalPosition,
             );
           },
           onLongPressEnd: (_) {
@@ -685,7 +725,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
             if (!_dragSelecting) return;
             final start = _dragStartY ?? 0;
             final end = _dragCurrentY ?? start;
-            _hintPos.value = null;
+            widget.selectionRange?.value = null;
             setState(() {
               _dragSelecting = false;
               _dragAnchorY = null;
@@ -792,42 +832,66 @@ class DayColumnState extends ConsumerState<DayColumn> {
                         ),
                       ),
                     ),
-                // E7：拖动选择高亮区（不透明浅色填充，避免网格线透出形成"双横线"；
-                // 内含起止时间，实时变化）
-                if (_dragSelecting &&
-                    _dragStartY != null &&
-                    _dragCurrentY != null)
-                  Positioned(
-                    top: _dragStartY! < _dragCurrentY!
-                        ? _dragStartY!
-                        : _dragCurrentY!,
-                    height: (_dragStartY! - _dragCurrentY!).abs(),
-                    left: 2,
-                    right: 2,
-                    child: IgnorePointer(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        alignment: Alignment.topLeft,
-                        child: Text(
-                          _selectionHintText(),
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onPrimaryContainer,
+                // E7：长按选时选区（共享跨页渲染：active 列 = 目标日列，
+                // 边缘翻页后新列接管渲染——此前高亮/胶囊为列局部状态，
+                // 随滑出的旧列走，翻页后与手指不同步）
+                ValueListenableBuilder<SelectionRange?>(
+                  valueListenable: widget.selectionRange ?? _noopSel,
+                  builder: (context, sel, _) {
+                    if (sel == null ||
+                        !DateUtilsEx.sameDay(sel.active, widget.day)) {
+                      return const SizedBox.shrink();
+                    }
+                    // 胶囊水平位置：手指全局坐标 → 本列 local（跨页列换算）
+                    final gpos = sel.fingerGlobal;
+                    final local = gpos == null ? null : _localFromGlobal(gpos);
+                    if (local == null && gpos != null) {
+                      _retryLocalAfterLayout(); // 新列未布局：下一帧重算
+                    }
+                    return Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        // 高亮区（不透明浅色填充，避免网格线透出形成"双横线"；
+                        // 内含起止时间，实时变化）
+                        if (sel.end > sel.start)
+                          Positioned(
+                            top: sel.start,
+                            height: sel.end - sel.start,
+                            left: 2,
+                            right: 2,
+                            child: IgnorePointer(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.primaryContainer,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                alignment: Alignment.topLeft,
+                                child: Text(
+                                  _selectionHintTextFor(sel.start, sel.end),
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onPrimaryContainer,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                    ),
-                  ),
+                        // A13：悬浮时间胶囊（锚定选区上端；水平与手指错开——
+                        // 手指不挡胶囊，水平换算用手指全局位置的老列 local）
+                        _selectionCapsuleFor(local, sel),
+                      ],
+                    );
+                  },
+                ),
                 // 拖动改期虚影：目标位置实时预览（最上层，跟随手指）。
                 // 由共享拖拽状态驱动（dragGlobalPos/dragTaskId/dragActiveDay）——
                 // 翻周/翻日后新列据此恢复虚影，可连续跨页拖动
@@ -893,23 +957,9 @@ class DayColumnState extends ConsumerState<DayColumn> {
                           60 *
                           _pp,
                       text: DateUtilsEx.timeCn(gStart),
-                    );
-                  },
-                ),
-                // A13：拖选胶囊（长按选时，列局部状态——选区跨页保持不在本次范围）
-                ValueListenableBuilder<Offset?>(
-                  valueListenable: _hintPos,
-                  builder: (context, pos, _) {
-                    if (pos == null || !_dragSelecting) {
-                      return const SizedBox.shrink();
-                    }
-                    return _buildHintCapsule(
-                      local: pos,
-                      anchorY: _dragStartY ?? pos.dy,
-                      text: _selectionHintText(),
-                    );
-                  },
-                ),
+                     );
+                   },
+                 ),
               ],
             ),
           ),
@@ -1065,12 +1115,21 @@ class DayColumnState extends ConsumerState<DayColumn> {
     return (s1, s2);
   }
 
-  /// 拖动选时创建：当前选区的时间文字（跟随手指）
-  String _selectionHintText() {
-    final s = _dragStartY ?? 0;
-    final e = _dragCurrentY ?? s;
-    final (t1, t2) = _snapRange(s, e);
+  /// 拖动选时创建：当前选区的时间文字（跟随手指；入参为吸附后列内 y 端点）
+  String _selectionHintTextFor(double sy, double ey) {
+    final (t1, t2) = _snapRange(sy, ey);
     return '${DateUtilsEx.timeCn(t1)} - ${DateUtilsEx.timeCn(t2)}';
+  }
+
+  /// 选时胶囊（共享渲染层）：手指全局位置 → 本列 local，锚定选区上端。
+  /// [local] 为 null（新列尚未布局）时本帧不渲染、下一帧重算。
+  Widget _selectionCapsuleFor(Offset? local, SelectionRange sel) {
+    if (local == null) return const SizedBox.shrink();
+    return _buildHintCapsule(
+      local: local,
+      anchorY: sel.start,
+      text: _selectionHintTextFor(sel.start, sel.end),
+    );
   }
 
   /// 本列是否为共享拖拽的"活动列"（虚影/胶囊仅显示在活动列；

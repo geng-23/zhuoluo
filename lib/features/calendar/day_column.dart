@@ -101,6 +101,7 @@ class SelectionRange {
     required this.start,
     required this.end,
     required this.active,
+    required this.fingerEdgeY,
     this.fingerGlobal,
   });
 
@@ -113,6 +114,10 @@ class SelectionRange {
   /// 选区当前挂载到的日期列（翻页后为新周/新日的目标列）
   final DateTime active;
 
+  /// 手指所在边缘端（吸附后列内 y；等于 start 或 end）——
+  /// 胶囊锚定并显示这一端的时间（"手指在选区下边缘/上边缘"）
+  final double fingerEdgeY;
+
   /// 手指全局位置（胶囊水平换算用，翻页后按渲染列 local 重算）
   final Offset? fingerGlobal;
 
@@ -121,6 +126,7 @@ class SelectionRange {
       start: start,
       end: end,
       active: active ?? this.active,
+      fingerEdgeY: fingerEdgeY,
       fingerGlobal: fingerGlobal ?? this.fingerGlobal,
     );
   }
@@ -357,6 +363,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
       start: sy,
       end: ey,
       active: _targetDay,
+      fingerEdgeY: _snapY(localY),
       fingerGlobal: g,
     );
   }
@@ -735,6 +742,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
               start: startY,
               end: startY,
               active: widget.day,
+              fingerEdgeY: _snapY(startY),
               fingerGlobal: details.globalPosition,
             );
           },
@@ -765,6 +773,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
               start: sy,
               end: ey,
               active: _targetDay,
+              fingerEdgeY: _snapY(rawY),
               fingerGlobal: details.globalPosition,
             );
           },
@@ -1179,8 +1188,34 @@ class DayColumnState extends ConsumerState<DayColumn> {
     if (local == null) return const SizedBox.shrink();
     return _buildHintCapsule(
       local: local,
-      anchorY: sel.start,
-      text: _selectionHintTextFor(sel.start, sel.end),
+      // 锚定手指所在边缘端（向下拖=下边缘、向上拖=上边缘），
+      // 胶囊时间 = 该边缘的吸附时间，与手指位置始终一致
+      anchorY: sel.fingerEdgeY,
+      text: _timeCnForEdge(sel.fingerEdgeY),
+    );
+  }
+
+  /// 单点 10 分钟吸附（与 _snappedYRange 的 snap 一致）：列内 y → 吸附后 y
+  double _snapY(double y) {
+    final minutes = widget.startHour * 60 + y / _pp * 60;
+    final snapped = ((minutes / 10).round() * 10).clamp(
+      widget.startHour * 60,
+      endHour * 60,
+    );
+    return (snapped - widget.startHour * 60) / 60 * _pp;
+  }
+
+  /// 列内 y（已吸附）→ 对应墙钟时间文字（胶囊显示手指边缘时间用）
+  String _timeCnForEdge(double y) {
+    final minutes = _snapMinutesForY(y);
+    return DateUtilsEx.timeCn(
+      AppClock.at(
+        widget.day.year,
+        widget.day.month,
+        widget.day.day,
+        minutes ~/ 60,
+        minutes % 60,
+      ),
     );
   }
 

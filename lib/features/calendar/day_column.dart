@@ -337,7 +337,9 @@ class DayColumnState extends ConsumerState<DayColumn> {
   }
 
   void _cancelSelectionEdgeTurn() {
-    _stopAutoScroll();
+    // 只取消边缘翻页 Timer/方向——**不停自动滚动**：本方法被每次纵向 move
+    // 触发（非水平意图分支），停滚动会让 _startAutoScroll 每帧 stop→start，
+    // 16ms Timer 反复重建永不 tick，真机连续拖动时列表不滚动
     final ctrl = widget.edgeTurnCtrl;
     ctrl?.timer?.cancel();
     ctrl?.timer = null;
@@ -633,6 +635,8 @@ class DayColumnState extends ConsumerState<DayColumn> {
           onLongPressStart: (details) {
             if (candidate.isNotEmpty) return;
             _cancelSelectionEdgeTurn();
+            // 新选时开始：停掉残留自动滚动（上一轮异常中断时兜底）
+            _stopAutoScroll();
             Haptics.select();
             setState(() {
               _dragSelecting = true;
@@ -675,6 +679,9 @@ class DayColumnState extends ConsumerState<DayColumn> {
           },
           onLongPressEnd: (_) {
             _cancelSelectionEdgeTurn();
+            // 松手立即停自动滚动（停止时机独立于翻页取消——
+            // 前者该在结束/离开触发区时停，不能随每次 move 的取消翻页）
+            _stopAutoScroll();
             if (!_dragSelecting) return;
             final start = _dragStartY ?? 0;
             final end = _dragCurrentY ?? start;

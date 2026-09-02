@@ -205,6 +205,11 @@ class CalendarPage extends ConsumerWidget {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      // 快建呼出提速：默认 250ms 动画 + 键盘弹出叠加体感慢，缩短到 120ms
+      sheetAnimationStyle: const AnimationStyle(
+        duration: Duration(milliseconds: 120),
+        reverseDuration: Duration(milliseconds: 120),
+      ),
       builder: (c) => QuickAddSheetWithDefaults(day),
     );
   }

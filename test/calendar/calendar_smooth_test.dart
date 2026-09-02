@@ -1204,6 +1204,143 @@ void main() {
       await tester.pumpAndSettle();
     });
 
+    testWidgets('长按选时向上滑：区间反转为"结束→开始"（锚点固定不吞段）', (tester) async {
+      await db.ensureDefaultList();
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 从下方锚点向上长按拖选，中途先停一点再继续上移：旧实现每次移动
+      // 都把起始端改写为手指位置，中间段被逐段吞掉——区间只剩最后一段
+      final gesture = await tester.startGesture(const Offset(400, 460));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await gesture.moveTo(const Offset(400, 400));
+      await tester.pump();
+      await gesture.moveTo(const Offset(400, 250));
+      await tester.pump(const Duration(milliseconds: 100));
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      // 快建弹层应显示完整区间：起点 < 终点，且跨度覆盖拖动全程而非仅末段
+      final text = tester.widget<Text>(find.textContaining('计划时间')).data!;
+      final match =
+          RegExp(r'(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})').firstMatch(text);
+      expect(match, isNotNull, reason: '快建弹层应显示计划时间区间（实际文案=$text）');
+      final startMins =
+          int.parse(match!.group(1)!) * 60 + int.parse(match.group(2)!);
+      final endMins =
+          int.parse(match.group(3)!) * 60 + int.parse(match.group(4)!);
+      final span = endMins - startMins;
+      expect(span, greaterThan(0), reason: '区间应为 开始→结束');
+      // 210px 全程约 197 分钟（64px/时）；旧 bug 只保留最后一段（约 140 分钟）
+      expect(
+        span,
+        greaterThan(170),
+        reason: '向上滑不应吞掉中间段（实际跨度=${span}min，应≈200min）',
+      );
+    });
+
+    testWidgets('长按选时拖到视口底部：时间轴自动滚动，松手停止', (tester) async {
+      await db.ensureDefaultList();
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      ScrollPosition timelinePosition() {
+        final scrollables = find.byType(Scrollable);
+        for (var i = 0; i < tester.widgetList(scrollables).length; i++) {
+          final position = tester
+              .state<ScrollableState>(scrollables.at(i))
+              .position;
+          if (position.axis == Axis.vertical && position.maxScrollExtent > 0) {
+            return position;
+          }
+        }
+        throw StateError('未找到时间轴滚动器');
+      }
+
+      final gesture = await tester.startGesture(const Offset(400, 300));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      // 拖到屏幕下缘（视口底 90px 触发区），悬停让自动滚动步进
+      await gesture.moveTo(const Offset(400, 580));
+      await tester.pump(const Duration(milliseconds: 500));
+      final rolling = timelinePosition().pixels;
+      expect(
+        rolling,
+        greaterThan(0),
+        reason: '长按选时拖到视口底部应自动滚动时间轴（实际 pixels=$rolling）',
+      );
+      // 松手：自动滚动应停止（不再持续推进）
+      await gesture.up();
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(
+        timelinePosition().pixels,
+        rolling,
+        reason: '松手后自动滚动应停止',
+      );
+    });
+
+    testWidgets('长按选时拖到视口顶部：时间轴自动向上滚动', (tester) async {
+      await db.ensureDefaultList();
+      final container = makeContainer();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CalendarPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      ScrollPosition timelinePosition() {
+        final scrollables = find.byType(Scrollable);
+        for (var i = 0; i < tester.widgetList(scrollables).length; i++) {
+          final position = tester
+              .state<ScrollableState>(scrollables.at(i))
+              .position;
+          if (position.axis == Axis.vertical && position.maxScrollExtent > 0) {
+            return position;
+          }
+        }
+        throw StateError('未找到时间轴滚动器');
+      }
+
+      // 先滚出一定余量，否则顶部触发区向上滚没有可滚空间
+      await tester.dragFrom(const Offset(400, 400), const Offset(0, -400));
+      await tester.pumpAndSettle();
+      final before = timelinePosition().pixels;
+      expect(before, greaterThan(0), reason: '预滚动应产生位置余量');
+
+      final gesture = await tester.startGesture(const Offset(400, 360));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      // 拖到屏幕上缘（视口顶 30px 触发区），悬停让自动滚动步进
+      await gesture.moveTo(const Offset(400, 120));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(
+        timelinePosition().pixels,
+        lessThan(before),
+        reason: '长按选时拖到视口顶部应自动向上滚动时间轴',
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('远距离跳转停在目标位置：周/日/月视图不落在中间页', (tester) async {
       await db.ensureDefaultList();
       final container = makeContainer();

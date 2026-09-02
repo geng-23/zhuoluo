@@ -54,7 +54,9 @@ class _QuickAddSheetWithRangeState
     final padding = MediaQuery.of(context).viewInsets.bottom;
     final s = widget.start;
     final e = widget.end;
-    return Padding(
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
       padding: EdgeInsets.only(bottom: padding),
       child: SafeArea(
         top: false,
@@ -197,7 +199,9 @@ class _QuickAddSheetWithDefaultsState
   @override
   Widget build(BuildContext context) {
     final padding = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
       padding: EdgeInsets.only(bottom: padding),
       child: SafeArea(
         top: false,

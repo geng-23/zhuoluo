@@ -1111,6 +1111,11 @@ class _TaskPageState extends ConsumerState<TaskPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      // 与日历快建一致：250ms 默认动画 + 键盘弹出叠加体感慢，缩短到 120ms
+      sheetAnimationStyle: const AnimationStyle(
+        duration: Duration(milliseconds: 120),
+        reverseDuration: Duration(milliseconds: 120),
+      ),
       builder: (c) => const QuickAddSheet(),
     );
   }
@@ -1146,7 +1151,9 @@ class _QuickAddSheetState extends ConsumerState<QuickAddSheet> {
   @override
   Widget build(BuildContext context) {
     final padding = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
       padding: EdgeInsets.only(bottom: padding),
       child: SafeArea(
         top: false,

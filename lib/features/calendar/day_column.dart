@@ -196,6 +196,10 @@ class DayColumnState extends ConsumerState<DayColumn> {
 
   // E7：拖动选时状态
   bool _dragSelecting = false;
+
+  /// 长按按下锚点（选时全程固定，不随移动吸附改写）——向上滑时区间
+  /// 反转"结束→开始"仍以按下点为另一端，选区不吞段
+  double? _dragAnchorY;
   double? _dragStartY;
   double? _dragCurrentY;
   double? _selectionStartGlobalX;
@@ -333,6 +337,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
   }
 
   void _cancelSelectionEdgeTurn() {
+    _stopAutoScroll();
     final ctrl = widget.edgeTurnCtrl;
     ctrl?.timer?.cancel();
     ctrl?.timer = null;
@@ -631,6 +636,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
             Haptics.select();
             setState(() {
               _dragSelecting = true;
+              _dragAnchorY = details.localPosition.dy;
               _dragStartY = details.localPosition.dy;
               _dragCurrentY = details.localPosition.dy;
               _selectionStartGlobalX = details.globalPosition.dx;
@@ -646,10 +652,16 @@ class DayColumnState extends ConsumerState<DayColumn> {
             if (!_dragSelecting) return;
             // 边缘自动翻页（选时跨周/跨天）
             _maybeEdgeTurnForSelection(details.globalPosition);
-            // 实时吸附：预览高亮区跟随 10 分钟粒度，松手结果一致
+            // 上下缘自动滚动时间轴（与拖动任务块一致：顶部 30px / 底部 90px
+            // 触发区，16ms 步进滚动）
+            _checkVerticalAutoScroll(details.globalPosition.dy);
+            // 实时吸附：预览高亮区跟随 10 分钟粒度，松手结果一致。
+            // 锚点固定用 _dragAnchorY（按下点）——此前以排序吸附端点的
+            // _dragStartY 回写：向上滑时每次移动都把起始端换成手指位置，
+            // 区间另一端被逐段吞掉（15:00→10:00 拖选只剩 10:00-12:00）
             setState(() {
               final (sy, ey) = _snappedYRange(
-                _dragStartY ?? details.localPosition.dy,
+                _dragAnchorY ?? details.localPosition.dy,
                 details.localPosition.dy,
               );
               _dragCurrentY = ey;
@@ -669,6 +681,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
             _hintPos.value = null;
             setState(() {
               _dragSelecting = false;
+              _dragAnchorY = null;
               _dragStartY = null;
               _dragCurrentY = null;
               _selectionStartGlobalX = null;
@@ -1205,6 +1218,12 @@ class DayColumnState extends ConsumerState<DayColumn> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      // 快建呼出提速：默认 250ms 动画 + 键盘弹出叠加体感慢，
+      // 缩短到 120ms 让输入框更快出现（收起对称）
+      sheetAnimationStyle: const AnimationStyle(
+        duration: Duration(milliseconds: 120),
+        reverseDuration: Duration(milliseconds: 120),
+      ),
       builder: (c) => QuickAddSheetWithDefaults(day, start: start, end: end),
     );
   }
@@ -1219,6 +1238,10 @@ class DayColumnState extends ConsumerState<DayColumn> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      sheetAnimationStyle: const AnimationStyle(
+        duration: Duration(milliseconds: 120),
+        reverseDuration: Duration(milliseconds: 120),
+      ),
       builder: (c) => QuickAddSheetWithRange(start: s, end: e),
     );
   }

@@ -325,24 +325,31 @@ class DayColumnState extends ConsumerState<DayColumn> {
     });
   }
 
-  /// 自动滚动 tick 后重算选区端点：手指 global → 列内 y，锚点与吸附逻辑
-  /// 与移动时一致。换算用「视口顶 + 轴顶 padding - 滚动 offset」公式——
-  /// 不用 RenderBox.globalToLocal（jumpTo 后位置要下一帧 layout 才更新，
-  /// tick 内读到的总是旧位置，选区永远滞后一轮）
-  void _refreshSelectionRangeFromFinger() {
-    if (!_dragSelecting) return;
-    final g = _selectionLastGlobal;
-    if (g == null) return;
+  /// 手指全局 y → 列内 y（统一公式：视口顶 + 轴顶 padding - 滚动 offset）。
+  /// 指针事件的 globalPosition 是即时的；details.localPosition 由引擎按
+  /// 列 RenderBox 矩阵换算——jumpTo 后矩阵下一帧 layout 才更新，滚动
+  /// 期间 move 事件拿到的 localPosition 恒滞后（选区被每一帧拉回），
+  /// globalPosition 无此问题，故 move 与自动滚动 tick 都用本函数。
+  double? _localYFromGlobal(double globalDy) {
     final scrollable = Scrollable.of(context);
     final scrollBox = scrollable.context.findRenderObject() as RenderBox?;
-    if (scrollBox == null || !scrollBox.hasSize) return;
+    if (scrollBox == null || !scrollBox.hasSize) return null;
     final viewportTop = scrollBox.localToGlobal(Offset.zero).dy;
     final off =
         widget.scrollController?.offset ??
         widget.scrollOffsetShare?.value ??
         0;
-    final columnTopGlobal = viewportTop + axisTopPadding - off;
-    final localY = g.dy - columnTopGlobal;
+    return globalDy - (viewportTop + axisTopPadding - off);
+  }
+
+  /// 自动滚动 tick 后重算选区端点：锚点与吸附逻辑与移动时一致，
+  /// 换算与 move 同一公式（见 _localYFromGlobal）
+  void _refreshSelectionRangeFromFinger() {
+    if (!_dragSelecting) return;
+    final g = _selectionLastGlobal;
+    if (g == null) return;
+    final localY = _localYFromGlobal(g.dy);
+    if (localY == null) return;
     final (sy, ey) = _snappedYRange(_dragAnchorY ?? localY, localY);
     _dragStartY = sy;
     _dragCurrentY = ey;
@@ -711,11 +718,13 @@ class DayColumnState extends ConsumerState<DayColumn> {
             // 新选时开始：停掉残留自动滚动（上一轮异常中断时兜底）
             _stopAutoScroll();
             Haptics.select();
+            final startY = _localYFromGlobal(details.globalPosition.dy) ??
+                details.localPosition.dy;
             setState(() {
               _dragSelecting = true;
-              _dragAnchorY = details.localPosition.dy;
-              _dragStartY = details.localPosition.dy;
-              _dragCurrentY = details.localPosition.dy;
+              _dragAnchorY = startY;
+              _dragStartY = startY;
+              _dragCurrentY = startY;
               _selectionStartGlobalX = details.globalPosition.dx;
               _selectionStartGlobalY = details.globalPosition.dy;
             });
@@ -723,8 +732,8 @@ class DayColumnState extends ConsumerState<DayColumn> {
             // A13：选区/悬浮时间胶囊共享化（渲染由 selectionRange 驱动，
             // 翻页后新列据此恢复——此前胶囊为列局部状态随旧列滑走）
             widget.selectionRange?.value = SelectionRange(
-              start: details.localPosition.dy,
-              end: details.localPosition.dy,
+              start: startY,
+              end: startY,
               active: widget.day,
               fingerGlobal: details.globalPosition,
             );
@@ -739,10 +748,14 @@ class DayColumnState extends ConsumerState<DayColumn> {
             // 实时吸附：预览高亮区跟随 10 分钟粒度，松手结果一致。
             // 锚点固定用 _dragAnchorY（按下点）——此前以排序吸附端点的
             // _dragStartY 回写：向上滑时每次移动都把起始端换成手指位置，
-            // 区间另一端被逐段吞掉（15:00→10:00 拖选只剩 10:00-12:00）
+            // 区间另一端被逐段吞掉（15:00→10:00 拖选只剩 10:00-12:00）。
+            // 列内 y 用 _localYFromGlobal（globalPosition 即时，不受滚动
+            // 期间引擎布局滞后影响——与自动滚动 tick 同源，选区不被拉回）
+            final rawY = _localYFromGlobal(details.globalPosition.dy) ??
+                details.localPosition.dy;
             final (sy, ey) = _snappedYRange(
-              _dragAnchorY ?? details.localPosition.dy,
-              details.localPosition.dy,
+              _dragAnchorY ?? rawY,
+              rawY,
             );
             _dragStartY = sy;
             _dragCurrentY = ey;

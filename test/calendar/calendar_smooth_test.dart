@@ -1284,13 +1284,22 @@ void main() {
         greaterThan(0),
         reason: '长按选时拖到视口底部应自动滚动时间轴（实际 pixels=$rolling）',
       );
+      // 滚动期间手指微动（真机持续产生 move 事件）：选区端点不应被拉回
+      await gesture.moveTo(const Offset(400, 580));
+      await tester.pump(const Duration(milliseconds: 200));
+      final afterJitter = timelinePosition().pixels;
+      expect(
+        afterJitter,
+        greaterThan(rolling),
+        reason: '滚动持续中再微动，滚动应继续推进',
+      );
       // 松手：自动滚动应停止（不再持续推进）
       await gesture.up();
       await tester.pumpAndSettle();
       await tester.pump(const Duration(milliseconds: 200));
       expect(
         timelinePosition().pixels,
-        rolling,
+        afterJitter,
         reason: '松手后自动滚动应停止',
       );
 

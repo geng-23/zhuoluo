@@ -208,6 +208,71 @@ void main() {
     });
   });
 
+  group('语义识别补全（HCI-2）', () {
+    final base = DateTime(2026, 8, 5); // 周三
+
+    void expectDate(String input, DateTime? expected, {String? rrule}) {
+      final r = ChineseDateParser.instance.parse(input, now: base);
+      expect(r.date, expected,
+          reason: 'input="$input" date=${r.date} expected=$expected');
+      if (rrule != null) {
+        expect(r.rrule, rrule, reason: 'input="$input"');
+      }
+    }
+
+    test('「每周」无星期 → 按今天星期重复（P2-11）', () {
+      expectDate('每周跑步', DateTime(2026, 8, 5),
+          rrule: 'FREQ=WEEKLY;BYDAY=WE');
+    });
+
+    test('「下下周X」不贪早命中「下周X」（P2-12）', () {
+      // base=周三(8/5)，本周一=8/3，下下周三 = 8/3+14+2 = 8/19
+      expectDate('下下周三开会', DateTime(2026, 8, 19));
+    });
+
+    test('「下下周」无星期 → 今天+14 天', () {
+      expectDate('下下周交报告', DateTime(2026, 8, 19));
+    });
+
+    test('「下周」无星期 → 今天+7 天（同星期日）', () {
+      expectDate('下周交报告', DateTime(2026, 8, 12));
+    });
+
+    test('「每一天」识别为每日重复', () {
+      expectDate('每一天晨跑', null, rrule: 'FREQ=DAILY');
+    });
+
+    test('既有句式回归：本周五/这周五/下周三/周三', () {
+      expectDate('本周五', DateTime(2026, 8, 7));
+      expectDate('这周五', DateTime(2026, 8, 7));
+      expectDate('下周三', DateTime(2026, 8, 12));
+      expectDate('周三', DateTime(2026, 8, 5));
+    });
+
+    test('标题切除：每天晨跑/每一天/每周/下下周三（P2-23）', () {
+      expect(extractTaskTitle('每天晨跑'), '晨跑');
+      expect(extractTaskTitle('每一天晨跑'), '晨跑');
+      expect(extractTaskTitle('每周跑步'), '跑步');
+      expect(extractTaskTitle('下下周三开会'), '开会');
+      expect(extractTaskTitle('下下周交报告'), '交报告');
+      // 已覆盖句式不回归
+      expect(extractTaskTitle('每周五跑步'), '跑步');
+      expect(extractTaskTitle('每3天健身'), '健身');
+    });
+
+    test('解析失败但含疑似时间词 → UI 提示（HCI-2）', () {
+      String? hint(String input) {
+        final r = ChineseDateParser.instance.parse(input, now: base);
+        return ChineseDateParser.unmatchedTimeHint(input, r);
+      }
+      expect(hint('每周八'), isNotNull); // 星期名不含"八"
+      expect(hint('每4小时提醒'), isNotNull); // "每N+小时"未覆盖句式
+      expect(hint('随便记一下'), isNull); // 无疑似时间词
+      expect(hint('明天下午3点交报告'), isNull); // 已命中
+      expect(hint('每周三健身'), isNull); // 已命中
+    });
+  });
+
   group('extractTaskTitle 同步（P1-D）', () {
     test('每2周三整体切除', () {
       expect(extractTaskTitle('每2周三跑步'), '跑步');

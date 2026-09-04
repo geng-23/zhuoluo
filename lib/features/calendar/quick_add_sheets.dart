@@ -6,6 +6,7 @@ import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/core/utils/task_title.dart';
+import 'package:zhuoluo/core/widgets/parse_hint_text_field.dart';
 import 'package:zhuoluo/data/services/chinese_date_parser.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
@@ -224,16 +225,9 @@ class _QuickAddSheetWithDefaultsState
                 ),
               ),
               const SizedBox(height: 8),
-              TextField(
+              ParseHintTextField(
                 controller: _controller,
-                autofocus: true,
-                maxLines: 3,
-                minLines: 1,
-                decoration: const InputDecoration(
-                  hintText: '输入任务，如：下午3点交报告',
-                  border: OutlineInputBorder(),
-                ),
-                textInputAction: TextInputAction.newline,
+                hintText: '输入任务，如：下午3点交报告',
               ),
               const SizedBox(height: 12),
               Row(

@@ -20,6 +20,7 @@ import 'package:zhuoluo/features/trash/trash_page.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/widgets/app_empty_view.dart';
 import 'package:zhuoluo/core/widgets/done_check_icon.dart';
+import 'package:zhuoluo/core/widgets/parse_hint_text_field.dart';
 
 /// 任务页：抽屉侧栏 + 任务列表
 class TaskPage extends ConsumerStatefulWidget {
@@ -1162,16 +1163,9 @@ class _QuickAddSheetState extends ConsumerState<QuickAddSheet> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
+              ParseHintTextField(
                 controller: _controller,
-                autofocus: true,
-                maxLines: 3,
-                minLines: 1,
-                decoration: const InputDecoration(
-                  hintText: '输入任务，如：明天下午3点交报告',
-                  border: OutlineInputBorder(),
-                ),
-                textInputAction: TextInputAction.newline,
+                hintText: '输入任务，如：明天下午3点交报告',
               ),
               const SizedBox(height: 12),
               Row(

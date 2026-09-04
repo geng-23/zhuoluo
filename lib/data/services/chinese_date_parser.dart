@@ -79,7 +79,12 @@ class ChineseDateParser {
     var rest = input;
 
     // ---- 重复规则 ----
-    if (rest.contains('每天')) {
+    // 每天与每一天（每一天是"每天"的变体，同义每日重复）
+    if (rest.contains('每一天')) {
+      rrule = 'FREQ=DAILY';
+      matched = true;
+      rest = rest.replaceAll('每一天', '');
+    } else if (rest.contains('每天')) {
       rrule = 'FREQ=DAILY';
       matched = true;
       rest = rest.replaceAll('每天', '');
@@ -94,6 +99,14 @@ class ChineseDateParser {
         date = AppClock.addCalendarDays(today, diff);
         matched = true;
         rest = rest.replaceAll(m.group(0)!, '');
+      } else if (!RegExp(r'每周[0-9一二三四五六七八九十两零]').hasMatch(rest)) {
+        // "每周"不带星期：按今天星期重复（与"每2周"补起始星期一致，
+        // 此前静默丢失重复语义且标题残留"每周"；后面紧跟数字（如
+        // "每周八"）不属于本兜底，保持未命中 → UI 提示）
+        rrule = 'FREQ=WEEKLY;BYDAY=${_weekdayCode(today.weekday)}';
+        date = today;
+        matched = true;
+        rest = rest.replaceAll('每周', '');
       }
     } else if (RegExp(r'每(' + _numAll + r')个?(周|月|天)([一二三四五六日天])?')
         .hasMatch(rest)) {
@@ -177,25 +190,37 @@ class ChineseDateParser {
         }
       }
     }
-    // 下周X / 这周X
+    // 下X周 / 下下周X / 本周X / 这周X
+    // "下"可叠加（下下周 = +2 周），此前正则 [下本这]周X 会在"下下周三"里
+    // 贪早命中"下周三"导致日期错一周、标题残留"下"；
+    // 裸"下X周"（不带星期）取同星期日 = 今天+7k；裸"本周/这周"太模糊不解析
     if (date == null) {
-      final m = RegExp(r'([下本这])周([一二三四五六日天])').firstMatch(rest);
-      if (m != null) {
-        final wd = _weekdayNames[m.group(2)!]!;
+      final m = RegExp(r'(下+|[本这])周([一二三四五六日天])?').firstMatch(rest);
+      final prefix = m?.group(1);
+      final bare = m?.group(2) == null;
+      // 本/这必须带星期，否则跳过（交回"周X"或后续分支处理）
+      if (m != null && !((prefix == '本' || prefix == '这') && bare)) {
+        final k = (prefix != null && prefix.startsWith('下')) ? prefix.length : 0;
         final thisWeekMonday = AppClock.addCalendarDays(
           today,
           -(today.weekday - 1),
         );
-        final offset = (wd - 1) - (today.weekday - 1);
-        if (m.group(1) == '下' || m.group(1) == '本') {
-          date = m.group(1) == '下'
-              ? AppClock.addCalendarDays(thisWeekMonday, 7 + (wd - 1))
-              : AppClock.addCalendarDays(
-                  today,
-                  offset < 0 ? offset + 7 : offset,
-                );
+        if (!bare) {
+          final wd = _weekdayNames[m.group(2)!]!;
+          if (prefix != null && prefix.startsWith('下')) {
+            date = AppClock.addCalendarDays(thisWeekMonday, 7 * k + (wd - 1));
+          } else if (prefix == '本') {
+            final offset = (wd - 1) - (today.weekday - 1);
+            date = AppClock.addCalendarDays(
+              today,
+              offset < 0 ? offset + 7 : offset,
+            );
+          } else {
+            final offset = (wd - 1) - (today.weekday - 1);
+            date = AppClock.addCalendarDays(today, offset);
+          }
         } else {
-          date = AppClock.addCalendarDays(today, offset);
+          date = AppClock.addCalendarDays(today, 7 * k);
         }
         matched = true;
         rest = rest.replaceAll(m.group(0)!, '');
@@ -404,8 +429,26 @@ class ChineseDateParser {
     );
   }
 
-  static String _weekdayCode(int wd) {
-    const map = {1: 'MO', 2: 'TU', 3: 'WE', 4: 'TH', 5: 'FR', 6: 'SA', 7: 'SU'};
+  /// 疑似时间词的宽松匹配（仅用于解析失败时的 UI 提示，不参与正式解析；
+  /// 故意宽松：宁可多提示，不放过"每周八""下周交"这类未覆盖句式）
+  static final RegExp _suspectTimeWord = RegExp(
+    r'每天|每一天|每周|每[0-9一二三四五六七八九十两]'
+    r'|[周星期礼拜][一二三四五六日天]'
+    r'|下+[一-龥]?周'
+    r'|[点时]|:[0-9]'
+    r'|[0-9一二三四五六七八九十两]+[月号日]'
+    r'|月底|天后|下个月|大后天|后天|明天|今天|昨天',
+  );
+
+  /// 解析未命中任何时间信息、但输入含疑似时间词时，返回给 UI 的提示文案；
+  /// 已命中或无疑似时间词时返回 null（不打扰正常输入）
+  static String? unmatchedTimeHint(String input, ParseResult parsed) {
+    if (parsed.matched) return null;
+    if (!_suspectTimeWord.hasMatch(input)) return null;
+    return '未识别到时间，试试「明天下午3点」或「每周三」';
+  }
+
+  static String _weekdayCode(int wd) {    const map = {1: 'MO', 2: 'TU', 3: 'WE', 4: 'TH', 5: 'FR', 6: 'SA', 7: 'SU'};
     return map[wd] ?? 'MO';
   }
 

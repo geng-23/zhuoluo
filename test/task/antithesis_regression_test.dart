@@ -148,7 +148,7 @@ void main() {
   });
 
   group('日历快加重复+无时间 → 全天', () {
-    testWidgets('输入"每天阅读"创建全天重复任务（不再 00:00-00:00 定时）', (tester) async {
+    testWidgets('输入"每天阅读"创建全天重复任务，标题切除"每天"（HCI-2）', (tester) async {
       await db.ensureDefaultList();
       final container = ProviderContainer(
         overrides: [dbProvider.overrideWithValue(db)],
@@ -176,7 +176,8 @@ void main() {
 
       final list = await db.getDefaultList();
       final tasks = await db.getTasksByList(list.id);
-      expect(tasks.single.title, '每天阅读');
+      expect(tasks.single.title, '阅读',
+          reason: 'HCI-2：标题应切除已识别时间词"每天"（此前残留"每天阅读"）');
       expect(tasks.single.rrule, 'FREQ=DAILY');
       expect(tasks.single.isAllDay, isTrue,
           reason: '重复+无明确时间应为全天任务');
@@ -184,6 +185,40 @@ void main() {
         tasks.single.planStart!.hour == 0 && tasks.single.planStart!.minute == 0,
         isTrue,
       );
+    });
+  });
+
+  group('快建输入解析提示（HCI-2）', () {
+    testWidgets('疑似时间词未命中 → 显示提示；无疑似词/已命中 → 不显示', (tester) async {
+      final container = ProviderContainer(
+        overrides: [dbProvider.overrideWithValue(db)],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: Scaffold(
+              body: QuickAddSheetWithDefaults(DateTime(2026, 8, 5)),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      const hint = '未识别到时间，试试「明天下午3点」或「每周三」';
+      // "每周八"：含疑似时间词但解析未命中 → 提示
+      await tester.enterText(find.byType(TextField), '每周八');
+      await tester.pumpAndSettle();
+      expect(find.text(hint), findsOneWidget);
+      // 无疑似时间词 → 不提示
+      await tester.enterText(find.byType(TextField), '跑步');
+      await tester.pumpAndSettle();
+      expect(find.text(hint), findsNothing);
+      // 已命中 → 不提示
+      await tester.enterText(find.byType(TextField), '明天下午3点交报告');
+      await tester.pumpAndSettle();
+      expect(find.text(hint), findsNothing);
     });
   });
 

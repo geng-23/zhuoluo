@@ -206,7 +206,7 @@ class ProfilePage extends ConsumerWidget {
               children: [
                 ListTile(
                   leading: const _IconLeading(Icons.info_outline),
-                  title: const Text('着落 v1.3.5+36'),
+                  title: const Text('着落 v1.3.6+37'),
                   subtitle: const Text('事事有着落 · 本地数据'),
                   onTap: () => _showAbout(context),
                 ),

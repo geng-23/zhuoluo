@@ -7,6 +7,8 @@ import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/data/services/notification_service.dart';
+import 'package:zhuoluo/features/calendar/calendar_page.dart';
+import 'package:zhuoluo/features/calendar/providers.dart';
 import 'package:zhuoluo/main.dart';
 
 import '../support/fake_notification_scheduler.dart';
@@ -67,19 +69,127 @@ void main() {
     expect(find.text('添加'), findsWidgets, reason: '长按应弹出快速添加');
   });
 
+  testWidgets('月视图点日期进入日视图，顶部返回回到原月份', (tester) async {
+    await pumpApp(tester);
+    await switchToMonthView(tester);
+    final now = DateTime.now();
+    final day = DateTime(now.year, now.month, 15);
+    await tester.tap(
+      find.byKey(ValueKey('month-day-${day.year}-${day.month}-${day.day}')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('返回月视图'), findsOneWidget);
+    await tester.tap(find.byTooltip('返回月视图'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(ValueKey('month-day-${day.year}-${day.month}-${day.day}')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('月视图进入日视图后系统返回回到原月份', (tester) async {
+    await pumpApp(tester);
+    await switchToMonthView(tester);
+    final now = DateTime.now();
+    final dayKey = ValueKey('month-day-${now.year}-${now.month}-15');
+    await tester.tap(find.byKey(dayKey));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('返回月视图'), findsOneWidget);
+    await tester.tap(find.byTooltip('日历菜单'));
+    await tester.pumpAndSettle();
+    expect(find.text('月视图'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('返回月视图'), findsOneWidget, reason: '首次返回应先关闭侧栏');
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byKey(dayKey), findsOneWidget);
+  });
+
+  testWidgets('迷你月历选日不改变当前视图', (tester) async {
+    await pumpApp(tester);
+    await tester.tap(find.text('日历'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-date-title')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('calendar-mini-month')), findsOneWidget);
+    await tester.tap(find.byTooltip('下个月'));
+    await tester.pumpAndSettle();
+    final now = DateTime.now();
+    final next = DateTime(now.year, now.month + 1, 15);
+    await tester.tap(
+      find.byKey(ValueKey('mini-day-${next.year}-${next.month}-${next.day}')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('calendar-mini-month')), findsNothing);
+    final scope = ProviderScope.containerOf(
+      tester.element(find.byKey(const ValueKey('calendar-date-title'))),
+    );
+    final state = scope.read(calendarControllerProvider);
+    expect(state.view, 'week');
+    expect(state.selectedDay.year, next.year);
+    expect(state.selectedDay.month, next.month);
+    expect(state.selectedDay.day, 15);
+  });
+
+  testWidgets('六行月份在小屏高度内完整显示', (tester) async {
+    for (final brightness in Brightness.values) {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            theme: ThemeData(
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: Colors.blue,
+                brightness: brightness,
+              ),
+            ),
+            home: Scaffold(
+              body: Center(
+                child: SizedBox(
+                  width: 320,
+                  height: 340,
+                  child: MonthView(
+                    items: const [],
+                    byDay: const {},
+                    displayedMonth: DateTime(2026, 8),
+                    selectedDay: DateTime(2026, 8, 15),
+                    onDayTap: (_) {},
+                    onDayLongPress: (_) {},
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const ValueKey('month-day-2026-8-31')), findsOneWidget);
+      final grid = tester.state<ScrollableState>(
+        find.descendant(
+          of: find.byType(GridView),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      expect(grid.position.maxScrollExtent, 0);
+    }
+  });
+
   testWidgets('月格显示任务摘要（含 N 个更多徽标）', (tester) async {
     await pumpApp(tester);
     // 造 5 个同一天任务（今天），月视图当天格应有摘要
     final list = await db.getDefaultList();
     final now = DateTime.now();
     for (var i = 0; i < 5; i++) {
-      await db.insertTask(TasksCompanion.insert(
-        listId: list.id,
-        title: '任务$i',
-        planStart: Value(DateTime(now.year, now.month, now.day, 9)),
-        planEnd: Value(DateTime(now.year, now.month, now.day, 10)),
-        createdAt: now,
-      ));
+      await db.insertTask(
+        TasksCompanion.insert(
+          listId: list.id,
+          title: '任务$i',
+          planStart: Value(DateTime(now.year, now.month, now.day, 9)),
+          planEnd: Value(DateTime(now.year, now.month, now.day, 10)),
+          createdAt: now,
+        ),
+      );
     }
     await switchToMonthView(tester);
     // 数据版本变化触发日历重载
@@ -88,7 +198,6 @@ void main() {
     await tester.pumpAndSettle();
 
     // 当天格显示"更多"徽标（5 个任务 > 2 个展示上限 → +3）
-    expect(find.text('+3'), findsOneWidget,
-        reason: '月格超过 2 个任务应显示 +N 更多徽标');
+    expect(find.text('+3'), findsOneWidget, reason: '月格超过 2 个任务应显示 +N 更多徽标');
   });
 }

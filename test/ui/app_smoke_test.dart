@@ -1,4 +1,4 @@
-﻿import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,9 +17,7 @@ void main() {
 
   ProviderContainer makeContainer() {
     final container = ProviderContainer(
-      overrides: [
-        dbProvider.overrideWithValue(db),
-      ],
+      overrides: [dbProvider.overrideWithValue(db)],
     );
     return container;
   }
@@ -68,7 +66,7 @@ void main() {
     expect(find.text('月视图'), findsOneWidget);
     expect(find.text('周视图'), findsOneWidget);
     expect(find.text('日视图'), findsOneWidget);
-    expect(find.text('今天'), findsWidgets);
+    expect(find.byTooltip('今天'), findsOneWidget);
     await tester.tapAt(const Offset(700, 100));
     await tester.pumpAndSettle();
 
@@ -87,8 +85,11 @@ void main() {
     expect(find.text('倒数纪念日'), findsNothing);
 
     // 关于：版本号 + 点击弹窗含联系方式（不写死版本号，避免升级后失配）
-    await tester.scrollUntilVisible(find.textContaining('着落 v'), 200,
-        scrollable: find.byType(Scrollable).last);
+    await tester.scrollUntilVisible(
+      find.textContaining('着落 v'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
     // 多滚一段，避免条目停在底部导航栏后方被遮挡
     await tester.drag(find.byType(Scrollable).last, const Offset(0, -80));
     await tester.pumpAndSettle();
@@ -96,10 +97,12 @@ void main() {
     expect(find.text('无账号'), findsNothing);
     await tester.tap(find.textContaining('着落 v'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('confusion_geng@protonmail.com'), findsOneWidget,
-        reason: '关于弹窗应显示联系方式');
-    expect(find.textContaining('本地待办'), findsOneWidget,
-        reason: '关于弹窗应有一句话介绍');
+    expect(
+      find.textContaining('confusion_geng@protonmail.com'),
+      findsOneWidget,
+      reason: '关于弹窗应显示联系方式',
+    );
+    expect(find.textContaining('本地待办'), findsOneWidget, reason: '关于弹窗应有一句话介绍');
   });
 
   testWidgets('通过 FAB 快速添加任务（智能时间解析）', (tester) async {
@@ -119,8 +122,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 输入智能时间文本
-    await tester.enterText(
-        find.byType(TextField).last, '明天下午3点交报告');
+    await tester.enterText(find.byType(TextField).last, '明天下午3点交报告');
     await tester.tap(find.text('添加'));
     await tester.pumpAndSettle();
 
@@ -132,14 +134,16 @@ void main() {
     await db.ensureDefaultList();
     final def = await db.getDefaultList();
 
-    final taskId = await db.insertTask(TasksCompanion.insert(
-      listId: def.id,
-      title: '写周报',
-      planStart: Value(DateTime(2026, 8, 10)),
-      planEnd: Value(DateTime(2026, 8, 11)),
-      isAllDay: const Value(true),
-      createdAt: DateTime.now(),
-    ));
+    final taskId = await db.insertTask(
+      TasksCompanion.insert(
+        listId: def.id,
+        title: '写周报',
+        planStart: Value(DateTime(2026, 8, 10)),
+        planEnd: Value(DateTime(2026, 8, 11)),
+        isAllDay: const Value(true),
+        createdAt: DateTime.now(),
+      ),
+    );
 
     // 完成
     await db.completeTask(taskId);
@@ -152,31 +156,40 @@ void main() {
     expect(reopened!.completedAt, isNull);
 
     // 子任务自动联动
-    final parentId = await db.insertTask(TasksCompanion.insert(
-      listId: def.id,
-      title: '项目',
-      createdAt: DateTime.now(),
-    ));
-    final sub1 = await db.insertTask(TasksCompanion.insert(
-      listId: def.id,
-      parentId: Value(parentId),
-      title: '子1',
-      createdAt: DateTime.now(),
-    ));
-    final sub2 = await db.insertTask(TasksCompanion.insert(
-      listId: def.id,
-      parentId: Value(parentId),
-      title: '子2',
-      createdAt: DateTime.now(),
-    ));
+    final parentId = await db.insertTask(
+      TasksCompanion.insert(
+        listId: def.id,
+        title: '项目',
+        createdAt: DateTime.now(),
+      ),
+    );
+    final sub1 = await db.insertTask(
+      TasksCompanion.insert(
+        listId: def.id,
+        parentId: Value(parentId),
+        title: '子1',
+        createdAt: DateTime.now(),
+      ),
+    );
+    final sub2 = await db.insertTask(
+      TasksCompanion.insert(
+        listId: def.id,
+        parentId: Value(parentId),
+        title: '子2',
+        createdAt: DateTime.now(),
+      ),
+    );
     await db.completeTask(sub1);
     await db.maybeAutoCompleteParent(parentId);
     var parent = await db.getTask(parentId);
     expect(parent!.completedAt, isNull, reason: '子任务未全部完成');
     // 子任务不进入"全部"清单（只显示顶层任务）
     final uncompleted = await db.getAllUncompleted();
-    expect(uncompleted.any((t) => t.title == '子2'), isFalse,
-        reason: '未完成的子任务不出现在全部清单');
+    expect(
+      uncompleted.any((t) => t.title == '子2'),
+      isFalse,
+      reason: '未完成的子任务不出现在全部清单',
+    );
     expect(uncompleted.any((t) => t.title == '项目'), isTrue);
     await db.completeTask(sub2);
     await db.maybeAutoCompleteParent(parentId);
@@ -184,8 +197,7 @@ void main() {
     expect(parent!.completedAt, isNotNull, reason: '子任务全完成父任务自动完成');
     // 子任务不进入"已完成"清单
     final done = await db.getCompletedTasks();
-    expect(done.any((t) => t.title == '子1'), isFalse,
-        reason: '子任务不出现在已完成清单');
+    expect(done.any((t) => t.title == '子1'), isFalse, reason: '子任务不出现在已完成清单');
     expect(done.any((t) => t.title == '子2'), isFalse);
   });
 
@@ -193,14 +205,16 @@ void main() {
     await db.ensureDefaultList();
     final def = await db.getDefaultList();
 
-    final taskId = await db.insertTask(TasksCompanion.insert(
-      listId: def.id,
-      title: '每周五例会',
-      planStart: Value(DateTime(2026, 8, 7, 14, 0)),
-      planEnd: Value(DateTime(2026, 8, 7, 15, 0)),
-      rrule: const Value('FREQ=WEEKLY;BYDAY=FR'),
-      createdAt: DateTime.now(),
-    ));
+    final taskId = await db.insertTask(
+      TasksCompanion.insert(
+        listId: def.id,
+        title: '每周五例会',
+        planStart: Value(DateTime(2026, 8, 7, 14, 0)),
+        planEnd: Value(DateTime(2026, 8, 7, 15, 0)),
+        rrule: const Value('FREQ=WEEKLY;BYDAY=FR'),
+        createdAt: DateTime.now(),
+      ),
+    );
 
     // 实例完成
     await db.completeInstance(taskId, DateTime(2026, 8, 7));
@@ -214,10 +228,12 @@ void main() {
       DateTime(2026, 8, 1),
       DateTime(2026, 8, 31),
     );
-    final aug7 = items.where((i) =>
-        i.instanceDate.month == 8 && i.instanceDate.day == 7);
-    final aug14 = items.where((i) =>
-        i.instanceDate.month == 8 && i.instanceDate.day == 14);
+    final aug7 = items.where(
+      (i) => i.instanceDate.month == 8 && i.instanceDate.day == 7,
+    );
+    final aug14 = items.where(
+      (i) => i.instanceDate.month == 8 && i.instanceDate.day == 14,
+    );
     expect(aug7.first.completed, isTrue);
     expect(aug14.first.completed, isFalse);
   });
@@ -226,13 +242,15 @@ void main() {
     await db.ensureDefaultList();
     final def = await db.getDefaultList();
 
-    final taskId = await db.insertTask(TasksCompanion.insert(
-      listId: def.id,
-      title: '普通任务',
-      planStart: Value(DateTime(2026, 8, 10, 9, 0)),
-      planEnd: Value(DateTime(2026, 8, 10, 10, 0)),
-      createdAt: DateTime.now(),
-    ));
+    final taskId = await db.insertTask(
+      TasksCompanion.insert(
+        listId: def.id,
+        title: '普通任务',
+        planStart: Value(DateTime(2026, 8, 10, 9, 0)),
+        planEnd: Value(DateTime(2026, 8, 10, 10, 0)),
+        createdAt: DateTime.now(),
+      ),
+    );
 
     // 未完成时
     var items = await db.getCalendarItems(
@@ -247,8 +265,11 @@ void main() {
       DateTime(2026, 8, 1),
       DateTime(2026, 8, 31),
     );
-    expect(items.firstWhere((i) => i.task.id == taskId).completed, isTrue,
-        reason: '非重复任务完成后日历应显示完成状态');
+    expect(
+      items.firstWhere((i) => i.task.id == taskId).completed,
+      isTrue,
+      reason: '非重复任务完成后日历应显示完成状态',
+    );
   });
 
   testWidgets('数据库：习惯提醒时间可更新与清除', (tester) async {

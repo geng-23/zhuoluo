@@ -322,6 +322,7 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
     // A7：表头"今天"高亮由 build 时实时计算（跨天时随页面重建自然更新），
     // 不再依赖每分钟 setState 的 _now
     final today = AppClock.now();
+    final scheme = Theme.of(context).colorScheme;
     // 时间轴起始小时动态化——显示范围内最早 timed 任务决定
     //（默认 6；06:00 前任务存在时扩展起始点，任务不再隐形不可操作）
     final startEff = _effectiveStartHour(days);
@@ -376,52 +377,48 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                               }
                             },
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Column(
                           children: [
-                            if (widget.isWeek) ...[
-                              Text(
-                                DateUtilsEx.weekdayCn[d.weekday - 1],
+                            Text(
+                              DateUtilsEx.weekdayCn[d.weekday - 1],
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: DateUtilsEx.sameDay(d, today)
+                                    ? scheme.primary
+                                    : scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Container(
+                              width: 32,
+                              height: 32,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: DateUtilsEx.sameDay(d, today)
+                                    ? scheme.primary
+                                    : DateUtilsEx.sameDay(d, widget.selectedDay)
+                                    ? scheme.primaryContainer
+                                    : null,
+                              ),
+                              child: Text(
+                                '${d.day}',
                                 style: TextStyle(
-                                  fontSize: 11,
-                                  color: DateUtilsEx.sameDay(d, today)
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                              // 今天彩底圆（谷歌日历风格）：与月视图 today 同步，
-                              // 此前仅有文字高亮
-                              Container(
-                                width: 28,
-                                height: 28,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: DateUtilsEx.sameDay(d, today)
-                                      ? Theme.of(context).colorScheme.primary
-                                      : null,
-                                ),
-                                child: Text(
-                                  '${d.day}',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: DateUtilsEx.sameDay(d, today)
-                                        ? FontWeight.bold
-                                        : null,
-                                    color: DateUtilsEx.sameDay(d, today)
-                                        ? Theme.of(context).colorScheme.onPrimary
-                                        : null,
-                                  ),
-                                ),
-                              ),
-                            ] else
-                              Text(
-                                DateUtilsEx.dateCn(d),
-                                style: const TextStyle(
-                                  fontSize: 13,
+                                  fontSize: 16,
                                   fontWeight: FontWeight.w600,
+                                  color: DateUtilsEx.sameDay(d, today)
+                                      ? scheme.onPrimary
+                                      : DateUtilsEx.sameDay(
+                                          d,
+                                          widget.selectedDay,
+                                        )
+                                      ? scheme.onPrimaryContainer
+                                      : scheme.onSurface,
                                 ),
                               ),
+                            ),
                           ],
                         ),
                       ),
@@ -430,22 +427,6 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
               ],
             ),
             const Divider(height: 1),
-            // 5.8/时间轴可见范围说明（动态起始小时，06:00 前有任务时
-            // 起始点扩展；超出时间轴范围的夜间任务仍不显示）
-            Padding(
-              padding: const EdgeInsets.fromLTRB(48, 1, 12, 1),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  // 截图②：明确"可滚动"——消除"标注 06-23 但屏内只看到部分"的困惑
-                  '可滚动 · 时间轴 ${startEff.toString().padLeft(2, '0')}:00-23:00',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
-                ),
-              ),
-            ),
             Expanded(
               child: Column(
                 children: [
@@ -543,7 +524,11 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                       child: Stack(
                                         children: [
                                           // 时间网格线（暗色适配）
-                                          for (var h = 0; h <= totalHours; h++) ...[
+                                          for (
+                                            var h = 0;
+                                            h <= totalHours;
+                                            h++
+                                          ) ...[
                                             Positioned(
                                               top: h * pp - 0.5,
                                               left: 0,
@@ -569,9 +554,8 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                                     1,
                                                   ),
                                                   painter: _HalfHourLinePainter(
-                                                    color: Theme.of(
-                                                      context,
-                                                    ).colorScheme
+                                                    color: Theme.of(context)
+                                                        .colorScheme
                                                         .outlineVariant
                                                         .withValues(alpha: 0.3),
                                                   ),
@@ -615,14 +599,18 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                                         widget.dragDropped,
                                                     dragViewportTopY:
                                                         widget.dragViewportTopY,
+                                                    dragViewportH:
+                                                        widget.dragViewportH,
+                                                    activeScrollController:
+                                                        widget.dragScrollCtrl,
                                                     scrollOffsetShare: widget
                                                         .scrollOffsetShare,
                                                     edgeTurnCtrl:
                                                         widget.edgeTurnCtrl,
                                                     onDragStartTracking: widget
                                                         .onDragStartTracking,
-                                                    selectionRange: widget
-                                                        .selectionRange,
+                                                    selectionRange:
+                                                        widget.selectionRange,
                                                     // A13：列在视口内的左偏移（含分隔线）
                                                     viewportLeft:
                                                         i *

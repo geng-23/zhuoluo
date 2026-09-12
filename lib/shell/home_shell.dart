@@ -11,6 +11,7 @@ import 'package:zhuoluo/features/profile/profile_page.dart';
 import 'package:zhuoluo/features/profile/quadrant_page.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
 import 'package:zhuoluo/features/task/task_page.dart';
+
 /// 四栏主壳（任务 / 日历 / 四象限 / 我的）
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
@@ -22,14 +23,18 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell>
     with WidgetsBindingObserver {
   int _tab = 0;
+
   /// 用户是否已手动切换 Tab（_restoreTab 恢复结果不得覆盖手动选择）
   bool _tabChanged = false;
+
   /// 是否曾进入后台（paused）。回前台 resume 时据此前台补触发自动备份；
   /// 冷启动首个 resumed 无前置 paused，不重复触发（main() 已触发过）。
   bool _wasBackgrounded = false;
   StreamSubscription<String?>? _tapSub;
+
   /// 番茄钟通知主体点击订阅（原生桥事件 → 打开番茄专注页）
   StreamSubscription<void>? _pomodoroOpenSub;
+
   /// A1：懒加载页面缓存——仅首次访问时创建，之后保留 State
   /// （IndexedStack 保留状态的前提是子树不因 key 变化重建）
   final List<Widget?> _pages = List<Widget?>.filled(4, null);
@@ -44,6 +49,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
   Widget _buildPage(int i) => switch (i) {
     0 => TaskPage(onNavigateNext: () => _switchTo(1)),
     1 => CalendarPage(
+      isActive: _tab == 1,
       // 边缘滑动切 tab：左缘右滑 → 任务；右缘左滑 → 四象限
       onNavigateLeft: () => _switchTo(0),
       onNavigateRight: () => _switchTo(2),
@@ -90,9 +96,10 @@ class _HomeShellState extends ConsumerState<HomeShell>
   void _openPomodoroPage() {
     ref.read(pomodoroNativeProvider).consumePendingOpen();
     if (!mounted) return;
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute(builder: (_) => const PomodoroPage()),
-    );
+    Navigator.of(
+      context,
+      rootNavigator: true,
+    ).push(MaterialPageRoute(builder: (_) => const PomodoroPage()));
   }
 
   /// 消费冷启动深链 payload（init 漏捕时补读 getNotificationAppLaunchDetails）
@@ -112,23 +119,17 @@ class _HomeShellState extends ConsumerState<HomeShell>
     if (payload.startsWith('t')) {
       final id = int.tryParse(payload.substring(1));
       if (id == null) return;
-      nav.push(
-        MaterialPageRoute(builder: (_) => TaskDetailPage(taskId: id)),
-      );
+      nav.push(MaterialPageRoute(builder: (_) => TaskDetailPage(taskId: id)));
     } else if (payload.startsWith('h')) {
       // 5.4：携带习惯 ID 定位到具体习惯（此前只打开通用习惯页）
       final id = int.tryParse(payload.substring(1));
       if (id == null) return;
       nav.push(
-        MaterialPageRoute(
-          builder: (_) => HabitPage(initialHabitId: id),
-        ),
+        MaterialPageRoute(builder: (_) => HabitPage(initialHabitId: id)),
       );
     } else if (payload == 'pomodoro') {
       // 番茄钟通知（倒计时/完成提醒）点击 → 回到番茄专注页
-      nav.push(
-        MaterialPageRoute(builder: (_) => const PomodoroPage()),
-      );
+      nav.push(MaterialPageRoute(builder: (_) => const PomodoroPage()));
     }
   }
 
@@ -195,6 +196,8 @@ class _HomeShellState extends ConsumerState<HomeShell>
     for (var i = 0; i <= _tab; i++) {
       _pages[i] ??= _buildPage(i);
     }
+    // 缓存中的日历 State 保留，只有活动 Tab 接管系统返回键。
+    if (_pages[1] != null) _pages[1] = _buildPage(1);
     return Scaffold(
       body: _TabTransition(
         tab: _tab,
@@ -212,9 +215,9 @@ class _HomeShellState extends ConsumerState<HomeShell>
             color: Theme.of(context).colorScheme.surface,
             border: Border(
               top: BorderSide(
-                color: Theme.of(context).colorScheme.outlineVariant.withValues(
-                  alpha: 0.5,
-                ),
+                color: Theme.of(
+                  context,
+                ).colorScheme.outlineVariant.withValues(alpha: 0.5),
               ),
             ),
           ),

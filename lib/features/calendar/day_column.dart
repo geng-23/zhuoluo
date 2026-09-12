@@ -153,6 +153,8 @@ class DayColumn extends ConsumerStatefulWidget {
     this.dragGhostInfo,
     this.dragDropped,
     this.dragViewportTopY,
+    this.dragViewportH,
+    this.activeScrollController,
     this.scrollOffsetShare,
     this.edgeTurnCtrl,
     this.onDragStartTracking,
@@ -203,6 +205,10 @@ class DayColumn extends ConsumerStatefulWidget {
   /// 虚影/落点换算用它 + 共享滚动 offset 推算内容 y，
   /// 不依赖当前页自身 offset 的瞬态（翻页恢复前的跳变）
   final ValueNotifier<double>? dragViewportTopY;
+
+  /// 当前可见页的时间轴视口；跨页选时时从共享值读取。
+  final ValueNotifier<double>? dragViewportH;
+  final ValueNotifier<ScrollController?>? activeScrollController;
 
   /// 共享垂直滚动位置（跨页稳定：翻页时保持旧值，不被新页瞬态污染）。
   /// 与 dragViewportTopY 配合计算内容 y
@@ -289,19 +295,30 @@ class DayColumnState extends ConsumerState<DayColumn> {
   // ---------- 拖动垂直自动滚动（时间轴顶部/底部边缘） ----------
 
   Timer? _autoScrollTimer;
+  int? _autoScrollDirection;
+
+  ScrollController? get _visibleScrollController => _dragSelecting
+      ? (widget.activeScrollController?.value ?? widget.scrollController)
+      : widget.scrollController;
 
   /// 拖动中检测手指是否接近时间轴视口顶部/底部，触发自动滚动
   /// （如从 22:00 拖到 6:00 需要向上滚动）。
   /// 用 Scrollable 视口的全局位置精确换算：手指在视口内 y =
   /// 全局 y - 视口顶部全局 y（不受 ListView padding/滚动偏移影响）。
   void _checkVerticalAutoScroll(double globalDy) {
-    final scroll = widget.scrollController;
+    final scroll = _visibleScrollController;
     if (scroll == null || !scroll.hasClients) return;
     final scrollable = Scrollable.of(context);
     final scrollBox = scrollable.context.findRenderObject() as RenderBox?;
-    if (scrollBox == null || !scrollBox.hasSize) return;
-    final viewportTop = scrollBox.localToGlobal(Offset.zero).dy;
-    final viewportH = scrollBox.size.height;
+    final viewportTop =
+        (_dragSelecting ? widget.dragViewportTopY?.value : null) ??
+        (scrollBox?.hasSize == true
+            ? scrollBox!.localToGlobal(Offset.zero).dy
+            : null);
+    final viewportH =
+        (_dragSelecting ? widget.dragViewportH?.value : null) ??
+        (scrollBox?.hasSize == true ? scrollBox!.size.height : null);
+    if (viewportTop == null || viewportH == null || viewportH <= 0) return;
     final fingerY = globalDy - viewportTop;
     // 上滑触发区 30px；下滑触发区 90px（底部靠近导航栏，放宽便于触发）
     if (fingerY < 30) {
@@ -314,10 +331,15 @@ class DayColumnState extends ConsumerState<DayColumn> {
   }
 
   void _startAutoScroll(int dir) {
+    if (_autoScrollDirection != dir) _stopAutoScroll();
     if (_autoScrollTimer != null) return;
+    _autoScrollDirection = dir;
     _autoScrollTimer = Timer.periodic(const Duration(milliseconds: 16), (t) {
-      final scroll = widget.scrollController;
-      if (scroll == null || !scroll.hasClients) return;
+      final scroll = _visibleScrollController;
+      if (scroll == null || !scroll.hasClients) {
+        _stopAutoScroll();
+        return;
+      }
       final max = scroll.position.maxScrollExtent;
       final target = (scroll.offset + dir * 8).clamp(0.0, max);
       if (target == scroll.offset) {
@@ -339,10 +361,14 @@ class DayColumnState extends ConsumerState<DayColumn> {
   double? _localYFromGlobal(double globalDy) {
     final scrollable = Scrollable.of(context);
     final scrollBox = scrollable.context.findRenderObject() as RenderBox?;
-    if (scrollBox == null || !scrollBox.hasSize) return null;
-    final viewportTop = scrollBox.localToGlobal(Offset.zero).dy;
+    final viewportTop =
+        widget.dragViewportTopY?.value ??
+        (scrollBox?.hasSize == true
+            ? scrollBox!.localToGlobal(Offset.zero).dy
+            : null);
+    if (viewportTop == null) return null;
     final off =
-        widget.scrollController?.offset ??
+        _visibleScrollController?.offset ??
         widget.scrollOffsetShare?.value ??
         0;
     return globalDy - (viewportTop + axisTopPadding - off);
@@ -371,6 +397,23 @@ class DayColumnState extends ConsumerState<DayColumn> {
   void _stopAutoScroll() {
     _autoScrollTimer?.cancel();
     _autoScrollTimer = null;
+    _autoScrollDirection = null;
+  }
+
+  void _cancelSelection() {
+    _cancelSelectionEdgeTurn();
+    _stopAutoScroll();
+    widget.selectionRange?.value = null;
+    _selectionLastGlobal = null;
+    if (!mounted) return;
+    setState(() {
+      _dragSelecting = false;
+      _dragAnchorY = null;
+      _dragStartY = null;
+      _dragCurrentY = null;
+      _selectionStartGlobalX = null;
+      _selectionStartGlobalY = null;
+    });
   }
 
   /// 边缘翻周/日：进入边缘区停留 300ms 触发首次翻页；
@@ -725,7 +768,8 @@ class DayColumnState extends ConsumerState<DayColumn> {
             // 新选时开始：停掉残留自动滚动（上一轮异常中断时兜底）
             _stopAutoScroll();
             Haptics.select();
-            final startY = _localYFromGlobal(details.globalPosition.dy) ??
+            final startY =
+                _localYFromGlobal(details.globalPosition.dy) ??
                 details.localPosition.dy;
             setState(() {
               _dragSelecting = true;
@@ -759,12 +803,10 @@ class DayColumnState extends ConsumerState<DayColumn> {
             // 区间另一端被逐段吞掉（15:00→10:00 拖选只剩 10:00-12:00）。
             // 列内 y 用 _localYFromGlobal（globalPosition 即时，不受滚动
             // 期间引擎布局滞后影响——与自动滚动 tick 同源，选区不被拉回）
-            final rawY = _localYFromGlobal(details.globalPosition.dy) ??
+            final rawY =
+                _localYFromGlobal(details.globalPosition.dy) ??
                 details.localPosition.dy;
-            final (sy, ey) = _snappedYRange(
-              _dragAnchorY ?? rawY,
-              rawY,
-            );
+            final (sy, ey) = _snappedYRange(_dragAnchorY ?? rawY, rawY);
             _dragStartY = sy;
             _dragCurrentY = ey;
             _selectionLastGlobal = details.globalPosition;
@@ -810,6 +852,7 @@ class DayColumnState extends ConsumerState<DayColumn> {
               t2,
             );
           },
+          onLongPressCancel: _cancelSelection,
           child: SizedBox(
             height: (endHour - widget.startHour) * _pp,
             // 拖入不整列变蓝（用户反馈太丑），仅保留顶部时间浮标与指示线
@@ -1018,9 +1061,9 @@ class DayColumnState extends ConsumerState<DayColumn> {
                           60 *
                           _pp,
                       text: DateUtilsEx.timeCn(gStart),
-                     );
-                   },
-                 ),
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -1676,9 +1719,7 @@ class TaskBlock extends ConsumerWidget {
     final baseColor =
         TaskColors.colorOf(item.task.color, brightness) ??
         colorFromHex(item.listColor);
-    final color = done
-        ? Theme.of(context).colorScheme.outline
-        : baseColor;
+    final color = done ? Theme.of(context).colorScheme.outline : baseColor;
     final block = _blockBody(context, color, done, notifier, ref);
     // 全天任务同样可长按拖动：拖到置顶区另一天=改期保持全天（AllDayBar
     // DragTarget 处理），拖进时间轴=转 1 小时时段任务（本列 onAccept 处理）
@@ -1780,38 +1821,38 @@ class TaskBlock extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                          // 标题按块高自适应换行（10px 字约 14dp 行高）
+                        // 标题按块高自适应换行（10px 字约 14dp 行高）
+                        Text(
+                          t.title,
+                          maxLines: allDay
+                              ? 2
+                              : _blockLineCount(ref.read(pixelPerHourProvider)),
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                            decoration: done
+                                ? TextDecoration.lineThrough
+                                : null,
+                            color: textColor,
+                          ),
+                        ),
+                        // 仅置顶区跨天定时任务显示起止时刻小字
+                        // （时间轴内定时任务用户要求不显示时间，标题占满全块）
+                        if (showTime && t.planStart != null)
                           Text(
-                            t.title,
-                            maxLines: allDay
-                                ? 2
-                                : _blockLineCount(ref.read(pixelPerHourProvider)),
-                            overflow: TextOverflow.ellipsis,
+                            // 跨天任务：起止两端都带日期（"8月10日 22:00 到
+                            // 8月11日 06:00"），避免只显示时分产生跨天歧义
+                            DateUtilsEx.timeRangeText(
+                              t.planStart!,
+                              t.planEnd ??
+                                  t.planStart!.add(const Duration(hours: 1)),
+                            ),
                             style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w500,
-                              decoration: done
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                              color: textColor,
+                              fontSize: 8,
+                              color: textColor.withValues(alpha: 0.85),
                             ),
                           ),
-                          // 仅置顶区跨天定时任务显示起止时刻小字
-                          // （时间轴内定时任务用户要求不显示时间，标题占满全块）
-                          if (showTime && t.planStart != null)
-                            Text(
-                              // 跨天任务：起止两端都带日期（"8月10日 22:00 到
-                              // 8月11日 06:00"），避免只显示时分产生跨天歧义
-                              DateUtilsEx.timeRangeText(
-                                t.planStart!,
-                                t.planEnd ??
-                                    t.planStart!.add(const Duration(hours: 1)),
-                              ),
-                              style: TextStyle(
-                                fontSize: 8,
-                                color: textColor.withValues(alpha: 0.85),
-                              ),
-                            ),
                       ],
                     ),
                   ),

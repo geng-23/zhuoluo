@@ -227,10 +227,10 @@ class _TrashPageState extends ConsumerState<TrashPage> {
   Widget build(BuildContext context) {
     final itemsAsync = ref.watch(trashItemsProvider);
     final retentionAsync = ref.watch(trashRetentionDaysProvider);
-    final items = itemsAsync.valueOrNull ?? const <TrashItem>[];
+    final items = itemsAsync.value ?? const <TrashItem>[];
     // 列表变化时清空失效选择（被恢复/删除的条目）
     ref.listen<AsyncValue<List<TrashItem>>>(trashItemsProvider, (prev, next) {
-      final fresh = next.valueOrNull;
+      final fresh = next.value;
       if (fresh == null) return;
       final ids = fresh.map((i) => i.id).toSet();
       if (_selected.any((id) => !ids.contains(id))) {
@@ -238,7 +238,7 @@ class _TrashPageState extends ConsumerState<TrashPage> {
       }
     });
 
-    final retention = retentionAsync.valueOrNull ?? 30;
+    final retention = retentionAsync.value ?? 30;
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(

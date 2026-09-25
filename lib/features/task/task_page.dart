@@ -728,15 +728,22 @@ class _TaskPageState extends ConsumerState<TaskPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const ListTile(title: Text('排序方式')),
-            ...[('time', '按时间'), ('quadrant', '按象限')].map(
-              (e) => RadioListTile<String>(
-                value: e.$1,
-                groupValue: state.sortMode,
-                title: Text(e.$2),
-                onChanged: (v) {
-                  ref.read(tasksControllerProvider.notifier).setSortMode(v!);
-                  Navigator.pop(c);
-                },
+            RadioGroup<String>(
+              groupValue: state.sortMode,
+              onChanged: (value) {
+                if (value == null) return;
+                ref.read(tasksControllerProvider.notifier).setSortMode(value);
+                Navigator.pop(c);
+              },
+              child: Column(
+                children: [
+                  ...[('time', '按时间'), ('quadrant', '按象限')].map(
+                    (e) => RadioListTile<String>(
+                      value: e.$1,
+                      title: Text(e.$2),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

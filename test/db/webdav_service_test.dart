@@ -47,12 +47,49 @@ void main() {
       .replaceAll('<multistatus xmlns="DAV:">', '<multistatus>');
 
   http.Response xml(String body, [int status = 207]) => http.Response(
-        body,
-        status,
-        headers: {'content-type': 'application/xml;charset=utf-8'},
-      );
+    body,
+    status,
+    headers: {'content-type': 'application/xml;charset=utf-8'},
+  );
 
   group('testConnection', () {
+    test('拒绝明文 HTTP，且不会发送账号密码', () async {
+      var requested = false;
+      final svc = WebdavService(
+        client: MockClient((_) async {
+          requested = true;
+          return http.Response('', 207);
+        }),
+      );
+      const insecure = WebdavConfig(
+        url: 'http://dav.example.com/dav/',
+        username: 'user',
+        password: 'pass',
+      );
+      expect(insecure.connectable, isFalse);
+      await expectLater(
+        svc.testConnection(insecure),
+        throwsA(isA<WebdavException>()),
+      );
+      expect(requested, isFalse);
+    });
+
+    test('HTTPS 重定向不能自动跟随', () async {
+      final svc = WebdavService(
+        client: MockClient((req) async {
+          expect(req.followRedirects, isFalse);
+          return http.Response(
+            '',
+            302,
+            headers: {'location': 'http://dav.example.com/dav/'},
+          );
+        }),
+      );
+      await expectLater(
+        svc.testConnection(config),
+        throwsA(isA<WebdavException>()),
+      );
+    });
     test('目录存在：Depth:0 PROPFIND 返回 207 即成功', () async {
       final methods = <String>[];
       final svc = WebdavService(
@@ -82,8 +119,11 @@ void main() {
       );
       await svc.testConnection(config);
       expect(calls.first, startsWith('PROPFIND'));
-      expect(calls.where((c) => c.startsWith('MKCOL')), isNotEmpty,
-          reason: '404 后必须先创建目录');
+      expect(
+        calls.where((c) => c.startsWith('MKCOL')),
+        isNotEmpty,
+        reason: '404 后必须先创建目录',
+      );
       expect(calls.last, startsWith('PROPFIND'), reason: '建目录后应复测');
     });
 
@@ -114,7 +154,10 @@ void main() {
       await expectLater(
         svc.testConnection(
           const WebdavConfig(
-              url: 'dav.example.com/dav', username: 'u', password: 'p'),
+            url: 'dav.example.com/dav',
+            username: 'u',
+            password: 'p',
+          ),
         ),
         throwsA(isA<WebdavException>()),
       );
@@ -138,12 +181,17 @@ void main() {
       );
       final name = await svc.upload(config, '{"hello":"world"}');
       expect(
-        RegExp(r'^zhuoluo_backup_\d{8}_\d{6}_[a-z0-9]{4}\.json$').hasMatch(name),
+        RegExp(
+          r'^zhuoluo_backup_\d{8}_\d{6}_[a-z0-9]{4}\.json$',
+        ).hasMatch(name),
         isTrue,
       );
       expect(putBody, '{"hello":"world"}');
-      expect(calls.indexOf('MKCOL'), lessThan(calls.indexOf('PUT')),
-          reason: '必须先确保目录存在再 PUT（防新目录首次上传 409）');
+      expect(
+        calls.indexOf('MKCOL'),
+        lessThan(calls.indexOf('PUT')),
+        reason: '必须先确保目录存在再 PUT（防新目录首次上传 409）',
+      );
     });
 
     test('中文目录与无末尾斜杠地址正确编码拼接', () async {
@@ -163,29 +211,39 @@ void main() {
         ),
         '{}',
       );
-      expect(captured!.pathSegments.take(3), ['dav', '着落', '备份'],
-          reason: '路径段解码后应等于原始目录名');
-      expect(captured!.path.endsWith('/'), isFalse,
-          reason: '文件请求不应带末尾斜杠');
+      expect(captured!.pathSegments.take(3), [
+        'dav',
+        '着落',
+        '备份',
+      ], reason: '路径段解码后应等于原始目录名');
+      expect(captured!.path.endsWith('/'), isFalse, reason: '文件请求不应带末尾斜杠');
     });
 
     test('目录请求带末尾斜杠', () {
       final svc = WebdavService(
-          client: MockClient((_) async => http.Response('', 207)));
+        client: MockClient((_) async => http.Response('', 207)),
+      );
       final uri = svc.buildUri(config);
       expect(uri.path, endsWith('/'));
     });
 
     test('云端空间不足：507 语义化提示', () async {
       final svc = WebdavService(
-        client: MockClient((req) async => req.method == 'MKCOL'
-            ? http.Response('', 201)
-            : http.Response('', 507)),
+        client: MockClient(
+          (req) async => req.method == 'MKCOL'
+              ? http.Response('', 201)
+              : http.Response('', 507),
+        ),
       );
       await expectLater(
         svc.upload(config, '{}'),
-        throwsA(isA<WebdavException>()
-            .having((e) => e.message, 'message', contains('存储空间不足'))),
+        throwsA(
+          isA<WebdavException>().having(
+            (e) => e.message,
+            'message',
+            contains('存储空间不足'),
+          ),
+        ),
       );
     });
   });
@@ -229,8 +287,13 @@ void main() {
       );
       await expectLater(
         svc.list(config),
-        throwsA(isA<WebdavException>()
-            .having((e) => e.message, 'message', contains('无法识别'))),
+        throwsA(
+          isA<WebdavException>().having(
+            (e) => e.message,
+            'message',
+            contains('无法识别'),
+          ),
+        ),
       );
     });
   });
@@ -245,7 +308,9 @@ void main() {
         }),
       );
       expect(
-          await svc.download(config, 'zhuoluo_backup_a.json'), '{"version":1}');
+        await svc.download(config, 'zhuoluo_backup_a.json'),
+        '{"version":1}',
+      );
     });
 
     test('删除 204 成功、404 视为已删', () async {
@@ -267,7 +332,8 @@ void main() {
 
     test('拒绝越权路径的文件名', () async {
       final svc = WebdavService(
-          client: MockClient((_) async => http.Response('', 204)));
+        client: MockClient((_) async => http.Response('', 204)),
+      );
       for (final bad in [
         '../evil.json',
         'other/file.json',
@@ -293,8 +359,13 @@ void main() {
       );
       await expectLater(
         svc.testConnection(config),
-        throwsA(isA<WebdavException>()
-            .having((e) => e.message, 'message', contains('无法连接服务器'))),
+        throwsA(
+          isA<WebdavException>().having(
+            (e) => e.message,
+            'message',
+            contains('无法连接服务器'),
+          ),
+        ),
       );
     });
 
@@ -308,8 +379,13 @@ void main() {
       );
       await expectLater(
         svc.testConnection(config),
-        throwsA(isA<WebdavException>()
-            .having((e) => e.message, 'message', contains('超时'))),
+        throwsA(
+          isA<WebdavException>().having(
+            (e) => e.message,
+            'message',
+            contains('超时'),
+          ),
+        ),
       );
     });
 
@@ -319,8 +395,13 @@ void main() {
       );
       await expectLater(
         svc.testConnection(config),
-        throwsA(isA<WebdavException>()
-            .having((e) => e.message, 'message', contains('502'))),
+        throwsA(
+          isA<WebdavException>().having(
+            (e) => e.message,
+            'message',
+            contains('502'),
+          ),
+        ),
       );
     });
   });

@@ -27,11 +27,9 @@ void main() {
   Future<void> seed() async {
     await db.ensureDefaultList();
     final list = await db.getDefaultList();
-    final taskId = await db.insertTask(TasksCompanion.insert(
-      listId: list.id,
-      title: '任务A',
-      createdAt: now,
-    ));
+    final taskId = await db.insertTask(
+      TasksCompanion.insert(listId: list.id, title: '任务A', createdAt: now),
+    );
     await db.insertReminder(
       RemindersCompanion.insert(
         taskId: taskId,
@@ -41,6 +39,52 @@ void main() {
     await db.insertHabit('阅读', '⭐', null);
     await db.completeTask(taskId);
   }
+
+  test('完整恢复保留本机 WebDAV 配置，且备份不能覆盖它', () async {
+    await db.setSetting(
+      BackupService.keyWebdavUrl,
+      'https://local.example/dav',
+    );
+    await db.setSetting(BackupService.keyWebdavPassword, 'local-secret');
+    await db.setSetting('themeMode', 'dark');
+    final service = BackupService(db);
+    final data = jsonDecode(await service.exportJson()) as Map<String, dynamic>;
+    data.remove('checksum'); // 兼容旧版无校验和备份
+    (data['settings'] as List).addAll([
+      {'key': BackupService.keyWebdavUrl, 'value': 'https://other.example/dav'},
+      {'key': BackupService.keyWebdavPassword, 'value': 'other-secret'},
+      {'key': 'themeMode', 'value': 'light'},
+    ]);
+    await service.importJson(jsonEncode(data));
+    expect(
+      await db.getSetting(BackupService.keyWebdavUrl),
+      'https://local.example/dav',
+    );
+    expect(
+      await db.getSetting(BackupService.keyWebdavPassword),
+      'local-secret',
+    );
+    expect(await db.getSetting('themeMode'), 'light');
+  });
+
+  test('合并导入忽略备份中的 WebDAV 配置', () async {
+    await db.setSetting(
+      BackupService.keyWebdavUrl,
+      'https://local.example/dav',
+    );
+    final service = BackupService(db);
+    final data = jsonDecode(await service.exportJson()) as Map<String, dynamic>;
+    data.remove('checksum');
+    (data['settings'] as List).add({
+      'key': BackupService.keyWebdavUrl,
+      'value': 'https://other.example/dav',
+    });
+    await service.importJson(jsonEncode(data), merge: true);
+    expect(
+      await db.getSetting(BackupService.keyWebdavUrl),
+      'https://local.example/dav',
+    );
+  });
 
   test('parseBackupStats：解析备份内容统计（确认框/完成报告用）', () async {
     await seed();
@@ -100,29 +144,26 @@ void main() {
     expect(tasks.single.title, '任务A');
   });
 
-  test(
-    '导入读取必须用 readAsBytes+utf8.decode：XFile.fromData 中文不乱码'
-    '（readAsString 按 code unit 解读字节，中文必乱码）',
-    () async {
-      await seed();
-      final service = BackupService(db);
-      final json = await service.exportJson();
-      // 模拟 file_selector_android 的 openFile 返回：XFile.fromData(原始字节)
-      final xfile = XFile.fromData(
-        utf8.encode(json),
-        mimeType: 'application/json',
-      );
-      // 修复后的读取方式（backup_platform_io pickBackupFileImpl 同款）
-      final text = utf8.decode(await xfile.readAsBytes());
-      final db2 = AppDatabase.forTesting(NativeDatabase.memory());
-      addTearDown(db2.close);
-      await BackupService(db2).importJson(text);
-      final lists = await db2.getAllLists();
-      expect(lists.single.name, '收件箱');
-      final tasks = await db2.allTasksForBackup();
-      expect(tasks.single.title, '任务A');
-    },
-  );
+  test('导入读取必须用 readAsBytes+utf8.decode：XFile.fromData 中文不乱码'
+      '（readAsString 按 code unit 解读字节，中文必乱码）', () async {
+    await seed();
+    final service = BackupService(db);
+    final json = await service.exportJson();
+    // 模拟 file_selector_android 的 openFile 返回：XFile.fromData(原始字节)
+    final xfile = XFile.fromData(
+      utf8.encode(json),
+      mimeType: 'application/json',
+    );
+    // 修复后的读取方式（backup_platform_io pickBackupFileImpl 同款）
+    final text = utf8.decode(await xfile.readAsBytes());
+    final db2 = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db2.close);
+    await BackupService(db2).importJson(text);
+    final lists = await db2.getAllLists();
+    expect(lists.single.name, '收件箱');
+    final tasks = await db2.allTasksForBackup();
+    expect(tasks.single.title, '任务A');
+  });
 
   group('删除备份与自动备份计时重置', () {
     test('删除后无任何备份文件 → 重置 lastAutoBackupAt（下次打开补一份）', () async {
@@ -133,14 +174,18 @@ void main() {
       );
       final service = _InjectingBackupService(db)..remaining = [];
       await service.deleteBackupFiles(['/nonexistent/a.json']);
-      expect(await db.getSetting(BackupService.keyLastAutoBackupAt), '',
-          reason: '备份删光后重置计时，24h 门控不再拦截');
+      expect(
+        await db.getSetting(BackupService.keyLastAutoBackupAt),
+        '',
+        reason: '备份删光后重置计时，24h 门控不再拦截',
+      );
     });
 
     test('删除后仍有备份文件 → 不重置计时', () async {
       await db.ensureDefaultList();
-      final old =
-          DateTime.now().subtract(const Duration(hours: 1)).toIso8601String();
+      final old = DateTime.now()
+          .subtract(const Duration(hours: 1))
+          .toIso8601String();
       await db.setSetting(BackupService.keyLastAutoBackupAt, old);
       final service = _InjectingBackupService(db)
         ..remaining = [
@@ -152,8 +197,11 @@ void main() {
           ),
         ];
       await service.deleteBackupFiles(['/nonexistent/a.json']);
-      expect(await db.getSetting(BackupService.keyLastAutoBackupAt), old,
-          reason: '仍有备份时保持计时，一天最多一次');
+      expect(
+        await db.getSetting(BackupService.keyLastAutoBackupAt),
+        old,
+        reason: '仍有备份时保持计时，一天最多一次',
+      );
     });
   });
   group('备份完整性与导入字段校验', () {
@@ -188,14 +236,16 @@ void main() {
     });
 
     test('旧版备份无 checksum 字段 → 兼容导入', () async {
-      final data = await exported()..remove('checksum');
+      final data = await exported()
+        ..remove('checksum');
       final count = await BackupService(newDb()).importJson(jsonEncode(data));
       expect(count, 1, reason: '历史版本备份保持向后兼容');
     });
 
     test('remindAtMinutes 越界（>1439 或负数）→ 拒绝', () async {
       for (final bad in [1440, -1]) {
-        final data = await exported()..remove('checksum');
+        final data = await exported()
+          ..remove('checksum');
         (data['reminders'] as List).first['remindAtMinutes'] = bad;
         await expectLater(
           BackupService(newDb()).importJson(jsonEncode(data)),
@@ -207,7 +257,8 @@ void main() {
 
     test('remindMinutesBefore 越界（负数 / >31 天）→ 拒绝', () async {
       for (final bad in [-5, 44641]) {
-        final data = await exported()..remove('checksum');
+        final data = await exported()
+          ..remove('checksum');
         (data['reminders'] as List).first['remindMinutesBefore'] = bad;
         await expectLater(
           BackupService(newDb()).importJson(jsonEncode(data)),
@@ -228,7 +279,8 @@ void main() {
         'FREQ=DAILY;UNTIL=notadate',
       ];
       for (final rule in badRules) {
-        final data = await exported()..remove('checksum');
+        final data = await exported()
+          ..remove('checksum');
         (data['tasks'] as List).first['rrule'] = rule;
         await expectLater(
           BackupService(newDb()).importJson(jsonEncode(data)),
@@ -240,7 +292,8 @@ void main() {
 
     test('skippedDates 格式非法或条目过多 → 拒绝', () async {
       for (final bad in ['not-json', '[123]', '["${DateTime(2026)}x"]']) {
-        final data = await exported()..remove('checksum');
+        final data = await exported()
+          ..remove('checksum');
         (data['tasks'] as List).first['skippedDates'] = bad;
         await expectLater(
           BackupService(newDb()).importJson(jsonEncode(data)),
@@ -249,10 +302,13 @@ void main() {
         );
       }
       final big = jsonEncode(
-        List.generate(10001, (i) => DateTime(2026, 1 + i % 12, 1 + i % 28)
-            .toIso8601String()),
+        List.generate(
+          10001,
+          (i) => DateTime(2026, 1 + i % 12, 1 + i % 28).toIso8601String(),
+        ),
       );
-      final data = await exported()..remove('checksum');
+      final data = await exported()
+        ..remove('checksum');
       (data['tasks'] as List).first['skippedDates'] = big;
       await expectLater(
         BackupService(newDb()).importJson(jsonEncode(data)),
@@ -292,8 +348,9 @@ void main() {
       expect(ok, isTrue, reason: '测试替身写盘成功，自动备份应完整执行');
       expect(service.wroteAutoBackup, isTrue);
       // 只删私有域内最旧一份；手动导出文件不在删除列表
-      expect(service.deletedPaths, ['/private/zhuoluo_backup_10.json'],
-          reason: '清理只作用于自动备份私有目录（保留 10 份）');
+      expect(service.deletedPaths, [
+        '/private/zhuoluo_backup_10.json',
+      ], reason: '清理只作用于自动备份私有目录（保留 10 份）');
     });
   });
 }
@@ -314,12 +371,13 @@ class _IsolationBackupService extends BackupService {
   bool wroteAutoBackup = false;
 
   @override
-  Future<List<BackupFileInfo>> listAutoBackupInfos() async =>
-      List.of(autoDir);
+  Future<List<BackupFileInfo>> listAutoBackupInfos() async => List.of(autoDir);
 
   @override
-  Future<List<BackupFileInfo>> listBackupInfos() async =>
-      [...autoDir, ...manualFiles];
+  Future<List<BackupFileInfo>> listBackupInfos() async => [
+    ...autoDir,
+    ...manualFiles,
+  ];
 
   @override
   Future<String> writeAutoBackupFile(String json) async {

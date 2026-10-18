@@ -266,6 +266,7 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
   /// 结束（含提前结束/归零）：记录实际专注时长，清理通知。
   /// 前台完成走应用内反馈（音效+页面提示）；后台完成弹完成通知。
   Future<void> finish() async {
+    if (state.state == PomodoroState.idle) return;
     _timer?.cancel();
     _endAt = null;
     _accumulateElapsed();
@@ -290,19 +291,21 @@ class PomodoroController extends StateNotifier<PomodoroStatus> {
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
       // 完成通知尽力而为：失败不影响记录写入与反馈
       unawaited(
-        notifications.showPomodoroFinished(minutes: elapsedMin).catchError(
-          (Object e) => debugPrint('番茄钟完成通知失败: $e'),
-        ),
+        notifications
+            .showPomodoroFinished(minutes: elapsedMin)
+            .catchError((Object e) => debugPrint('番茄钟完成通知失败: $e')),
       );
     }
     // 数据库保存成功后再反馈；捕获外键异常（关联任务被删除时
     // insertPomodoro 抛错，此前无反馈）
     try {
-      await _ref.read(dbProvider).insertPomodoro(
-        taskId,
-        elapsedMin,
-        AppClock.now().subtract(Duration(minutes: elapsedMin)),
-      );
+      await _ref
+          .read(dbProvider)
+          .insertPomodoro(
+            taskId,
+            elapsedMin,
+            AppClock.now().subtract(Duration(minutes: elapsedMin)),
+          );
       // 番茄记录写库后通知统计等依赖方
       _ref.read(dataVersionProvider.notifier).state++;
     } catch (e) {

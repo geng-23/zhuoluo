@@ -436,6 +436,7 @@ class CalendarController extends StateNotifier<CalendarState> {
     _seriesUndo = null;
     final t = await _db.getTask(s.taskId);
     if (t == null) return;
+    await _scheduler.cancelTask(s.taskId);
     await _db.updateTask(
       s.taskId,
       TasksCompanion(

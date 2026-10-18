@@ -8,11 +8,28 @@ import java.util.Properties
 import java.io.FileInputStream
 
 // 读取发布签名凭据（android/key.properties，不入库）。
-// 文件缺失时回退 debug 签名，保证 `flutter run --release` 开发流程可用。
 val keystoreProperties = Properties().apply {
     val f = rootProject.file("key.properties")
     if (f.exists()) {
         FileInputStream(f).use { load(it) }
+    }
+}
+val releaseSigningKeys = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+val hasReleaseSigning = releaseSigningKeys.all {
+    !keystoreProperties.getProperty(it).isNullOrBlank()
+}
+val validateReleaseSigning = tasks.register("validateReleaseSigning") {
+    doLast {
+        if (!hasReleaseSigning ||
+            !file(keystoreProperties.getProperty("storeFile", "")).isFile
+        ) {
+            throw GradleException("发布签名未配置：请检查 android/key.properties 与密钥库文件")
+        }
+    }
+}
+tasks.configureEach {
+    if (name == "preReleaseBuild") {
+        dependsOn(validateReleaseSigning)
     }
 }
 
@@ -38,7 +55,7 @@ android {
     }
 
     signingConfigs {
-        if (keystoreProperties.containsKey("storeFile")) {
+        if (hasReleaseSigning) {
             create("release") {
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
@@ -50,12 +67,8 @@ android {
 
     buildTypes {
         release {
-            // 正式签名（key.properties 存在时）；缺失时回退 debug 签名
-            signingConfig = if (keystoreProperties.containsKey("storeFile")) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            // 未配置时由 validateReleaseSigning 让 release 构建失败，绝不回退调试签名。
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 }

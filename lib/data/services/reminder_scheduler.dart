@@ -29,8 +29,11 @@ class ReminderScheduler {
     List<Reminder> reminders,
   ) {
     return reminders.map((r) {
-      final t = _reminderBase(task, instanceDate, r)
-          .subtract(Duration(minutes: r.remindMinutesBefore));
+      final t = _reminderBase(
+        task,
+        instanceDate,
+        r,
+      ).subtract(Duration(minutes: r.remindMinutesBefore));
       return t;
     }).toList();
   }
@@ -38,7 +41,12 @@ class ReminderScheduler {
   /// 任务在实例日期的"提醒基准时间"：
   /// - 全天任务：当天 [Reminder.remindAtMinutes] 墙钟时刻（null = 默认 09:00）
   /// - 定时任务：实例时间（例外改期带时分时用实例时分），否则 planStart 的时分
-  DateTime _reminderBase(Task task, DateTime instanceDate, Reminder r) {
+  DateTime _reminderBase(
+    Task task,
+    DateTime instanceDate,
+    Reminder r, {
+    bool exactInstanceTime = false,
+  }) {
     final d = AppClock.at(
       instanceDate.year,
       instanceDate.month,
@@ -49,7 +57,9 @@ class ReminderScheduler {
       return allDayMoment(d.year, d.month, d.day, r.remindAtMinutes);
     }
     // 例外改期到带时分的目标（如改期本次选了具体时间）
-    if (instanceDate.hour != 0 || instanceDate.minute != 0) {
+    if (exactInstanceTime ||
+        instanceDate.hour != 0 ||
+        instanceDate.minute != 0) {
       return AppClock.at(
         d.year,
         d.month,
@@ -129,7 +139,7 @@ class ReminderScheduler {
       // 先收集窗口内待排期实例日（纯内存过滤），再按 (实例日 × 提醒)
       // 扁平化分批并发排期——此前逐日串行 await，全窗 ≈90+ 次平台
       // 往返是完成/编辑反馈慢的主因
-      final pendingDays = <DateTime>[];
+      final pendingDays = <(DateTime, bool)>[];
       for (final inst in instances) {
         // 实例日期归一化到当天 00:00，与完成记录存储基准一致，
         // 避免 RRULE 展开保留的时分（如 09:00）与完成记录（00:00）互相不识别
@@ -139,7 +149,7 @@ class ReminderScheduler {
           continue;
         }
         if (doneSet.contains(_db.completionKey(task.id, day))) continue;
-        pendingDays.add(day);
+        pendingDays.add((day, false));
       }
       // 例外改期：原日期已被 hasInstanceOnDaySync 判为移走，改期到的新日期
       // 不在规则展开里，需单独在窗口内排提醒
@@ -150,14 +160,15 @@ class ReminderScheduler {
         final day = AppClock.at(a.year, a.month, a.day);
         if (day.isBefore(windowStart) || day.isAfter(windowEnd)) continue;
         if (doneSet.contains(_db.completionKey(task.id, day))) continue;
-        pendingDays.add(day);
+        pendingDays.add((a, true));
       }
-      ok = await _forEachBatched<(DateTime, Reminder)>(
+      ok = await _forEachBatched<(DateTime, Reminder, bool)>(
         [
-          for (final day in pendingDays)
-            for (final r in reminders) (day, r),
+          for (final entry in pendingDays)
+            for (final r in reminders) (entry.$1, r, entry.$2),
         ],
-        (pair) => _scheduleOne(task, pair.$1, pair.$2),
+        (pair) =>
+            _scheduleOne(task, pair.$1, pair.$2, exactInstanceTime: pair.$3),
       );
       if (!task.hasReminder && pendingDays.isNotEmpty) {
         await _db.updateTaskHasReminder(task.id, true);
@@ -168,9 +179,18 @@ class ReminderScheduler {
 
   /// 排期单个（实例日, 提醒）组合。已过时刻返回 true（不算失败，
   /// 与全窗重排口径一致）。
-  Future<bool> _scheduleOne(Task task, DateTime day, Reminder r) async {
-    final when = _reminderBase(task, day, r)
-        .subtract(Duration(minutes: r.remindMinutesBefore));
+  Future<bool> _scheduleOne(
+    Task task,
+    DateTime day,
+    Reminder r, {
+    bool exactInstanceTime = false,
+  }) async {
+    final when = _reminderBase(
+      task,
+      day,
+      r,
+      exactInstanceTime: exactInstanceTime,
+    ).subtract(Duration(minutes: r.remindMinutesBefore));
     if (when.isBefore(AppClock.now())) return true;
     // ID 含实例日期：同一 (task, reminder) 的不同实例通知互不覆盖
     return NotificationService.instance.schedule(
@@ -347,7 +367,24 @@ class ReminderScheduler {
       final day = DateUtilsEx.normalizeInstanceDate(instanceDate);
       final reminders = await _db.getReminders(task.id);
       if (reminders.isEmpty) return;
-      await _scheduleDay(task, day, reminders);
+      final exceptions = await _db.getExceptions(task.id);
+      DateTime? override;
+      for (final ex in exceptions) {
+        final target = ex.overrideScheduledDate;
+        if (ex.action == 'edit' &&
+            target != null &&
+            DateUtilsEx.sameDay(target, day)) {
+          override = AppClock.asApp(target);
+          break;
+        }
+      }
+      if (override == null) {
+        await _scheduleDay(task, day, reminders);
+      } else {
+        for (final r in reminders) {
+          await _scheduleOne(task, override, r, exactInstanceTime: true);
+        }
+      }
     } catch (e) {
       debugPrint('实例撤销通知补排失败 taskId=${task.id}: $e');
     }
@@ -396,8 +433,7 @@ class ReminderScheduler {
   Future<void> rescheduleIfStale() async {
     final last = _lastFullReschedule;
     if (last == null) return;
-    final stale =
-        AppClock.now().difference(last) > const Duration(hours: 24);
+    final stale = AppClock.now().difference(last) > const Duration(hours: 24);
     if (stale) {
       await rescheduleAll();
     }
@@ -579,9 +615,7 @@ class ReminderScheduler {
     final start = AppClock.startOfDay(now);
     const window = 93;
     for (var i = 0; i < window; i += _rpcBatchSize) {
-      final n = (i + _rpcBatchSize > window)
-          ? window - i
-          : _rpcBatchSize;
+      final n = (i + _rpcBatchSize > window) ? window - i : _rpcBatchSize;
       await Future.wait([
         for (var j = i; j < i + n; j++)
           NotificationService.instance.cancel(
@@ -624,8 +658,7 @@ class ReminderScheduler {
       if (comp != null) {
         _skippedCompletionCache[_skipCompletionKey(taskId, day)] =
             comp.completedAt;
-        while (_skippedCompletionCache.length >
-            _skippedCompletionCacheLimit) {
+        while (_skippedCompletionCache.length > _skippedCompletionCacheLimit) {
           _skippedCompletionCache.remove(_skippedCompletionCache.keys.first);
         }
       }
@@ -691,16 +724,24 @@ DateTime? reminderTriggerAt(
     final due = task.dueTime;
     if (due == null) return null;
     final a = AppClock.asApp(due);
-    return allDayMoment(a.year, a.month, a.day, remindAtMinutes)
-        .subtract(Duration(minutes: remindMinutesBefore));
+    return allDayMoment(
+      a.year,
+      a.month,
+      a.day,
+      remindAtMinutes,
+    ).subtract(Duration(minutes: remindMinutesBefore));
   }
   final pa = AppClock.asApp(ps);
   final day = task.rrule.isNotEmpty
       ? today
       : AppClock.at(pa.year, pa.month, pa.day);
   if (task.isAllDay) {
-    return allDayMoment(day.year, day.month, day.day, remindAtMinutes)
-        .subtract(Duration(minutes: remindMinutesBefore));
+    return allDayMoment(
+      day.year,
+      day.month,
+      day.day,
+      remindAtMinutes,
+    ).subtract(Duration(minutes: remindMinutesBefore));
   }
   return AppClock.at(
     day.year,

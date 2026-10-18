@@ -153,6 +153,7 @@ void main() {
         .listSync(recursive: true)
         .whereType<File>()
         .where((f) => f.path.endsWith('.dart'))) {
+      final path = file.path.replaceAll('\\', '/');
       final raw = file.readAsStringSync();
       // 去掉行注释后再匹配，避免注释里的示例代码误报
       final code = raw
@@ -160,11 +161,11 @@ void main() {
           .map((l) => l.split('//').first)
           .join('\n');
       if (!pattern.hasMatch(code)) continue;
-      final reason = allowedFiles[file.path];
+      final reason = allowedFiles[path];
       if (reason == null) {
-        violations.add('${file.path}: 出现 await 全窗重排且未登记白名单');
+        violations.add('$path: 出现 await 全窗重排且未登记白名单');
       } else if (!raw.contains(marker)) {
-        violations.add('${file.path}: 在白名单内但缺少 "$marker" 标记');
+        violations.add('$path: 在白名单内但缺少 "$marker" 标记');
       }
     }
     expect(violations, isEmpty,

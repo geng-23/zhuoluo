@@ -41,14 +41,52 @@ void main() {
   Future<int> seedRecurringTask(String rrule, {DateTime? start}) async {
     await db.ensureDefaultList();
     final list = await db.getDefaultList();
-    return db.insertTask(TasksCompanion.insert(
-      listId: list.id,
-      title: 'r',
-      rrule: Value(rrule),
-      planStart: Value(start ?? DateTime(now.year, now.month, now.day, 9)),
-      createdAt: now,
-    ));
+    return db.insertTask(
+      TasksCompanion.insert(
+        listId: list.id,
+        title: 'r',
+        rrule: Value(rrule),
+        planStart: Value(start ?? DateTime(now.year, now.month, now.day, 9)),
+        createdAt: now,
+      ),
+    );
   }
+
+  test('重复任务改期保留目标时刻，包括午夜', () async {
+    final taskId = await seedRecurringTask(
+      'FREQ=WEEKLY;BYDAY=FR',
+      start: DateTime(2026, 8, 21, 9),
+    );
+    final reminderId = await db.insertReminder(
+      RemindersCompanion.insert(
+        taskId: taskId,
+        remindMinutesBefore: const Value(0),
+      ),
+    );
+    final exId = await db.insertException(
+      TaskExceptionsCompanion.insert(
+        taskId: taskId,
+        instanceDate: DateTime(2026, 8, 21),
+        action: const Value('edit'),
+        overrideScheduledDate: Value(DateTime(2026, 8, 22, 16, 30)),
+      ),
+    );
+    final scheduler = ReminderScheduler(db);
+    final fake =
+        NotificationService.instance.debugOverrideScheduler!
+            as FakeNotificationScheduler;
+    await scheduler.scheduleTask((await db.getTask(taskId))!);
+    final targetId = NotificationIds.forReminder(
+      reminderId,
+      DateTime(2026, 8, 22),
+    );
+    expect(fake.byId(targetId).last.when, DateTime(2026, 8, 22, 16, 30));
+
+    await db.updateException(exId, DateTime(2026, 8, 22));
+    fake.clear();
+    await scheduler.scheduleTask((await db.getTask(taskId))!);
+    expect(fake.byId(targetId).last.when, DateTime(2026, 8, 22));
+  });
 
   test('#1 通知 ID 含实例日期维度：同一 (task, reminder) 不同实例 ID 互异', () {
     final reminderId = 1;
@@ -118,8 +156,11 @@ void main() {
     );
 
     // 原日期 8/10 不再显示
-    expect(await db.expandTaskForDate(task, monday2026), isEmpty,
-        reason: '被改期的原日期不应再显示实例');
+    expect(
+      await db.expandTaskForDate(task, monday2026),
+      isEmpty,
+      reason: '被改期的原日期不应再显示实例',
+    );
     // 新日期 8/12 显示
     expect(
       (await db.expandTaskForDate(task, DateTime(2026, 8, 12))).length,
@@ -127,10 +168,7 @@ void main() {
       reason: '改期后的新日期应显示实例',
     );
     // 其他规则日期（8/17）仍正常
-    expect(
-      (await db.expandTaskForDate(task, DateTime(2026, 8, 17))).length,
-      1,
-    );
+    expect((await db.expandTaskForDate(task, DateTime(2026, 8, 17))).length, 1);
   });
 
   test('#3 delete 例外：原日期隐藏', () async {
@@ -148,10 +186,7 @@ void main() {
       ),
     );
     expect(await db.expandTaskForDate(task, monday2026), isEmpty);
-    expect(
-      (await db.expandTaskForDate(task, DateTime(2026, 8, 17))).length,
-      1,
-    );
+    expect((await db.expandTaskForDate(task, DateTime(2026, 8, 17))).length, 1);
   });
 
   test('#6 系列改期保留过去命中的完成记录', () async {
@@ -175,8 +210,7 @@ void main() {
       'FREQ=DAILY',
     );
     final after = await db.allCompletionsForBackup();
-    expect(removed, isEmpty,
-        reason: '新规则仍命中过去的日期，完成记录不应被清理');
+    expect(removed, isEmpty, reason: '新规则仍命中过去的日期，完成记录不应被清理');
     expect(
       after.where((c) => c.taskId == taskId).length,
       before.where((c) => c.taskId == taskId).length,
@@ -199,18 +233,23 @@ void main() {
     await db.ensureDefaultList();
     final list = await db.getDefaultList();
     final due = DateTime(now.year, now.month, 15, 18, 0);
-    await db.insertTask(TasksCompanion.insert(
-      listId: list.id,
-      title: 'due-only',
-      dueTime: Value(due),
-      createdAt: now,
-    ));
+    await db.insertTask(
+      TasksCompanion.insert(
+        listId: list.id,
+        title: 'due-only',
+        dueTime: Value(due),
+        createdAt: now,
+      ),
+    );
     final planned = await db.getPlannedCountByDay(
       DateTime(now.year, now.month, 10),
       DateTime(now.year, now.month, 20),
     );
-    expect(planned[DateTime(now.year, now.month, 15)], 1,
-        reason: '仅有截止时间的任务应按截止日计入计划数');
+    expect(
+      planned[DateTime(now.year, now.month, 15)],
+      1,
+      reason: '仅有截止时间的任务应按截止日计入计划数',
+    );
   });
 
   test('通知 ID 无碰撞：同任务多条提醒跨实例、同实例均互异', () {
@@ -280,8 +319,7 @@ void main() {
     NotificationService.instance.debugOverrideScheduler = null;
     final svc = NotificationService.instance;
     final granted = await svc.refreshPermissionCache();
-    expect(granted, isTrue,
-        reason: '测试环境无原生宿主，权限查询应兜底返回 true');
+    expect(granted, isTrue, reason: '测试环境无原生宿主，权限查询应兜底返回 true');
   });
 
   test('reloadSystemTimezone 无原生宿主时静默返回 false（不抛异常）', () async {
@@ -316,15 +354,16 @@ void main() {
     final taskId = NotificationIds.forReminder(1, DateTime(2026, 8, 10));
     expect(testId, isNot(equals(habitId)));
     expect(testId, isNot(equals(taskId)));
-    expect(testId, greaterThan(habitId),
-        reason: '测试段在 int32 上限附近，高于习惯段');
+    expect(testId, greaterThan(habitId), reason: '测试段在 int32 上限附近，高于习惯段');
   });
 
   test('rescheduleIfStale 未过期时短路（不重复全量重排）', () async {
     // setUp 已注入记录型替身（FakeNotificationScheduler）：
     // 断言门控逻辑（此前依赖平台插件不可用时的异常吞掉行为，
     // 属"假绿"——无法验证是否真的短路）
-    final fake = NotificationService.instance.debugOverrideScheduler! as FakeNotificationScheduler;
+    final fake =
+        NotificationService.instance.debugOverrideScheduler!
+            as FakeNotificationScheduler;
 
     final scheduler = ReminderScheduler(db);
     await scheduler.rescheduleAll();
@@ -335,26 +374,25 @@ void main() {
 
     // 立即调用 rescheduleIfStale（<24h）应被门控短路：不再次 cancelAll
     await scheduler.rescheduleIfStale();
-    expect(fake.cancelAllCount, 1,
-        reason: '<24h 门控应短路，不得二次全量重排');
-    expect(fake.scheduled.length, afterFull,
-        reason: '短路后不得新增调度');
+    expect(fake.cancelAllCount, 1, reason: '<24h 门控应短路，不得二次全量重排');
+    expect(fake.scheduled.length, afterFull, reason: '短路后不得新增调度');
   });
 
   test('权限未授予时 rescheduleAll 不先 cancelAll（避免清掉已排提醒）', () async {
-    final fake = NotificationService.instance.debugOverrideScheduler!
-        as FakeNotificationScheduler;
+    final fake =
+        NotificationService.instance.debugOverrideScheduler!
+            as FakeNotificationScheduler;
     // 强制权限被拒（覆盖 setUp 注入的调度替身"视为已授权"路径）
     NotificationService.instance.debugOverridePermission = false;
-    addTearDown(() => NotificationService.instance.debugOverridePermission = null);
+    addTearDown(
+      () => NotificationService.instance.debugOverridePermission = null,
+    );
     // 让缓存确认到"被拒"状态
     await NotificationService.instance.refreshPermissionCache();
 
     final scheduler = ReminderScheduler(db);
     await scheduler.rescheduleAll();
-    expect(fake.cancelAllCount, 0,
-        reason: '权限未授予时全量重排应整体跳过，不得先清空已排提醒');
-    expect(fake.scheduled, isEmpty,
-        reason: '权限被拒不排新提醒（schedule 短路一致）');
+    expect(fake.cancelAllCount, 0, reason: '权限未授予时全量重排应整体跳过，不得先清空已排提醒');
+    expect(fake.scheduled, isEmpty, reason: '权限被拒不排新提醒（schedule 短路一致）');
   });
 }

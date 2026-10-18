@@ -130,12 +130,15 @@ class Settings extends Table {
 /// 备份导出不含回收站；备份恢复（replaceAll）时清空本表，避免旧快照复活。
 class TrashItems extends Table {
   IntColumn get id => integer().autoIncrement()();
+
   /// 被删任务根 id（撤销恢复后按此删除对应回收站行）
   IntColumn get originalTaskId => integer()();
   TextColumn get title => text()();
+
   /// 删除时所属清单名快照（清单可能随后被删/改名）
   TextColumn get listName => text()();
   DateTimeColumn get deletedAt => dateTime()();
+
   /// 整棵树 JSON 快照（encode/decode 见 trash_service.dart）
   TextColumn get data => text()();
 }
@@ -439,10 +442,8 @@ class AppDatabase extends _$AppDatabase {
   Future<List<Task>> getTasksForDate(DateTime day) => _tasksForRange(day, day);
 
   /// 智能清单：未来 7 天（今天起 7 天，含重复任务实例展开）
-  Future<List<Task>> getTasksNext7Days(DateTime today) => _tasksForRange(
-    today,
-    AppClock.addCalendarDays(today, 6),
-  );
+  Future<List<Task>> getTasksNext7Days(DateTime today) =>
+      _tasksForRange(today, AppClock.addCalendarDays(today, 6));
 
   /// 时间范围智能清单（含重复任务实例展开）
   Future<List<Task>> _tasksForRange(DateTime from, DateTime to) async {
@@ -592,10 +593,7 @@ class AppDatabase extends _$AppDatabase {
       base,
       t.rrule,
       from: now,
-      to: AppClock.addCalendarDays(
-        now,
-        RruleService.windowDaysFor(t.rrule),
-      ),
+      to: AppClock.addCalendarDays(now, RruleService.windowDaysFor(t.rrule)),
       limit: 1,
     );
     return hits.isNotEmpty;
@@ -959,10 +957,13 @@ class AppDatabase extends _$AppDatabase {
         .replaceAll('%', '\\%')
         .replaceAll('_', '\\_');
     final q = '%$escaped%';
-    final rows = await (select(tasks)..where(
-      (t) =>
-          t.title.like(q, escapeChar: r'\') | t.note.like(q, escapeChar: r'\'),
-    )).get();
+    final rows =
+        await (select(tasks)..where(
+              (t) =>
+                  t.title.like(q, escapeChar: r'\') |
+                  t.note.like(q, escapeChar: r'\'),
+            ))
+            .get();
     return rows.where((t) => !isCompleted(t)).toList();
   }
 
@@ -1302,8 +1303,7 @@ class AppDatabase extends _$AppDatabase {
 
   /// 完成记录集合的 key（与 getCompletedSetForTasks 返回集合同格式）。
   /// 供提醒调度等批量路径按同一口径判断实例是否已完成。
-  String completionKey(int taskId, DateTime day) =>
-      _doneKey(taskId, day);
+  String completionKey(int taskId, DateTime day) => _doneKey(taskId, day);
 
   Future<List<int>> getVisibleCalendarListIds() async {
     final rows = await (select(
@@ -1385,16 +1385,14 @@ class AppDatabase extends _$AppDatabase {
       );
 
   /// 更新习惯图标
-  Future<void> updateHabitIcon(int id, String icon) =>
-      (update(habits)..where((h) => h.id.equals(id))).write(
-        HabitsCompanion(icon: Value(icon)),
-      );
+  Future<void> updateHabitIcon(int id, String icon) => (update(
+    habits,
+  )..where((h) => h.id.equals(id))).write(HabitsCompanion(icon: Value(icon)));
 
   /// 更新习惯名称
-  Future<void> updateHabitName(int id, String name) =>
-      (update(habits)..where((h) => h.id.equals(id))).write(
-        HabitsCompanion(name: Value(name)),
-      );
+  Future<void> updateHabitName(int id, String name) => (update(
+    habits,
+  )..where((h) => h.id.equals(id))).write(HabitsCompanion(name: Value(name)));
 
   /// 删除习惯的撤销恢复：按原 ID 重建习惯及其全部打卡记录（单事务原子）。
   /// 删除后原 ID 空闲（autoIncrement 不回收但不会冲突），提醒由调用方重排。
@@ -1444,13 +1442,12 @@ class AppDatabase extends _$AppDatabase {
     final start = AppClock.startOfDay(AppClock.asApp(from));
     final end = AppClock.nextDay(to);
     final rows =
-        await (select(habitRecords)
-              ..where(
-                (h) =>
-                    h.habitId.equals(habitId) &
-                    h.date.isBiggerOrEqualValue(start) &
-                    h.date.isSmallerThanValue(end),
-              ))
+        await (select(habitRecords)..where(
+              (h) =>
+                  h.habitId.equals(habitId) &
+                  h.date.isBiggerOrEqualValue(start) &
+                  h.date.isSmallerThanValue(end),
+            ))
             .get();
     return {for (final r in rows) AppClock.startOfDay(AppClock.asApp(r.date))};
   }
@@ -1564,12 +1561,13 @@ class AppDatabase extends _$AppDatabase {
     }
 
     // 重复任务实例完成（task_completions）：按实例日（计划日）计入
-    final completions = await (select(taskCompletions)..where(
-          (c) =>
-              c.instanceDate.isBiggerOrEqualValue(start) &
-              c.instanceDate.isSmallerThanValue(end),
-        ))
-        .get();
+    final completions =
+        await (select(taskCompletions)..where(
+              (c) =>
+                  c.instanceDate.isBiggerOrEqualValue(start) &
+                  c.instanceDate.isSmallerThanValue(end),
+            ))
+            .get();
     // 与计划数口径一致——仅计顶层任务，子任务不计入完成数
     // （重复子任务的实例完成记录也需过滤）
     final completionTaskIds = completions.map((c) => c.taskId).toSet();
@@ -1589,13 +1587,14 @@ class AppDatabase extends _$AppDatabase {
 
     // 非重复任务完成（completedAt，rrule 为空）：按计划开始日/截止日计入，
     // 排除子任务；无计划时间的任务与计划数口径一致，不计入
-    final doneTasks = await (select(tasks)..where(
-          (t) =>
-              t.completedAt.isNotNull() &
-              t.rrule.equals('') &
-              t.parentId.isNull(),
-        ))
-        .get();
+    final doneTasks =
+        await (select(tasks)..where(
+              (t) =>
+                  t.completedAt.isNotNull() &
+                  t.rrule.equals('') &
+                  t.parentId.isNull(),
+            ))
+            .get();
     for (final t in doneTasks) {
       final day = t.planStart ?? t.dueTime;
       if (day == null) continue;
@@ -1691,12 +1690,13 @@ class AppDatabase extends _$AppDatabase {
   }
 
   // ---------- 回收站 ----------
-  Future<int> insertTrashItem(TrashItemsCompanion c) => into(trashItems).insert(c);
+  Future<int> insertTrashItem(TrashItemsCompanion c) =>
+      into(trashItems).insert(c);
 
   /// 回收站条目（按删除时间倒序）
-  Future<List<TrashItem>> getTrashItems() =>
-      (select(trashItems)..orderBy([(t) => OrderingTerm.desc(t.deletedAt)]))
-          .get();
+  Future<List<TrashItem>> getTrashItems() => (select(
+    trashItems,
+  )..orderBy([(t) => OrderingTerm.desc(t.deletedAt)])).get();
 
   Future<TrashItem?> getTrashItem(int id) =>
       (select(trashItems)..where((t) => t.id.equals(id))).getSingleOrNull();
@@ -1710,17 +1710,16 @@ class AppDatabase extends _$AppDatabase {
   Future<void> deleteTrashItem(int id) =>
       (delete(trashItems)..where((t) => t.id.equals(id))).go();
 
-  Future<void> deleteTrashItemByOriginalTaskId(int originalTaskId) =>
-      (delete(trashItems)
-            ..where((t) => t.originalTaskId.equals(originalTaskId)))
-          .go();
+  Future<void> deleteTrashItemByOriginalTaskId(int originalTaskId) => (delete(
+    trashItems,
+  )..where((t) => t.originalTaskId.equals(originalTaskId))).go();
 
   Future<void> clearTrash() => delete(trashItems).go();
 
   /// 删除删除时间早于 [cutoff] 的回收站条目（保留期自动清理）
-  Future<void> deleteTrashOlderThan(DateTime cutoff) =>
-      (delete(trashItems)..where((t) => t.deletedAt.isSmallerThanValue(cutoff)))
-          .go();
+  Future<void> deleteTrashOlderThan(DateTime cutoff) => (delete(
+    trashItems,
+  )..where((t) => t.deletedAt.isSmallerThanValue(cutoff))).go();
 
   /// 回收站条目数量（抽屉入口角标用）
   Future<int> countTrash() => trashItems.count().getSingle();
@@ -1741,12 +1740,16 @@ class AppDatabase extends _$AppDatabase {
   // ---------- 合并导入支持（备份方案设计 3.4）----------
   /// 同名清单（limit 1——本地存在多个同名清单时合并不得崩溃，取首行）
   Future<TaskList?> getListByName(String name) =>
-      (select(lists)..where((l) => l.name.equals(name))..limit(1))
+      (select(lists)
+            ..where((l) => l.name.equals(name))
+            ..limit(1))
           .getSingleOrNull();
 
   /// 同名习惯（limit 1——同上去重查询防崩溃）
   Future<Habit?> getHabitByName(String name) =>
-      (select(habits)..where((h) => h.name.equals(name))..limit(1))
+      (select(habits)
+            ..where((h) => h.name.equals(name))
+            ..limit(1))
           .getSingleOrNull();
 
   /// 非子任务按（清单, 标题）查所有同名候选（合并导入指纹去重用——
@@ -1771,12 +1774,14 @@ class AppDatabase extends _$AppDatabase {
     int remindMinutesBefore,
     int? remindAtMinutes,
   ) =>
-      (select(reminders)..where(
-            (r) =>
-                r.taskId.equals(taskId) &
-                r.remindMinutesBefore.equals(remindMinutesBefore) &
-                r.remindAtMinutes.equalsNullable(remindAtMinutes),
-          )..limit(1))
+      (select(reminders)
+            ..where(
+              (r) =>
+                  r.taskId.equals(taskId) &
+                  r.remindMinutesBefore.equals(remindMinutesBefore) &
+                  r.remindAtMinutes.equalsNullable(remindAtMinutes),
+            )
+            ..limit(1))
           .getSingleOrNull();
 
   Future<TaskException?> getExceptionByTaskDateAction(
@@ -1839,7 +1844,8 @@ class AppDatabase extends _$AppDatabase {
       await delete(reminders).go();
       await delete(pomodoroRecords).go();
       await delete(habitRecords).go();
-      await delete(settings).go();
+      // 本机 WebDAV 配置不在导出备份中，恢复时保留这些键。
+      await (delete(settings)..where((s) => s.key.like('webdav%').not())).go();
       await delete(habits).go();
       await delete(tasks).go();
       await delete(lists).go();

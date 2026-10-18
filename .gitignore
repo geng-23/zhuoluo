@@ -30,8 +30,8 @@ app.*.symbols
 app.*.map.json
 
 # 发布签名密钥与凭据（不入库）
-/android/key.properties
-/android/app/*.keystore
+key.properties
+*.keystore
 *.jks
 *.p12
 *.pfx

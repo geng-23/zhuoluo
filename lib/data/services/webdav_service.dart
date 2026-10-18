@@ -30,7 +30,8 @@ class WebdavConfig {
 
   /// 配置是否足以发起连接（enabled 不参与判断——手动上传只看前三项）
   bool get connectable =>
-      url.trim().isNotEmpty &&
+      Uri.tryParse(url.trim())?.scheme == 'https' &&
+      Uri.tryParse(url.trim())?.host.isNotEmpty == true &&
       username.trim().isNotEmpty &&
       password.isNotEmpty &&
       dir.trim().isNotEmpty;
@@ -151,12 +152,10 @@ class WebdavService {
       ..._dirSegments(c),
     ];
     for (var i = 1; i <= segments.length; i++) {
-      final uri = base
-          .replace(pathSegments: [...segments.sublist(0, i), ''])
-          ;
+      final uri = base.replace(pathSegments: [...segments.sublist(0, i), '']);
       final r = await _send(c, 'MKCOL', uri, timeout: _quick);
-      final ok = r.statusCode >= 200 && r.statusCode < 300 ||
-          r.statusCode == 405;
+      final ok =
+          r.statusCode >= 200 && r.statusCode < 300 || r.statusCode == 405;
       if (!ok) _ensureOk(r, '创建云端目录');
     }
   }
@@ -166,8 +165,8 @@ class WebdavService {
   Uri _parseBase(WebdavConfig c) {
     final raw = c.url.trim();
     final base = Uri.tryParse(raw);
-    if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
-      throw const WebdavException('服务器地址需以 http:// 或 https:// 开头');
+    if (base?.scheme != 'https') {
+      throw const WebdavException('服务器地址必须使用 HTTPS');
     }
     if (base == null || !base.hasScheme || base.host.isEmpty) {
       throw const WebdavException('服务器地址格式不正确');
@@ -200,7 +199,8 @@ class WebdavService {
         c,
         'PROPFIND',
         buildUri(c),
-        body: '<?xml version="1.0" encoding="utf-8"?>'
+        body:
+            '<?xml version="1.0" encoding="utf-8"?>'
             '<d:propfind xmlns:d="DAV:"><d:prop>'
             '<d:displayname/><d:getcontentlength/>'
             '<d:getlastmodified/><d:resourcetype/>'
@@ -221,6 +221,7 @@ class WebdavService {
     try {
       final token = base64Encode(utf8.encode('${c.username}:${c.password}'));
       final request = http.Request(method, uri)
+        ..followRedirects = false
         ..headers['Authorization'] = 'Basic $token'
         ..headers.addAll(extraHeaders ?? const {});
       if (body != null) {
@@ -258,7 +259,8 @@ class WebdavService {
   }
 
   void _validateFileName(String name) {
-    final valid = name.startsWith(fileNamePrefix) &&
+    final valid =
+        name.startsWith(fileNamePrefix) &&
         name.endsWith(fileNameSuffix) &&
         !name.contains('/') &&
         !name.contains('\\') &&
@@ -279,16 +281,18 @@ class WebdavService {
     }
     final result = <WebdavBackupInfo>[];
     for (final resp in doc.findAllElements('response', namespaceUri: '*')) {
-      if (resp.findAllElements('collection', namespaceUri: '*').isNotEmpty) continue;
+      if (resp.findAllElements('collection', namespaceUri: '*').isNotEmpty) {
+        continue;
+      }
       final hrefEl = resp.findAllElements('href', namespaceUri: '*').toList();
       if (hrefEl.isEmpty) continue;
       final href = hrefEl.first.innerText;
-      final segments = Uri.tryParse(href)?.pathSegments ??
+      final segments =
+          Uri.tryParse(href)?.pathSegments ??
           href.split('/').where((s) => s.isNotEmpty);
       if (segments.isEmpty) continue;
       final name = Uri.decodeComponent(segments.last);
-      if (!name.startsWith(fileNamePrefix) ||
-          !name.endsWith(fileNameSuffix)) {
+      if (!name.startsWith(fileNamePrefix) || !name.endsWith(fileNameSuffix)) {
         continue;
       }
       result.add(
@@ -297,12 +301,24 @@ class WebdavService {
           modified: _parseHttpDate(
             resp.findAllElements('getlastmodified', namespaceUri: '*').isEmpty
                 ? ''
-                : resp.findAllElements('getlastmodified', namespaceUri: '*').first.innerText,
+                : resp
+                      .findAllElements('getlastmodified', namespaceUri: '*')
+                      .first
+                      .innerText,
           ),
-          size: int.tryParse(
-                resp.findAllElements('getcontentlength', namespaceUri: '*').isEmpty
+          size:
+              int.tryParse(
+                resp
+                        .findAllElements('getcontentlength', namespaceUri: '*')
+                        .isEmpty
                     ? ''
-                    : resp.findAllElements('getcontentlength', namespaceUri: '*').first.innerText,
+                    : resp
+                          .findAllElements(
+                            'getcontentlength',
+                            namespaceUri: '*',
+                          )
+                          .first
+                          .innerText,
               ) ??
               0,
         ),

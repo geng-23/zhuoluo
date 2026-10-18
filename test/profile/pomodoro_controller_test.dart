@@ -52,8 +52,7 @@ void main() {
   });
 
   /// 泵微任务直到条件成立（unawaited 异步链收敛；真实事件循环下有限轮询）
-  Future<void> pumpUntil(bool Function() predicate,
-      [int maxTurns = 50]) async {
+  Future<void> pumpUntil(bool Function() predicate, [int maxTurns = 50]) async {
     for (var i = 0; i < maxTurns; i++) {
       if (predicate()) return;
       await Future<void>.delayed(const Duration(milliseconds: 1));
@@ -63,11 +62,13 @@ void main() {
 
   Future<int> insertTask({required String title}) async {
     final list = await db.getDefaultList();
-    return db.insertTask(TasksCompanion.insert(
-      listId: list.id,
-      title: title,
-      createdAt: DateTime.now(),
-    ));
+    return db.insertTask(
+      TasksCompanion.insert(
+        listId: list.id,
+        title: title,
+        createdAt: DateTime.now(),
+      ),
+    );
   }
 
   test('开始：running + 满剩余 + 启动前台服务发布倒计时', () async {
@@ -82,6 +83,15 @@ void main() {
     expect(native.starts.last.title, isNull, reason: '未关联任务无标题');
   });
 
+  test('重复结束只写入一条番茄记录', () async {
+    final c = container.read(pomodoroControllerProvider.notifier);
+    c.start();
+    final first = c.finish();
+    final second = c.finish();
+    await Future.wait([first, second]);
+    expect((await db.getPomodoros()).length, 1);
+  });
+
   test('墙钟推进：tick 后剩余按真实经过时间减少（挂起纠偏）', () async {
     final t0 = DateTime(2026, 8, 20, 10, 0, 0);
     AppClock.setNow(t0);
@@ -90,8 +100,11 @@ void main() {
     AppClock.setNow(t0.add(const Duration(seconds: 90)));
     c.debugTick();
     expect(c.state.remainingSeconds, 25 * 60 - 90);
-    expect(native.updates.last.remainingSeconds, 25 * 60 - 90,
-        reason: '每秒推送通知正文实时倒计时');
+    expect(
+      native.updates.last.remainingSeconds,
+      25 * 60 - 90,
+      reason: '每秒推送通知正文实时倒计时',
+    );
     // 挂起恢复后一次 tick 直接补上全部经过时间（不依赖每秒累积）
     AppClock.setNow(t0.add(const Duration(minutes: 3)));
     c.debugTick();
@@ -185,10 +198,16 @@ void main() {
     expect(c.state.remainingSeconds, 25 * 60, reason: '空闲态恢复待开始显示');
     expect(result?.isSuccess, isTrue);
     expect(result?.minutes, 5);
-    expect(native.stops, contains(NotificationIds.forPomodoro),
-        reason: '结束停止前台服务并移除通知');
-    expect(fake.cancelled, contains(NotificationIds.forPomodoro),
-        reason: '结束清理倒计时通知');
+    expect(
+      native.stops,
+      contains(NotificationIds.forPomodoro),
+      reason: '结束停止前台服务并移除通知',
+    );
+    expect(
+      fake.cancelled,
+      contains(NotificationIds.forPomodoro),
+      reason: '结束清理倒计时通知',
+    );
     final rows = await db.getPomodoros();
     expect(rows.single.durationMinutes, 5);
     expect(rows.single.taskId, isNull);
@@ -267,8 +286,7 @@ void main() {
     final c = container.read(pomodoroControllerProvider.notifier);
     c.start();
     expect(c.state.state, PomodoroState.running, reason: '权限被拒不阻止计时');
-    expect(native.starts, isNotEmpty,
-        reason: '权限被拒仍启动前台服务（保活优先，通知由系统隐藏）');
+    expect(native.starts, isNotEmpty, reason: '权限被拒仍启动前台服务（保活优先，通知由系统隐藏）');
     await c.finish();
     expect(native.stops, contains(NotificationIds.forPomodoro));
     expect(fake.finishedShows, isEmpty, reason: '权限被拒不弹完成通知');

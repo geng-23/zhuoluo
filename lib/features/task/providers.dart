@@ -22,10 +22,13 @@ class TasksState {
   final String searchQuery;
   final String sortMode; // time / quadrant
   final bool loading;
+
   /// 重复任务：今天实例是否已完成（今天命中规则时才有意义）
   final Map<int, bool> instanceDone;
+
   /// 重复任务：下一个未完成实例日期（今天起；系列已结束/全部完成则为 null）
   final Map<int, DateTime?> nextInstance;
+
   /// 重复任务：今天是否命中规则
   final Map<int, bool> todayHas;
 
@@ -174,12 +177,11 @@ class TasksController extends StateNotifier<TasksState> {
     final now = AppClock.now();
     final today = AppClock.at(now.year, now.month, now.day);
     // 批量预取今日完成记录（此前逐任务查库）
-    final ids = tasks.where((t) => t.rrule.isNotEmpty).map((t) => t.id).toList();
-    final doneSet = await _db.getCompletedSetForTasks(
-      ids,
-      today,
-      today,
-    );
+    final ids = tasks
+        .where((t) => t.rrule.isNotEmpty)
+        .map((t) => t.id)
+        .toList();
+    final doneSet = await _db.getCompletedSetForTasks(ids, today, today);
     final result = <int, bool>{};
     for (final t in tasks) {
       if (t.rrule.isEmpty) continue;
@@ -193,7 +195,10 @@ class TasksController extends StateNotifier<TasksState> {
     final now = AppClock.now();
     final today = AppClock.at(now.year, now.month, now.day);
     // 批量预取例外（此前逐任务查库）
-    final ids = tasks.where((t) => t.rrule.isNotEmpty).map((t) => t.id).toList();
+    final ids = tasks
+        .where((t) => t.rrule.isNotEmpty)
+        .map((t) => t.id)
+        .toList();
     final exMap = await _db.getExceptionsForTasks(ids);
     final result = <int, bool>{};
     for (final t in tasks) {
@@ -202,8 +207,7 @@ class TasksController extends StateNotifier<TasksState> {
         t,
         today,
         exMap[t.id] ?? const [],
-      ))
-          .isNotEmpty;
+      )).isNotEmpty;
     }
     return result;
   }
@@ -255,10 +259,7 @@ class TasksController extends StateNotifier<TasksState> {
       base,
       t.rrule,
       from: today,
-      to: AppClock.addCalendarDays(
-        today,
-        RruleService.windowDaysFor(t.rrule),
-      ),
+      to: AppClock.addCalendarDays(today, RruleService.windowDaysFor(t.rrule)),
       limit: 400,
     );
     // 候选日期 = 规则实例（被"改期本次"移走的实例替换为其目标日）
@@ -653,7 +654,9 @@ class TasksController extends StateNotifier<TasksState> {
       inst = _currentInstanceDate(t);
       // 乐观更新：与 completeTask 对称，仅"今天实例"立即翻转显示
       if (DateUtilsEx.sameDay(inst, AppClock.now())) {
-        state = state.copyWith(instanceDone: {...state.instanceDone, id: false});
+        state = state.copyWith(
+          instanceDone: {...state.instanceDone, id: false},
+        );
       }
       await _db.uncompleteInstance(id, inst);
     }
@@ -795,8 +798,7 @@ class TasksController extends StateNotifier<TasksState> {
     for (final id in ids) {
       final t = await _db.getTask(id);
       if (t == null) continue;
-      if (t.rrule.isNotEmpty &&
-          await _db.isInstanceCompleted(id, today)) {
+      if (t.rrule.isNotEmpty && await _db.isInstanceCompleted(id, today)) {
         continue;
       }
       // 非重复任务已完成时同样跳过（completeTask 切换语义会误撤销）
@@ -903,6 +905,7 @@ class TasksController extends StateNotifier<TasksState> {
     final existing = await _db.getExceptions(id);
     for (final ex in existing) {
       if (DateUtilsEx.sameDay(ex.instanceDate, fromDate)) {
+        await _scheduler.cancelTask(id);
         await _db.updateException(ex.id, toDate);
         // 更新既有例外同样迁移完成记录
         await _migrateCompletionOnReschedule(id, fromDate, toDate);
@@ -915,6 +918,7 @@ class TasksController extends StateNotifier<TasksState> {
         return ex.id;
       }
     }
+    await _scheduler.cancelTask(id);
     final exId = await _db.insertException(
       TaskExceptionsCompanion.insert(
         taskId: id,
@@ -950,6 +954,7 @@ class TasksController extends StateNotifier<TasksState> {
   Future<void> undoEditException(int id, int exceptionId) async {
     // 撤销改期前读取迁移信息——把完成记录从新日期迁回原日期；
     // 删除例外 + 迁移完成记录包进同一事务（中途失败整体回滚）
+    await _scheduler.cancelTask(id);
     await _db.transaction(() async {
       final ex = await _db.getException(exceptionId);
       await _db.deleteException(exceptionId);

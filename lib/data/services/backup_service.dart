@@ -150,16 +150,15 @@ class BackupService {
   /// 备份表键缺失/为 null（不完整旧备份）时兜底为空表；
   /// 键存在但类型错误仍抛 TypeError（数据损坏应明确报错而非静默吞掉）
   static List _rows(Map<String, dynamic> data, String key) =>
-      data.containsKey(key) && data[key] != null
-          ? data[key] as List
-          : const [];
+      data.containsKey(key) && data[key] != null ? data[key] as List : const [];
 
   // ---------- 完整性校验与导入字段白名单（P1-3 / P2-30） ----------
 
   /// 载荷校验和：递归键排序的规范化 JSON 编码后取 SHA-256——
   /// 哈希基准与键序无关，同内容备份无论由哪个版本导出校验值一致。
-  static String _payloadChecksum(Map<String, dynamic> payload) =>
-      sha256.convert(utf8.encode(jsonEncode(_canonicalize(payload)))).toString();
+  static String _payloadChecksum(Map<String, dynamic> payload) => sha256
+      .convert(utf8.encode(jsonEncode(_canonicalize(payload))))
+      .toString();
 
   /// 规范化：Map 递归转按键排序（SplayTreeMap），List 逐项处理，
   /// 其余原样。jsonEncode 按迭代序输出，排序后编码即确定性的。
@@ -216,9 +215,7 @@ class BackupService {
           hasFreq = true;
         case 'INTERVAL' || 'COUNT':
           final n = int.tryParse(value);
-          if (n == null ||
-              n < 1 ||
-              n > (key == 'INTERVAL' ? 9999 : 999999)) {
+          if (n == null || n < 1 || n > (key == 'INTERVAL' ? 9999 : 999999)) {
             throw const FormatException('备份校验失败：重复规则数值越界');
           }
         case 'UNTIL':
@@ -309,7 +306,10 @@ class BackupService {
           infos.skip(keepBackupCount).map((f) => f.path).toList(),
         );
       }
-      await _db.setSetting(keyLastAutoBackupAt, AppClock.now().toIso8601String());
+      await _db.setSetting(
+        keyLastAutoBackupAt,
+        AppClock.now().toIso8601String(),
+      );
       await _db.setSetting(keyAutoBackupFailed, '');
       // 云端同步挂在本地备份成功之后：失败只记 webdavFailed 角标，
       // 不影响本地自动备份的成功状态（syncToWebdav 内部吞异常）
@@ -320,10 +320,7 @@ class BackupService {
       try {
         await _db.setSetting(
           keyAutoBackupFailed,
-          jsonEncode({
-            'time': AppClock.now().toIso8601String(),
-            'error': '$e',
-          }),
+          jsonEncode({'time': AppClock.now().toIso8601String(), 'error': '$e'}),
         );
       } catch (_) {}
       return false;
@@ -417,23 +414,25 @@ class BackupService {
     // 缺表键（不完整旧备份）兜底为空表，不抛 TypeError
     final lists = _rows(data, 'lists').map(_jsonToList).toList();
     final tasks = _rows(data, 'tasks').map(_jsonToTask).toList();
-    final reminders = _rows(data, 'reminders')
-        .map(_jsonToReminder)
-        .toList();
-    final completions = _rows(data, 'completions')
-        .map(_jsonToCompletion)
-        .toList();
-    final exceptions = _rows(data, 'exceptions')
-        .map(_jsonToException)
-        .toList();
+    final reminders = _rows(data, 'reminders').map(_jsonToReminder).toList();
+    final completions = _rows(
+      data,
+      'completions',
+    ).map(_jsonToCompletion).toList();
+    final exceptions = _rows(data, 'exceptions').map(_jsonToException).toList();
     final habits = _rows(data, 'habits').map(_jsonToHabit).toList();
-    final habitRecords = _rows(data, 'habitRecords')
-        .map(_jsonToHabitRecord)
-        .toList();
-    final pomodoros = _rows(data, 'pomodoros')
-        .map(_jsonToPomodoro)
-        .toList();
+    final habitRecords = _rows(
+      data,
+      'habitRecords',
+    ).map(_jsonToHabitRecord).toList();
+    final pomodoros = _rows(data, 'pomodoros').map(_jsonToPomodoro).toList();
     final settings = _rows(data, 'settings')
+        // WebDAV 凭据和同步目标只属于本机，不接受备份文件写入。
+        .where(
+          (e) => !(e as Map<String, dynamic>)['key'].toString().startsWith(
+            'webdav',
+          ),
+        )
         .map(
           (e) => SettingsCompanion.insert(
             key: (e as Map<String, dynamic>)['key'] as String,
@@ -520,7 +519,11 @@ class BackupService {
       // 同名但内容不同（计划时间/备注/重复规则等）须保留为独立任务；
       // 本地同清单存在多个同名任务时也不崩溃
       final taskIdMap = <int, int>{};
-      Future<void> insertOne(TasksCompanion t, int listId, int? parentId) async {
+      Future<void> insertOne(
+        TasksCompanion t,
+        int listId,
+        int? parentId,
+      ) async {
         final candidates = parentId == null
             ? await _db.getTasksByListAndTitle(listId, t.title.value)
             : await _db.getTasksByParentAndTitle(parentId, t.title.value);
@@ -836,9 +839,7 @@ class BackupService {
       remindMinutesBefore: Value(before),
       isPersistent: Value(j['isPersistent'] as bool),
       // 旧备份无该字段 → null（默认 09:00）
-      remindAtMinutes: atMin == null
-          ? const Value(null)
-          : Value(atMin as int),
+      remindAtMinutes: atMin == null ? const Value(null) : Value(atMin as int),
     );
   }
 
@@ -883,9 +884,7 @@ class BackupService {
     habitId: Value(j['habitId'] as int),
     // 打卡日期归一化到当天 00:00（与 isHabitDone/checkHabit 基准一致）
     date: Value(
-      DateUtilsEx.normalizeInstanceDate(
-        DateTime.parse(j['date'] as String),
-      ),
+      DateUtilsEx.normalizeInstanceDate(DateTime.parse(j['date'] as String)),
     ),
     completedAt: Value(DateTime.parse(j['completedAt'] as String)),
   );

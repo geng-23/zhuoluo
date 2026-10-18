@@ -63,10 +63,13 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
   Future<void> _bootstrap() async {
     final cfg = await _service.readWebdavConfig();
     final lastSync =
-        await ref.read(dbProvider).getSetting(BackupService.keyWebdavLastSyncAt) ??
-            '';
+        await ref
+            .read(dbProvider)
+            .getSetting(BackupService.keyWebdavLastSyncAt) ??
+        '';
     final failed =
-        await ref.read(dbProvider).getSetting(BackupService.keyWebdavFailed) ?? '';
+        await ref.read(dbProvider).getSetting(BackupService.keyWebdavFailed) ??
+        '';
     if (!mounted) return;
     setState(() {
       if (cfg != null) {
@@ -88,12 +91,12 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
 
   /// 从当前表单构造配置
   WebdavConfig _formConfig() => WebdavConfig(
-        url: _url.text.trim(),
-        username: _user.text.trim(),
-        password: _pass.text,
-        dir: _dir.text.trim(),
-        enabled: _enabled,
-      );
+    url: _url.text.trim(),
+    username: _user.text.trim(),
+    password: _pass.text,
+    dir: _dir.text.trim(),
+    enabled: _enabled,
+  );
 
   bool get _formConnectable => _formConfig().connectable;
 
@@ -109,15 +112,13 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
 
   Future<void> _testConnection() async {
     if (!_formConnectable) {
-      showAppSnackBar(context, '请先填写完整的服务器地址、账号和密码',
-          icon: Icons.info_outline);
+      showAppSnackBar(context, '请先填写完整的服务器地址、账号和密码', icon: Icons.info_outline);
       return;
     }
     setState(() => _testing = true);
     try {
       // 用未保存的表单值直接测试，便于先验证再保存
-      await _svc()
-          .testConnection(_formConfig());
+      await _svc().testConnection(_formConfig());
       if (mounted) showAppSnackBar(context, '连接成功', icon: Icons.cloud_done);
     } catch (e) {
       if (mounted) {
@@ -130,8 +131,7 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
 
   Future<void> _uploadNow() async {
     if (!_formConnectable) {
-      showAppSnackBar(context, '请先填写完整的服务器地址、账号和密码',
-          icon: Icons.info_outline);
+      showAppSnackBar(context, '请先填写完整的服务器地址、账号和密码', icon: Icons.info_outline);
       return;
     }
     setState(() => _uploading = true);
@@ -147,7 +147,8 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
         await _refreshStatus();
         await _loadRemote();
       } else {
-        final failed = await ref
+        final failed =
+            await ref
                 .read(dbProvider)
                 .getSetting(BackupService.keyWebdavFailed) ??
             '';
@@ -186,8 +187,7 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
     if (saved == null || !saved.connectable) return;
     setState(() => _loadingList = true);
     try {
-      final items = await _svc()
-          .list(saved);
+      final items = await _svc().list(saved);
       if (mounted) setState(() => _remote = items);
     } catch (e) {
       if (mounted) {
@@ -224,14 +224,14 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
     try {
       final json = await _svc().download(_saved!, info.name);
       if (!mounted) return;
-      final count =
-          await importBackupWithRefresh(ref, json, merge: false, safetyBackup: true);
+      final count = await importBackupWithRefresh(
+        ref,
+        json,
+        merge: false,
+        safetyBackup: true,
+      );
       if (mounted) {
-        showAppSnackBar(
-          context,
-          '已从云端恢复 $count 个任务',
-          icon: Icons.restore,
-        );
+        showAppSnackBar(context, '已从云端恢复 $count 个任务', icon: Icons.restore);
       }
     } catch (e) {
       if (mounted) {
@@ -263,8 +263,7 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
     );
     if (ok != true || _saved == null || !mounted) return;
     try {
-      await _svc()
-          .delete(_saved!, [info.name]);
+      await _svc().delete(_saved!, [info.name]);
       await _loadRemote();
     } catch (e) {
       if (mounted) {
@@ -300,7 +299,11 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
       appBar: AppBar(
         title: const Text('WebDAV 云备份'),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), tooltip: '刷新云端列表', onPressed: _loadRemote),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: '刷新云端列表',
+            onPressed: _loadRemote,
+          ),
         ],
       ),
       body: ListView(
@@ -330,7 +333,7 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
                   decoration: const InputDecoration(
                     labelText: '服务器地址',
                     hintText: 'https://your-server.example.com/dav/',
-                    helperText: '填到 WebDAV 共享目录根路径',
+                    helperText: '仅支持 HTTPS，填到 WebDAV 共享目录根路径',
                     border: OutlineInputBorder(),
                   ),
                   onChanged: (_) => setState(() {}),
@@ -340,14 +343,19 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
                     padding: const EdgeInsets.only(top: 6),
                     child: Row(
                       children: [
-                        Icon(Icons.warning_amber_rounded,
-                            size: 16, color: Colors.orange.shade700),
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          size: 16,
+                          color: Colors.orange.shade700,
+                        ),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
-                            '当前使用明文 HTTP，账号与数据未经加密传输，建议改用 HTTPS',
+                            'HTTP 地址已停用，请改用 HTTPS',
                             style: TextStyle(
-                                fontSize: 12, color: Colors.orange.shade700),
+                              fontSize: 12,
+                              color: Colors.orange.shade700,
+                            ),
                           ),
                         ),
                       ],
@@ -416,7 +424,9 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.network_check),
                         label: const Text('测试连接'),
@@ -430,7 +440,9 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.cloud_upload),
                         label: const Text('立即上传'),
@@ -477,9 +489,7 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
                 '填写并保存上方配置后，即可查看与管理云端备份',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
+                style: TextStyle(color: Theme.of(context).colorScheme.outline),
               ),
             )
           else if (_remote.isEmpty && !_loadingList)
@@ -487,9 +497,7 @@ class _WebdavPageState extends ConsumerState<WebdavPage> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
                 '云端暂无备份文件',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.outline,
-                ),
+                style: TextStyle(color: Theme.of(context).colorScheme.outline),
               ),
             )
           else

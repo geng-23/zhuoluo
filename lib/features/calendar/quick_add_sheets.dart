@@ -121,11 +121,7 @@ class _QuickAddSheetWithRangeState
     final text = _controller.text.trim();
     // C4-4：空文本统一提示（此前区间快建会凭空创建"未命名"任务）
     if (text.isEmpty) {
-      showAppSnackBar(
-        context,
-        '请输入任务内容',
-        icon: Icons.info_outline,
-      );
+      showAppSnackBar(context, '请输入任务内容', icon: Icons.info_outline);
       return;
     }
     final title = extractTaskTitle(text);
@@ -168,7 +164,7 @@ class _QuickAddSheetWithRangeState
   }
 }
 
-/// 快速添加（日历默认预填今天+默认时间）
+/// 快速添加（日历默认预填当前浏览日期+默认时间）
 /// C6-1：可传入 [start]/[end] 预填计划时段（时间轴点空白位置）
 class QuickAddSheetWithDefaults extends ConsumerStatefulWidget {
   const QuickAddSheetWithDefaults(
@@ -261,9 +257,7 @@ class _QuickAddSheetWithDefaultsState
   (DateTime?, DateTime?, bool) _parsePlan(String text) {
     final parsed = ChineseDateParser.instance.parse(text);
     // C6-1：未解析出日期/时间且有预填时段 → 用预填的定时计划
-    if (parsed.time == null &&
-        parsed.date == null &&
-        widget.start != null) {
+    if (parsed.time == null && parsed.date == null && widget.start != null) {
       final s = widget.start!;
       return (s, widget.end ?? s.add(const Duration(hours: 1)), false);
     }
@@ -302,11 +296,7 @@ class _QuickAddSheetWithDefaultsState
     final text = _controller.text.trim();
     // C4-4：空文本统一提示（与任务页/区间快建一致）
     if (text.isEmpty) {
-      showAppSnackBar(
-        context,
-        '请输入任务内容',
-        icon: Icons.info_outline,
-      );
+      showAppSnackBar(context, '请输入任务内容', icon: Icons.info_outline);
       return;
     }
     final (ps, pe, isAllDay) = _parsePlan(text);

@@ -6,9 +6,11 @@ import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/core/widgets/app_empty_view.dart';
 import 'package:zhuoluo/data/services/backup_types.dart';
+import 'package:zhuoluo/features/profile/backup_actions.dart';
 import 'package:zhuoluo/features/profile/restore_flow.dart';
+import 'package:zhuoluo/features/profile/webdav_page.dart';
 
-/// H2：#30 备份管理页（列出/删除单份/多份/全部/恢复）
+/// 备份与恢复：集中导出、导入、WebDAV 和本地备份管理。
 class BackupManagePage extends ConsumerStatefulWidget {
   const BackupManagePage({super.key});
 
@@ -41,9 +43,10 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
 
   @override
   Widget build(BuildContext context) {
+    final webdavFailed = ref.watch(webdavFailedProvider).value ?? '';
     return Scaffold(
       appBar: AppBar(
-        title: const Text('备份管理'),
+        title: const Text('备份与恢复'),
         actions: [
           if (_multiSelect)
             IconButton(
@@ -72,111 +75,181 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _files.isEmpty
-          ? const AppEmptyView(
-              icon: Icons.inventory_2_outlined,
-              title: '暂无备份文件',
-              subtitle: '数据备份之后，换机/重装也能恢复如初',
-            )
-          : Column(
-              children: [
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: _files.length,
-                    itemBuilder: (context, i) {
-                      final f = _files[i];
-                      final selected = _selected.contains(f.path);
-                      return ListTile(
-                        leading: _multiSelect
-                            ? Checkbox(
-                                value: selected,
-                                onChanged: (_) => _toggle(f.path),
-                              )
-                            : const Icon(Icons.description_outlined),
-                        title: Text(
-                          f.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Material(
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.backup_outlined),
+                      title: const Text('导出到文件'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => exportBackupFile(context, ref),
+                    ),
+                    const Divider(indent: 56, height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.restore),
+                      title: const Text('从文件导入'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () async {
+                        if (await importBackupFile(context, ref) && mounted) {
+                          _load();
+                        }
+                      },
+                    ),
+                    const Divider(indent: 56, height: 1),
+                    ListTile(
+                      leading: Icon(
+                        webdavFailed.isEmpty
+                            ? Icons.cloud_outlined
+                            : Icons.cloud_off,
+                        color: webdavFailed.isEmpty ? null : Colors.orange,
+                      ),
+                      title: const Text('WebDAV 云备份'),
+                      subtitle: webdavFailed.isEmpty
+                          ? null
+                          : const Text('上次云端同步失败'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const WebdavPage(),
                         ),
-                        subtitle: Text(
-                          '${_fmtTime(f.modified)} · ${(f.size / 1024).toStringAsFixed(1)} KB',
-                        ),
-                        trailing: _multiSelect
-                            ? null
-                            : PopupMenuButton<String>(
-                                onSelected: (v) {
-                                  if (v == 'restore') {
-                                    _restore(f.path);
-                                  } else if (v == 'delete') {
-                                    _deleteSingle(f.path);
-                                  }
-                                },
-                                itemBuilder: (c) => const [
-                                  PopupMenuItem(
-                                    value: 'restore',
-                                    child: Text('恢复'),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('删除'),
-                                  ),
-                                ],
-                              ),
-                        onLongPress: () {
-                          setState(() {
-                            _multiSelect = true;
-                            _selected.add(f.path);
-                          });
-                        },
-                        onTap: () {
-                          if (_multiSelect) {
-                            _toggle(f.path);
-                          }
-                        },
-                      );
-                    },
-                  ),
-                ),
-                if (_multiSelect)
-                  SafeArea(
-                    top: false,
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Row(
-                        children: [
-                          Text('已选 ${_selected.length} 份'),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: _selected.isEmpty
-                                ? null
-                                : () => _deleteSelected(),
-                            child: Text(
-                              '删除所选',
-                              style: TextStyle(color: Theme.of(context).colorScheme.error),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: () => _deleteAll(),
-                            child: Text(
-                              '删除全部',
-                              style: TextStyle(color: Theme.of(context).colorScheme.error),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: () => setState(() {
-                              _multiSelect = false;
-                              _selected.clear();
-                            }),
-                            child: const Text('完成'),
-                          ),
-                        ],
                       ),
                     ),
-                  ),
-              ],
+                  ],
+                ),
+              ),
             ),
+          ),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text('本地备份'),
+            ),
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _files.isEmpty
+                ? const AppEmptyView(
+                    icon: Icons.inventory_2_outlined,
+                    title: '暂无备份文件',
+                    subtitle: '换机或重装前，请先导出备份文件',
+                  )
+                : Column(
+                    children: [
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: _files.length,
+                          itemBuilder: (context, i) {
+                            final f = _files[i];
+                            final selected = _selected.contains(f.path);
+                            return ListTile(
+                              leading: _multiSelect
+                                  ? Checkbox(
+                                      value: selected,
+                                      onChanged: (_) => _toggle(f.path),
+                                    )
+                                  : const Icon(Icons.description_outlined),
+                              title: Text(
+                                f.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                '${_fmtTime(f.modified)} · ${(f.size / 1024).toStringAsFixed(1)} KB',
+                              ),
+                              trailing: _multiSelect
+                                  ? null
+                                  : PopupMenuButton<String>(
+                                      onSelected: (v) {
+                                        if (v == 'restore') {
+                                          _restore(f.path);
+                                        } else if (v == 'delete') {
+                                          _deleteSingle(f.path);
+                                        }
+                                      },
+                                      itemBuilder: (c) => const [
+                                        PopupMenuItem(
+                                          value: 'restore',
+                                          child: Text('恢复'),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'delete',
+                                          child: Text('删除'),
+                                        ),
+                                      ],
+                                    ),
+                              onLongPress: () {
+                                setState(() {
+                                  _multiSelect = true;
+                                  _selected.add(f.path);
+                                });
+                              },
+                              onTap: () {
+                                if (_multiSelect) {
+                                  _toggle(f.path);
+                                }
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                      if (_multiSelect)
+                        SafeArea(
+                          top: false,
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Row(
+                              children: [
+                                Text('已选 ${_selected.length} 份'),
+                                const Spacer(),
+                                TextButton(
+                                  onPressed: _selected.isEmpty
+                                      ? null
+                                      : () => _deleteSelected(),
+                                  child: Text(
+                                    '删除所选',
+                                    style: TextStyle(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.error,
+                                    ),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () => _deleteAll(),
+                                  child: Text(
+                                    '删除全部',
+                                    style: TextStyle(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.error,
+                                    ),
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: () => setState(() {
+                                    _multiSelect = false;
+                                    _selected.clear();
+                                  }),
+                                  child: const Text('完成'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -220,17 +293,18 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
       // 恢复前自动安全备份当前数据（备份方案设计 3.5，私有目录可回退）
       // 与导入后的全量刷新/重排统一走共享编排
       final json = await ref.read(backupServiceProvider).readFile(path);
-      await importBackupWithRefresh(ref, json, merge: false, safetyBackup: true);
+      await importBackupWithRefresh(
+        ref,
+        json,
+        merge: false,
+        safetyBackup: true,
+      );
       if (mounted) {
         showAppSnackBar(context, '恢复完成', icon: Icons.restore);
       }
     } catch (e) {
       if (mounted) {
-        showAppSnackBar(
-          context,
-          '恢复失败：$e',
-          icon: Icons.error_outline,
-        );
+        showAppSnackBar(context, '恢复失败：$e', icon: Icons.error_outline);
       }
     }
   }
@@ -248,7 +322,10 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            child: Text(
+              '删除',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           ),
         ],
       ),
@@ -272,7 +349,10 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: Text('删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            child: Text(
+              '删除',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           ),
         ],
       ),
@@ -302,7 +382,10 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: Text('全部删除', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            child: Text(
+              '全部删除',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
           ),
         ],
       ),

@@ -1,47 +1,21 @@
-import 'dart:async';
-
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:zhuoluo/core/theme/task_colors.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/date_utils.dart';
 import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/features/calendar/providers.dart';
+import 'package:zhuoluo/features/calendar/calendar_sheets.dart';
 import 'package:zhuoluo/features/calendar/quick_add_sheets.dart';
 import 'package:zhuoluo/features/calendar/views.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 
-/// 日历页：顶部迷你月历选日，左侧菜单切换视图与添加任务。
-/// 左右边缘 15% 区域滑动切换底部 tab（左缘右滑 → 上一个，
-/// 右缘左滑 → 下一个），中间区域滑动翻月/翻周/翻日。
-/// 实现：视图铺满全屏，Stack 顶层为全屏透明监听层（_EdgeTabSwipeDetector，
-/// HitTestBehavior.translucent 零遮挡）——起点在屏幕左右 15% 区域内、
-/// 非长按（首次移动距 down <350ms）、位移 ≥24px 的滑动切换底部 tab；
-/// 中间 70% 区域滑动仍由 PageView 翻月/翻周/翻日；
-/// 任务块点击/长按拖动完全不受影响。
-/// 注意：检测层为 RawGestureDetector + 自定义识别器，边缘快速横向滑动
-/// 会抢占手势竞技场（下层 PageView 不再翻页）——切 tab 与翻页互斥，
-/// 避免返回日历后发现月/周/日范围被连带翻动。
+/// 日历页：顶部切换月/周/日视图并选择日期。
+/// 水平滑动只翻当前日历视图，底部页面通过底部导航切换。
 class CalendarPage extends ConsumerStatefulWidget {
-  const CalendarPage({
-    super.key,
-    this.isActive = true,
-    this.onNavigateLeft,
-    this.onNavigateRight,
-  });
+  const CalendarPage({super.key, this.isActive = true});
 
   /// IndexedStack 中只有当前日历 Tab 可以接管系统返回键。
   final bool isActive;
-
-  /// 屏幕左边缘向右滑（切到上一个 tab，如任务）
-  final VoidCallback? onNavigateLeft;
-
-  /// 屏幕右边缘向左滑（切到下一个 tab，如四象限）
-  final VoidCallback? onNavigateRight;
-
-  static final GlobalKey<ScaffoldState> scaffoldKey =
-      GlobalKey<ScaffoldState>();
 
   @override
   ConsumerState<CalendarPage> createState() => _CalendarPageState();
@@ -49,7 +23,6 @@ class CalendarPage extends ConsumerStatefulWidget {
 
 class _CalendarPageState extends ConsumerState<CalendarPage> {
   bool _showMiniMonth = false;
-  DateTime? _monthReturnDay;
   late DateTime _miniMonth = AppClock.at(
     AppClock.now().year,
     AppClock.now().month,
@@ -60,53 +33,71 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     if (_showMiniMonth) setState(() => _showMiniMonth = false);
   }
 
-  void _openDrawer() {
-    _closeMiniMonth();
-    CalendarPage.scaffoldKey.currentState?.openDrawer();
-  }
-
-  void _returnToMonth(CalendarController notifier) {
-    final day = _monthReturnDay;
-    if (day == null) return;
-    setState(() => _monthReturnDay = null);
-    notifier.setSelectedDayWithView(day, 'month');
-  }
-
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(calendarControllerProvider);
     final notifier = ref.read(calendarControllerProvider.notifier);
-    final canReturn = state.view == 'day' && _monthReturnDay != null;
+    final scheme = Theme.of(context).colorScheme;
     return PopScope(
-      canPop: !widget.isActive || (!_showMiniMonth && !canReturn),
+      canPop: !widget.isActive || !_showMiniMonth,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop || !widget.isActive) return;
-        if (CalendarPage.scaffoldKey.currentState?.isDrawerOpen == true) {
-          Navigator.of(context).pop();
-          return;
-        }
-        if (_showMiniMonth) {
-          _closeMiniMonth();
-        } else if (canReturn) {
-          _returnToMonth(notifier);
-        }
+        _closeMiniMonth();
       },
       child: Scaffold(
-        key: CalendarPage.scaffoldKey,
-        // 禁用抽屉边缘拖拽，保留边缘切 Tab 的原有手势。
-        drawerEdgeDragWidth: 0,
         appBar: AppBar(
-          leading: canReturn
-              ? IconButton(
-                  icon: const Icon(Icons.arrow_back),
-                  tooltip: '返回月视图',
-                  onPressed: () => _returnToMonth(notifier),
-                )
-              : IconButton(
-                  icon: const Icon(Icons.menu),
-                  tooltip: '日历菜单',
-                  onPressed: _openDrawer,
+          leadingWidth: 100,
+          titleSpacing: 4,
+          leading: Padding(
+            padding: const EdgeInsets.only(left: 12, right: 4),
+            child: PopupMenuButton<String>(
+              key: const ValueKey('calendar-view-menu'),
+              tooltip: '切换视图',
+              initialValue: state.view,
+              onSelected: (view) {
+                _closeMiniMonth();
+                notifier.setView(view);
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'month', child: Text('月视图')),
+                PopupMenuItem(value: 'week', child: Text('周视图')),
+                PopupMenuItem(value: 'day', child: Text('日视图')),
+              ],
+              child: Center(
+                child: Container(
+                  height: 40,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: AppRadius.pill,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        switch (state.view) {
+                          'month' => '月视图',
+                          'day' => '日视图',
+                          _ => '周视图',
+                        },
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onPrimaryContainer,
+                        ),
+                      ),
+                      Icon(
+                        Icons.arrow_drop_down,
+                        size: 18,
+                        color: scheme.onPrimaryContainer,
+                      ),
+                    ],
+                  ),
                 ),
+              ),
+            ),
+          ),
           title: InkWell(
             key: const ValueKey('calendar-date-title'),
             borderRadius: AppRadius.tile,
@@ -128,14 +119,17 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                     _titleFor(state),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 Icon(
                   _showMiniMonth
                       ? Icons.keyboard_arrow_up
                       : Icons.keyboard_arrow_down,
-                  size: 22,
+                  size: 18,
                 ),
               ],
             ),
@@ -149,23 +143,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
               icon: const Icon(Icons.today_outlined),
               tooltip: '今天',
             ),
-            if (canReturn)
-              IconButton(
-                icon: const Icon(Icons.menu),
-                tooltip: '日历菜单',
-                onPressed: _openDrawer,
-              ),
           ],
-        ),
-        drawer: _CalendarDrawer(
-          state: state,
-          onViewChanged: (v) {
-            setState(() => _monthReturnDay = null);
-            _closeMiniMonth();
-            notifier.setView(v);
-          },
-          onAdd: () => _openQuickAdd(context, ref),
-          onPickDate: (d) => notifier.setSelectedDay(d),
         ),
         body: Stack(
           children: [
@@ -195,14 +173,21 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                                 onMonthChanged: (m) =>
                                     notifier.setDisplayedMonth(m),
                                 onDayTap: (d) {
-                                  setState(() => _monthReturnDay = d);
-                                  notifier.setSelectedDayWithView(d, 'day');
+                                  notifier.setSelectedDay(d);
+                                  showModalBottomSheet<void>(
+                                    context: context,
+                                    isScrollControlled: true,
+                                    builder: (_) => DayPreviewSheet(
+                                      day: d,
+                                      onOpenDayView: () => notifier
+                                          .setSelectedDayWithView(d, 'day'),
+                                    ),
+                                  );
                                 },
-                                // 长按 = 快速添加（与点按预览区分开，
-                                // 此前两者行为完全相同）
+                                // 长按直接为该日期添加任务。
                                 onDayLongPress: (d) {
                                   notifier.setSelectedDay(d);
-                                  _openQuickAdd(context, ref, initialDay: d);
+                                  _openQuickAdd(context, d);
                                 },
                               ),
                               'week' => WeekView(
@@ -231,13 +216,6 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                           ),
                   ),
                 ],
-              ),
-            ),
-            // 全屏透明监听层（零遮挡）：边缘 15% 区滑动切 tab
-            Positioned.fill(
-              child: _EdgeTabSwipeDetector(
-                onSwipeRight: widget.onNavigateLeft,
-                onSwipeLeft: widget.onNavigateRight,
               ),
             ),
             if (_showMiniMonth)
@@ -288,34 +266,15 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     );
   }
 
-  /// E9：标题随当前视图变化
+  /// 顶部仅显示年月；周/日的具体日期由视图表头展示。
   String _titleFor(CalendarState state) {
-    final d = state.selectedDay;
-    switch (state.view) {
-      case 'month':
-        return DateUtilsEx.monthCn(state.displayedMonth);
-      case 'week':
-        final monday = DateUtilsEx.mondayOf(d);
-        final sunday = AppClock.addCalendarDays(monday, 6);
-        // 跨月周（如 8/31-9/6）拆分显示，此前"8月 31-6日"误导
-        if (monday.month == sunday.month) {
-          return '${DateUtilsEx.monthCn(monday)} '
-              '${monday.day}-${sunday.day}日';
-        }
-        return '${monday.month}月${monday.day}日-'
-            '${sunday.month}月${sunday.day}日';
-      case 'day':
-        return DateUtilsEx.dateCn(d);
-    }
-    return DateUtilsEx.monthCn(state.displayedMonth);
+    final day = state.view == 'month'
+        ? state.displayedMonth
+        : state.selectedDay;
+    return DateUtilsEx.monthCn(day);
   }
 
-  void _openQuickAdd(
-    BuildContext context,
-    WidgetRef ref, {
-    DateTime? initialDay,
-  }) {
-    final day = initialDay ?? AppClock.now();
+  void _openQuickAdd(BuildContext context, DateTime day) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -478,291 +437,6 @@ class _MiniMonthPicker extends StatelessWidget {
   }
 }
 
-/// 边缘滑动切 tab 检测层（丝滑交互，零遮挡）：
-/// RawGestureDetector（HitTestBehavior.translucent——自身监听且下层正常交互），
-/// 判定条件（全部满足才切 tab）：
-/// 1. 指针起点在屏幕左右 15% 区域内（中间 70% 区域滑动仍由 PageView 翻页）
-/// 2. 非长按：首次位移距按下 <350ms（长按拖动任务/长按选时不受影响）
-/// 3. 累计绝对水平位移 ≥16px（不依赖速度，慢速滑动也可触发）
-/// 4. 横向意图：水平位移明显大于垂直位移（abs(dx) > abs(dy)*1.5），
-///    纵向滚动/斜向移动的横向抖动不视为切 tab 意图
-/// 右滑 → [onSwipeRight]（左缘），左滑 → [onSwipeLeft]（右缘）。
-/// 拖动任务到边缘翻周/日由 Draggable 全局坐标驱动（views.dart），互不干扰。
-///
-/// 关键：与旧实现（全屏 Listener 被动监听）不同，本识别器**参与手势竞技场**——
-/// 判定为边缘快速横向滑动时立即 accepted 抢占，下层 PageView（月/周/日）
-/// 收不到该手势，切 tab 不再连带翻页（修复"返回日历发现视图范围变了"）；
-/// 非边缘滑动/长按/点击则 rejected 让位，行为与旧实现一致。
-class _EdgeTabSwipeDetector extends StatefulWidget {
-  const _EdgeTabSwipeDetector({this.onSwipeRight, this.onSwipeLeft});
-
-  final VoidCallback? onSwipeRight;
-  final VoidCallback? onSwipeLeft;
-
-  @override
-  State<_EdgeTabSwipeDetector> createState() => _EdgeTabSwipeDetectorState();
-}
-
-class _EdgeTabSwipeDetectorState extends State<_EdgeTabSwipeDetector> {
-  @override
-  Widget build(BuildContext context) {
-    return RawGestureDetector(
-      behavior: HitTestBehavior.translucent,
-      gestures: {
-        _EdgeTabSwipeRecognizer:
-            GestureRecognizerFactoryWithHandlers<_EdgeTabSwipeRecognizer>(
-              () => _EdgeTabSwipeRecognizer(),
-              (instance) {
-                instance
-                  ..screenWidth = MediaQuery.sizeOf(context).width
-                  ..onSwipeRight = widget.onSwipeRight
-                  ..onSwipeLeft = widget.onSwipeLeft;
-              },
-            ),
-      },
-      child: const SizedBox.expand(),
-    );
-  }
-}
-
-/// 边缘滑动切 tab 识别器：起点在屏幕左右 15% 区、350ms 内快速横向拖动时
-/// 立即赢得手势竞技场（下层 PageView 不再翻月/周/日），抬手满足条件才切 tab。
-class _EdgeTabSwipeRecognizer extends OneSequenceGestureRecognizer {
-  /// 起点判定区：屏幕左右各 15%（收窄——边缘区过大易与拖动任务/选时误触）
-  static const double _edgeZone = 0.15;
-
-  /// 触发位移阈值（px）
-  static const double _triggerDx = 16;
-
-  /// 横向意图比例：abs(dx) 须明显大于 abs(dy) 才视为切 tab（抗纵向抖动）
-  static const double _minDxRatio = 1.5;
-
-  /// 抢占 slop：水平位移超过此值即赢得竞技场（远小于 PageView 翻页距离，
-  /// 一旦抢占 PageView 即收不到手势，切 tab 不再连带翻页）。
-  /// 必须小于平台 touchSlop（Android 设备约 8-16px，真机实测 ~10px）——
-  /// 若大于平台 slop，小步滑动时 PageView 的横向拖拽先跨过自身阈值
-  /// 抢先 accepted，本识别器被判负（真机实测月视图右缘滑动被抢走）。
-  static const double _slop = 4;
-
-  /// 长按判定窗口：首次移动距按下超过此值 = 长按（拖动/选时），让位不切 tab
-  static const Duration _longPressWindow = Duration(milliseconds: 350);
-
-  /// 屏幕宽度（RawGestureDetector initialize 每次 build 更新，适配旋转）
-  double screenWidth = 0;
-  VoidCallback? onSwipeRight;
-  VoidCallback? onSwipeLeft;
-
-  Offset? _downPos;
-  DateTime? _downTime;
-  DateTime? _firstMoveAt;
-  double _dx = 0;
-  double _dy = 0;
-  bool _inEdgeZone = false;
-  bool _accepted = false;
-  Timer? _timer;
-
-  @override
-  void addAllowedPointer(PointerDownEvent event) {
-    // 已有活动指针（多指）时忽略新按下——单指边缘手势语义
-    if (_downPos != null) return;
-    startTrackingPointer(event.pointer, event.transform);
-    final w = screenWidth;
-    final zone = w * _edgeZone;
-    _downPos = event.position;
-    _downTime = DateTime.now();
-    _firstMoveAt = null;
-    _dx = 0;
-    _dy = 0;
-    _accepted = false;
-    _inEdgeZone = event.position.dx < zone || event.position.dx > w - zone;
-    // 起点不在边缘区 → 立即让位（中间区滑动由 PageView 翻页）
-    if (!_inEdgeZone) {
-      resolve(GestureDisposition.rejected);
-      stopTrackingPointer(event.pointer);
-      return;
-    }
-    // 边缘区：350ms 内无快速横向移动 → 让位（长按拖动/慢滑由下层接管）
-    _timer = Timer(_longPressWindow, () {
-      resolve(GestureDisposition.rejected);
-    });
-  }
-
-  @override
-  void handleEvent(PointerEvent event) {
-    if (event is PointerMoveEvent) {
-      final down = _downPos;
-      if (down == null) return;
-      _firstMoveAt ??= DateTime.now();
-      // 绝对位移（相对按下点）而非 delta 累加——抖动不会逐次累积
-      _dx = event.position.dx - down.dx;
-      _dy = event.position.dy - down.dy;
-      // 快速横向意图（位移超 slop 且 dx 明显大于 dy）→ 抢占手势，
-      // PageView 收不到该手势，切 tab 不再连带翻页
-      if (!_accepted &&
-          _dx.abs() > _slop &&
-          _dx.abs() > _dy.abs() * _minDxRatio) {
-        _accepted = true;
-        _timer?.cancel();
-        resolve(GestureDisposition.accepted);
-      }
-    } else if (event is PointerUpEvent || event is PointerCancelEvent) {
-      _finish(event);
-    }
-  }
-
-  void _finish(PointerEvent event) {
-    _timer?.cancel();
-    if (_accepted) {
-      final down = _downPos;
-      final downTime = _downTime;
-      final firstMove = _firstMoveAt;
-      if (down != null && downTime != null && firstMove != null) {
-        if (_dx.abs() >= _triggerDx && _dx.abs() > _dy.abs() * _minDxRatio) {
-          final w = screenWidth;
-          if (down.dx < w * _edgeZone && _dx > 0) {
-            onSwipeRight?.call();
-          } else if (down.dx > w * (1 - _edgeZone) && _dx < 0) {
-            onSwipeLeft?.call();
-          }
-        }
-      }
-    } else {
-      // 未抢占（点击/非横向）→ 弃权，让下层（tap/滚动/长按）获胜
-      resolve(GestureDisposition.rejected);
-    }
-    stopTrackingPointer(event.pointer);
-  }
-
-  @override
-  void rejectGesture(int pointer) {
-    _timer?.cancel();
-    _reset();
-    super.rejectGesture(pointer);
-  }
-
-  @override
-  void didStopTrackingLastPointer(int pointer) {
-    _timer?.cancel();
-    _reset();
-  }
-
-  void _reset() {
-    _downPos = null;
-    _downTime = null;
-    _firstMoveAt = null;
-    _dx = 0;
-    _dy = 0;
-    _inEdgeZone = false;
-    _accepted = false;
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  String get debugDescription => 'edge tab swipe';
-}
-
-/// E12：日历侧边栏（视图切换/添加/月份导航）
-class _CalendarDrawer extends ConsumerWidget {
-  const _CalendarDrawer({
-    required this.state,
-    required this.onViewChanged,
-    required this.onAdd,
-    required this.onPickDate,
-  });
-
-  final CalendarState state;
-  final ValueChanged<String> onViewChanged;
-  final VoidCallback onAdd;
-  final ValueChanged<DateTime> onPickDate;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Drawer(
-      child: SafeArea(
-        child: ListView(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text('日历', style: Theme.of(context).textTheme.titleLarge),
-            ),
-            ListTile(
-              leading: const Icon(Icons.calendar_view_month),
-              title: const Text('月视图'),
-              selected: state.view == 'month',
-              onTap: () {
-                onViewChanged('month');
-                Navigator.pop(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.view_week),
-              title: const Text('周视图'),
-              selected: state.view == 'week',
-              onTap: () {
-                onViewChanged('week');
-                Navigator.pop(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.view_day),
-              title: const Text('日视图'),
-              selected: state.view == 'day',
-              onTap: () {
-                onViewChanged('day');
-                Navigator.pop(context);
-              },
-            ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.add),
-              title: const Text('添加任务'),
-              onTap: () {
-                Navigator.pop(context);
-                onAdd();
-              },
-            ),
-            const Divider(),
-            // 月份导航（翻月）
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.chevron_left),
-                    onPressed: () {
-                      final m = state.displayedMonth;
-                      onPickDate(AppClock.at(m.year, m.month - 1, 1));
-                    },
-                  ),
-                  Expanded(
-                    child: Text(
-                      DateUtilsEx.monthCn(state.displayedMonth),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.chevron_right),
-                    onPressed: () {
-                      final m = state.displayedMonth;
-                      onPickDate(AppClock.at(m.year, m.month + 1, 1));
-                    },
-                  ),
-                ],
-              ),
-            ),
-            // 顶部标题可点击选择日期，此处不再提供日期选择器
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// 月视图（E11：左右滑动翻月）
 /// 6.9：PageController 由 State 持有并在 dispose 释放
 /// （此前在 build 中创建，刷新时月份位置可能重置）
@@ -885,9 +559,6 @@ class MonthView extends ConsumerWidget {
     required this.onDayLongPress,
   });
 
-  /// 单个日期格子最多显示的任务块数（超出显示 +N）
-  static const _monthMaxItems = 2;
-
   final List<CalendarItem> items;
 
   /// 按天分组索引（key = yyyymmdd 整数）
@@ -930,18 +601,13 @@ class MonthView extends ConsumerWidget {
           ),
         ),
         Expanded(
-          // 六行月份也随可用高度收缩，任务摘要按格高降级。
+          // 六行月份也随可用高度收缩；月格仅展示任务标记。
           child: LayoutBuilder(
             builder: (context, constraints) {
               final rows = totalCells ~/ 7;
               final cellH = (constraints.maxHeight / rows)
                   .floorToDouble()
                   .clamp(48.0, 320.0);
-              final itemLimit = cellH >= 76
-                  ? _monthMaxItems
-                  : cellH >= 56
-                  ? 1
-                  : 0;
               return GridView.builder(
                 padding: EdgeInsets.zero,
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -1020,7 +686,7 @@ class MonthView extends ConsumerWidget {
                             child: Text(
                               '${date.day}',
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: 15,
                                 color: isToday
                                     ? scheme.onPrimary
                                     : isSelected
@@ -1034,63 +700,48 @@ class MonthView extends ConsumerWidget {
                               ),
                             ),
                           ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                for (final item in dayItems.take(itemLimit))
-                                  Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(top: 1),
-                                      child: _MonthTaskLine(item: item),
-                                    ),
-                                  ),
-                                if (itemLimit > 0 &&
-                                    dayItems.length > itemLimit)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 2),
-                                    child: Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 5,
-                                          vertical: 1,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primaryContainer
-                                              .withValues(alpha: 0.6),
-                                          borderRadius: AppRadius.pill,
-                                        ),
-                                        child: Text(
-                                          '+${dayItems.length - itemLimit}',
-                                          style: TextStyle(
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.w700,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onPrimaryContainer,
-                                          ),
-                                        ),
+                          if (dayItems.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 5),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  for (
+                                    var i = 0;
+                                    i <
+                                        (dayItems.length > 3
+                                            ? 2
+                                            : dayItems.length);
+                                    i++
+                                  )
+                                    Container(
+                                      key: ValueKey('calendar-task-dot-$i'),
+                                      width: 6,
+                                      height: 6,
+                                      margin: const EdgeInsets.symmetric(
+                                        horizontal: 1.5,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: dayItems[i].completed
+                                            ? scheme.outline
+                                            : colorFromHex(
+                                                dayItems[i].listColor,
+                                              ),
                                       ),
                                     ),
-                                  ),
-                                if (itemLimit == 0 && dayItems.isNotEmpty)
-                                  Container(
-                                    width: 6,
-                                    height: 6,
-                                    margin: const EdgeInsets.only(top: 3),
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: colorFromHex(
-                                        dayItems.first.listColor,
+                                  if (dayItems.length > 3)
+                                    Text(
+                                      '+${dayItems.length - 2}',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        color: scheme.onSurfaceVariant,
                                       ),
                                     ),
-                                  ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
                         ],
                       ),
                     ),
@@ -1101,60 +752,6 @@ class MonthView extends ConsumerWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _MonthTaskLine extends StatelessWidget {
-  const _MonthTaskLine({required this.item});
-
-  final CalendarItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = item.task;
-    final done = item.completed;
-    final listColor = colorFromHex(item.listColor);
-    final scheme = Theme.of(context).colorScheme;
-    // 谷歌日历风格：实心色块（任务色）+ 自动黑白文字；
-    // 完成态用主题容器灰并划线降权
-    final color = done ? scheme.surfaceContainerHighest : listColor;
-    final textColor = done
-        ? scheme.onSurfaceVariant
-        : TaskColors.textOn(listColor);
-    const radius = 6.0;
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(radius),
-      ),
-      // LayoutBuilder：按格子均分高度尽量多行显示标题
-      // （月视图格子小，通常 1-2 行，长标题不再过早截断）
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final h = constraints.maxHeight.isFinite
-              ? constraints.maxHeight
-              : 28.0;
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                t.title,
-                maxLines: (h / 14).floor().clamp(1, 2),
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500,
-                  color: textColor,
-                  decoration: done ? TextDecoration.lineThrough : null,
-                ),
-              ),
-            ),
-          );
-        },
-      ),
     );
   }
 }

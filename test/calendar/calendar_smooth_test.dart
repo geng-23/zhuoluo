@@ -10,10 +10,10 @@ import 'package:zhuoluo/data/database/database.dart';
 import 'package:zhuoluo/features/calendar/calendar_page.dart';
 import 'package:zhuoluo/features/calendar/providers.dart';
 
-/// 丝滑翻页 + 边缘交互回归测试：
+/// 日历翻页和拖拽交互回归测试：
 /// - 窗口缓存：翻页/切视图命中缓存零 DB（loadCount 不增）
 /// - 数据版本变化 → 缓存失效重拉
-/// - 边缘手势条：左缘右滑切上一个 tab、右缘左滑切下一个 tab、中间滑动不切
+/// - 日历内水平滑动只翻月/周/日，不切底部页面
 /// - 拖动任务块到屏幕边缘停留 → 翻周/日（Draggable 全局坐标驱动，不依赖列边界）
 
 /// 延迟日历 DB：模拟真机异步查询时序。drift 内存库在测试 pump 内同步
@@ -141,199 +141,26 @@ void main() {
     });
   });
 
-  group('边缘滑动切 tab', () {
-    testWidgets('边缘短滑越过 16px 即切 Tab，不留下空响应区', (tester) async {
-      await db.ensureDefaultList();
-      var left = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(home: CalendarPage(onNavigateLeft: () => left++)),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final gesture = await tester.startGesture(const Offset(12, 400));
-      await gesture.moveBy(const Offset(20, 0));
-      await gesture.up();
-      await tester.pumpAndSettle();
-      expect(left, 1);
-    });
+  testWidgets('月视图从边缘横滑仍能翻月', (tester) async {
+    await db.ensureDefaultList();
+    final container = makeContainer();
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: CalendarPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    container.read(calendarControllerProvider.notifier).setView('month');
+    await tester.pumpAndSettle();
+    final before = container.read(calendarControllerProvider).displayedMonth;
 
-    testWidgets('左边缘右滑 → 切上一个 tab 回调', (tester) async {
-      await db.ensureDefaultList();
-      var left = 0;
-      var right = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(
-            home: CalendarPage(
-              onNavigateLeft: () => left++,
-              onNavigateRight: () => right++,
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
+    await tester.flingFrom(const Offset(750, 400), const Offset(-350, 0), 1000);
+    await tester.pumpAndSettle();
 
-      // 左边缘（x=12，落在 15% 手势区）快速右滑
-      await tester.flingFrom(const Offset(12, 400), const Offset(200, 0), 1000);
-      await tester.pumpAndSettle();
-      expect(left, 1, reason: '左缘右滑应触发切上一个 tab');
-      expect(right, 0);
-    });
-
-    testWidgets('右边缘左滑 → 切下一个 tab 回调', (tester) async {
-      await db.ensureDefaultList();
-      var left = 0;
-      var right = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(
-            home: CalendarPage(
-              onNavigateLeft: () => left++,
-              onNavigateRight: () => right++,
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.flingFrom(
-        const Offset(788, 400),
-        const Offset(-200, 0),
-        1000,
-      );
-      await tester.pumpAndSettle();
-      expect(right, 1, reason: '右缘左滑应触发切下一个 tab');
-      expect(left, 0);
-    });
-
-    testWidgets('中间区域滑动 → 不切 tab（翻周/日）', (tester) async {
-      await db.ensureDefaultList();
-      var left = 0;
-      var right = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(
-            home: CalendarPage(
-              onNavigateLeft: () => left++,
-              onNavigateRight: () => right++,
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      // 中间区域 fling（PageView 翻周）
-      await tester.flingFrom(
-        const Offset(400, 400),
-        const Offset(-200, 0),
-        1000,
-      );
-      await tester.pumpAndSettle();
-      expect(left + right, 0, reason: '中间滑动翻周/日，不切 tab');
-
-      // 反向
-      await tester.flingFrom(
-        const Offset(400, 400),
-        const Offset(200, 0),
-        1000,
-      );
-      await tester.pumpAndSettle();
-      expect(left + right, 0);
-    });
-
-    // 回归：边缘滑动切 tab 时，同一手势不得再被下层 PageView 消费翻页
-    // （修复前 Listener 被动监听不参与竞技场，切 tab 连带翻月/翻周/翻日，
-    // 返回日历后发现视图范围变了）
-    testWidgets('左缘右滑切 tab 时月视图不翻月', (tester) async {
-      await db.ensureDefaultList();
-      var left = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(home: CalendarPage(onNavigateLeft: () => left++)),
-        ),
-      );
-      await tester.pumpAndSettle();
-      container.read(calendarControllerProvider.notifier).setView('month');
-      await tester.pumpAndSettle();
-      final before = container.read(calendarControllerProvider).displayedMonth;
-
-      await tester.flingFrom(const Offset(12, 400), const Offset(200, 0), 2000);
-      await tester.pumpAndSettle();
-      expect(left, 1, reason: '左缘右滑应切上一个 tab');
-      final after = container.read(calendarControllerProvider).displayedMonth;
-      expect(
-        DateUtilsEx.sameDay(after, before),
-        isTrue,
-        reason: '切 tab 不应连带翻月（修复前 displayedMonth 被翻到相邻月）',
-      );
-    });
-
-    testWidgets('左缘右滑切 tab 时周视图不翻周', (tester) async {
-      await db.ensureDefaultList();
-      var left = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(home: CalendarPage(onNavigateLeft: () => left++)),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final before = container.read(calendarControllerProvider).selectedDay;
-
-      await tester.flingFrom(const Offset(12, 400), const Offset(200, 0), 2000);
-      await tester.pumpAndSettle();
-      expect(left, 1, reason: '左缘右滑应切上一个 tab');
-      final after = container.read(calendarControllerProvider).selectedDay;
-      expect(
-        DateUtilsEx.sameDay(after, before),
-        isTrue,
-        reason: '切 tab 不应连带翻周（修复前 selectedDay 被翻到相邻周）',
-      );
-    });
-
-    testWidgets('右缘左滑切 tab 时日视图不翻日', (tester) async {
-      await db.ensureDefaultList();
-      var right = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(
-            home: CalendarPage(onNavigateRight: () => right++),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      container.read(calendarControllerProvider.notifier).setView('day');
-      await tester.pumpAndSettle();
-      final before = container.read(calendarControllerProvider).selectedDay;
-
-      await tester.flingFrom(
-        const Offset(788, 400),
-        const Offset(-200, 0),
-        2000,
-      );
-      await tester.pumpAndSettle();
-      expect(right, 1, reason: '右缘左滑应切下一个 tab');
-      final after = container.read(calendarControllerProvider).selectedDay;
-      expect(
-        DateUtilsEx.sameDay(after, before),
-        isTrue,
-        reason: '切 tab 不应连带翻日（修复前 selectedDay 被翻到相邻日）',
-      );
-    });
+    final after = container.read(calendarControllerProvider).displayedMonth;
+    expect(after.year, DateTime(before.year, before.month + 1).year);
+    expect(after.month, DateTime(before.year, before.month + 1).month);
   });
 
   group('拖动任务块到边缘翻周/日（Draggable 全局坐标驱动）', () {
@@ -621,75 +448,6 @@ void main() {
       expect(left, lessThan(12), reason: '左时间栏应贴屏幕左缘（实际 $left）');
     });
 
-    testWidgets('边缘慢速滑动（位移 36px，无速度）也能切 tab', (tester) async {
-      await db.ensureDefaultList();
-      var left = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(home: CalendarPage(onNavigateLeft: () => left++)),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      // 左缘缓慢滑动 36px（低速度）
-      final gesture = await tester.startGesture(const Offset(12, 400));
-      await gesture.moveBy(const Offset(36, 0));
-      await tester.pump();
-      await gesture.up();
-      await tester.pumpAndSettle();
-      expect(left, 1, reason: '位移 ≥16px 即触发切 tab，不依赖速度');
-    });
-
-    testWidgets('纵向滚动带横向抖动不切 tab（起点左缘）', (tester) async {
-      await db.ensureDefaultList();
-      var left = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(home: CalendarPage(onNavigateLeft: () => left++)),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      // 起点在左缘 15% 区；纵向滚动 200px，途中多次轻微横向抖动
-      final gesture = await tester.startGesture(const Offset(12, 400));
-      for (var i = 0; i < 10; i++) {
-        await gesture.moveBy(const Offset(0, 20));
-        await tester.pump();
-        if (i.isEven) {
-          await gesture.moveBy(const Offset(8, 0));
-          await tester.pump();
-        }
-      }
-      await gesture.up();
-      await tester.pumpAndSettle();
-      expect(left, 0, reason: '纵向滚动中的横向抖动不应切 tab');
-    });
-
-    testWidgets('轻微斜向移动不切 tab（dx 明显小于 dy）', (tester) async {
-      await db.ensureDefaultList();
-      var left = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(home: CalendarPage(onNavigateLeft: () => left++)),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      // 起点左缘；斜向移动 dx=40、dy=50（纵向主导，非横向意图）
-      final gesture = await tester.startGesture(const Offset(12, 400));
-      await gesture.moveBy(const Offset(40, 50));
-      await tester.pump();
-      await gesture.up();
-      await tester.pumpAndSettle();
-      expect(left, 0, reason: '斜向移动（dx<dy）不应切 tab');
-    });
-
     testWidgets('左缘手势区（44px 覆盖时间栏）不挡任务块点击', (tester) async {
       await pumpCalendarWithTask(tester, '拖拽任务D');
       // 点击任务块（时间栏右侧的列区域）→ 实例操作层弹出
@@ -704,7 +462,7 @@ void main() {
     });
   });
 
-  group('全局指针事件驱动 + 边缘 15% 切 tab + 视图铺满', () {
+  group('全局指针事件驱动 + 视图铺满', () {
     Future<ProviderContainer> pumpCalendarWithTask(
       WidgetTester tester,
       String title,
@@ -731,69 +489,6 @@ void main() {
       await tester.pumpAndSettle();
       return container;
     }
-
-    testWidgets('15% 区滑动切 tab（左缘 x=100 右滑 / 右缘 x=700 左滑）', (tester) async {
-      await db.ensureDefaultList();
-      var left = 0;
-      var right = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(
-            home: CalendarPage(
-              onNavigateLeft: () => left++,
-              onNavigateRight: () => right++,
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      // 左 15% 区内右滑（x=100 < 120）
-      final g1 = await tester.startGesture(const Offset(100, 400));
-      await g1.moveBy(const Offset(40, 0));
-      await tester.pump();
-      await g1.up();
-      await tester.pumpAndSettle();
-      expect(left, 1, reason: '左 15% 区右滑应切上一个 tab');
-
-      // 右 15% 区内左滑（x=700 > 680）
-      final g2 = await tester.startGesture(const Offset(700, 400));
-      await g2.moveBy(const Offset(-40, 0));
-      await tester.pump();
-      await g2.up();
-      await tester.pumpAndSettle();
-      expect(right, 1, reason: '右 15% 区左滑应切下一个 tab');
-    });
-
-    testWidgets('长按拖动任务不误触切 tab', (tester) async {
-      await pumpCalendarWithTask(tester, '长按任务');
-      var left = 0;
-      final container = makeContainer();
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: MaterialApp(home: CalendarPage(onNavigateLeft: () => left++)),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final block = find.text('长按任务');
-      final gesture = await tester.startGesture(tester.getCenter(block.first));
-      // 真实等待 400ms（超过 350ms 长按窗口——拖动任务路径）
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 400)),
-      );
-      for (var i = 0; i < 6; i++) {
-        await tester.pump(const Duration(milliseconds: 100));
-      }
-      await gesture.moveBy(const Offset(100, 0));
-      await tester.pump();
-      await gesture.up();
-      await tester.pumpAndSettle();
-      expect(left, 0, reason: '长按拖动任务不应触发切 tab');
-    });
 
     testWidgets('视图铺满：周日列右缘贴屏幕右缘', (tester) async {
       await db.ensureDefaultList();

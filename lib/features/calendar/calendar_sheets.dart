@@ -180,11 +180,11 @@ class InstanceActionSheetState extends ConsumerState<InstanceActionSheet> {
 
 /// 月视图日期预览层（完整可操作）
 
-
 class DayPreviewSheet extends ConsumerStatefulWidget {
-  const DayPreviewSheet({super.key, required this.day});
+  const DayPreviewSheet({super.key, required this.day, this.onOpenDayView});
 
   final DateTime day;
+  final VoidCallback? onOpenDayView;
 
   @override
   ConsumerState<DayPreviewSheet> createState() => DayPreviewSheetState();
@@ -217,12 +217,26 @@ class DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Text(
-                DateUtilsEx.dateCn(widget.day),
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      DateUtilsEx.dateCn(widget.day),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  if (widget.onOpenDayView != null)
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        widget.onOpenDayView!();
+                      },
+                      child: const Text('日视图'),
+                    ),
+                ],
               ),
             ),
             Flexible(
@@ -403,4 +417,3 @@ class DayPreviewSheetState extends ConsumerState<DayPreviewSheet> {
     return l?.name ?? '';
   }
 }
-

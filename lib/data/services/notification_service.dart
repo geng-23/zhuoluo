@@ -97,6 +97,7 @@ class NotificationService {
 
   /// 通知是否已开启（Android 13+ 通知权限）
   Future<bool> areNotificationsEnabled() async {
+    if (debugOverridePermission != null) return debugOverridePermission!;
     try {
       final android = _plugin
           .resolvePlatformSpecificImplementation<
@@ -355,8 +356,9 @@ class NotificationService {
   Future<bool> reloadSystemTimezone() async {
     String? id;
     try {
-      id = await const MethodChannel('zhuoluo/notifications')
-          .invokeMethod<String>('getSystemTimezoneId');
+      id = await const MethodChannel(
+        'zhuoluo/notifications',
+      ).invokeMethod<String>('getSystemTimezoneId');
     } catch (_) {
       return false;
     }

@@ -48,12 +48,7 @@ class _HomeShellState extends ConsumerState<HomeShell>
 
   Widget _buildPage(int i) => switch (i) {
     0 => TaskPage(onNavigateNext: () => _switchTo(1)),
-    1 => CalendarPage(
-      isActive: _tab == 1,
-      // 边缘滑动切 tab：左缘右滑 → 任务；右缘左滑 → 四象限
-      onNavigateLeft: () => _switchTo(0),
-      onNavigateRight: () => _switchTo(2),
-    ),
+    1 => CalendarPage(isActive: _tab == 1),
     2 => QuadrantPage(
       onNavigateLeft: () => _switchTo(1),
       onNavigateRight: () => _switchTo(3),

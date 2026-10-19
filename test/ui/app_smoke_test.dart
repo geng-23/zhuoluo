@@ -57,16 +57,16 @@ void main() {
     // 默认任务页显示"未来 7 天"
     expect(find.text('未来 7 天'), findsWidgets);
 
-    // 切到日历（E12：功能在侧边栏，主区默认周视图）
+    // 切到日历，顶部可直接切换视图。
     await tester.tap(find.text('日历'));
     await tester.pumpAndSettle();
-    // 打开侧边栏验证视图切换
-    await tester.tap(find.byIcon(Icons.menu).last);
+    await tester.tap(find.byKey(const ValueKey('calendar-view-menu')));
     await tester.pumpAndSettle();
     expect(find.text('月视图'), findsOneWidget);
-    expect(find.text('周视图'), findsOneWidget);
+    expect(find.text('周视图'), findsWidgets);
     expect(find.text('日视图'), findsOneWidget);
     expect(find.byTooltip('今天'), findsOneWidget);
+    expect(find.byTooltip('添加任务'), findsNothing);
     await tester.tapAt(const Offset(700, 100));
     await tester.pumpAndSettle();
 
@@ -80,7 +80,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('番茄专注'), findsOneWidget);
     expect(find.text('习惯打卡'), findsOneWidget);
-    expect(find.text('统计'), findsWidgets); // 分组标题 + 入口
+    expect(find.text('统计'), findsOneWidget);
     // 纪念日已删除（#28）
     expect(find.text('倒数纪念日'), findsNothing);
 

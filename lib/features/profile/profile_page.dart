@@ -9,13 +9,10 @@ import 'package:zhuoluo/core/theme/task_colors.dart';
 import 'package:zhuoluo/core/theme/theme.dart';
 import 'package:zhuoluo/core/utils/app_snackbar.dart';
 import 'package:zhuoluo/data/services/backup_service.dart';
-import 'package:zhuoluo/data/services/notification_service.dart';
 import 'package:zhuoluo/features/profile/backup_page.dart';
 import 'package:zhuoluo/features/profile/habit_page.dart';
 import 'package:zhuoluo/features/profile/pomodoro_page.dart';
 import 'package:zhuoluo/features/profile/preferences_page.dart';
-import 'package:zhuoluo/features/profile/restore_flow.dart';
-import 'package:zhuoluo/features/profile/webdav_page.dart';
 import 'package:zhuoluo/features/statistics/statistics_page.dart';
 
 /// 我的页：工具入口 + 设置
@@ -32,7 +29,6 @@ class ProfilePage extends ConsumerWidget {
     final failTime = _parseAutoBackupFailTime(backupFail);
     // WebDAV 云端同步状态（入口副标题：上次同步时间 / 失败提示）
     final webdavFail = ref.watch(webdavFailedProvider).value ?? '';
-    final webdavLast = ref.watch(webdavLastSyncProvider).value ?? '';
     return Scaffold(
       appBar: AppBar(title: const Text('我的')),
       // 空白处从左向右滑切四象限（翻页式：上一个 tab；列表垂直滚动不冲突）
@@ -48,7 +44,7 @@ class ProfilePage extends ConsumerWidget {
           padding: const EdgeInsets.only(bottom: 140),
           children: [
             _SectionGroup(
-              header: const _SectionHeader('效率工具'),
+              header: const _SectionHeader('功能'),
               children: [
                 ListTile(
                   leading: const _IconLeading(Icons.timer_outlined),
@@ -62,11 +58,6 @@ class ProfilePage extends ConsumerWidget {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _push(context, const HabitPage()),
                 ),
-              ],
-            ),
-            _SectionGroup(
-              header: const _SectionHeader('统计'),
-              children: [
                 ListTile(
                   leading: const _IconLeading(Icons.bar_chart),
                   title: const Text('统计'),
@@ -76,98 +67,43 @@ class ProfilePage extends ConsumerWidget {
               ],
             ),
             _SectionGroup(
-              header: const _SectionHeader('数据管理'),
-              // 截图④：数据管理组统一右箭头（与其余入口一致）
+              header: const _SectionHeader('数据'),
               children: [
                 ListTile(
-                  leading: const _IconLeading(Icons.backup_outlined),
-                  title: const Text('导出备份'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _export(context, ref),
-                ),
-                ListTile(
-                    leading: _IconLeading(
-                      backupFail.isEmpty
-                          ? Icons.folder_open
-                          : Icons.error_outline,
-                      color: backupFail.isEmpty
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.orange,
-                    ),
-                    title: const Text('备份管理'),
-                    subtitle: backupFail.isEmpty
-                        ? null
-                        : Text(
-                            '上次自动备份失败（$failTime），点此查看',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.orange.shade700,
-                            ),
-                          ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () async {
-                      // 进入备份管理页后清除失败标志（备份方案设计 3.3）
-                      await _clearAutoBackupFailed(ref);
-                      if (context.mounted) {
-                        _push(context, const BackupManagePage());
-                      }
-                    },
-                  ),
-                ListTile(
-                  leading: const _IconLeading(Icons.restore),
-                  title: const Text('导入备份'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _import(context, ref),
-                ),
-                ListTile(
                   leading: _IconLeading(
-                    webdavFail.isEmpty
-                        ? Icons.cloud_outlined
-                        : Icons.cloud_off,
-                    color: webdavFail.isEmpty
+                    backupFail.isEmpty && webdavFail.isEmpty
+                        ? Icons.folder_open
+                        : Icons.error_outline,
+                    color: backupFail.isEmpty && webdavFail.isEmpty
                         ? Theme.of(context).colorScheme.primary
                         : Colors.orange,
                   ),
-                  title: const Text('WebDAV 云备份'),
-                  subtitle: webdavFail.isNotEmpty
-                      ? Text(
-                          '上次云端同步失败，点此查看',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.orange.shade700,
-                          ),
-                        )
-                      : Text(
-                          webdavLast.isEmpty
-                              ? '通过 WebDAV 把备份同步到你自己的服务器'
-                              : '上次云端同步 ${_fmtWebdavTime(webdavLast)}',
-                          style: AppTextStyles.subtitle(context),
-                        ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _push(context, const WebdavPage()),
-                ),
-              ],
-            ),
-            _SectionGroup(
-              header: const _SectionHeader('通知'),
-              children: [
-                const _NotificationPermissionTile(),
-                ListTile(
-                  leading: const _IconLeading(
-                    Icons.notifications_active_outlined,
-                  ),
-                  title: const Text('发送测试通知'),
+                  title: const Text('备份与恢复'),
                   subtitle: Text(
-                    '立即弹出一条通知，验证提醒是否正常',
+                    backupFail.isNotEmpty
+                        ? '上次自动备份失败（$failTime）'
+                        : webdavFail.isNotEmpty
+                        ? '上次云端同步失败'
+                        : '导出、导入、本地备份与 WebDAV',
                     style: AppTextStyles.subtitle(context),
                   ),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _sendTestNotification(context, ref),
+                  onTap: () async {
+                    // 进入备份管理页后清除失败标志（备份方案设计 3.3）
+                    await _clearAutoBackupFailed(ref);
+                    if (context.mounted) {
+                      _push(context, const BackupManagePage());
+                    }
+                  },
                 ),
               ],
             ),
             _SectionGroup(
-              header: const _SectionHeader('外观'),
+              header: const _SectionHeader('提醒'),
+              children: [const _ReminderSettingsTile()],
+            ),
+            _SectionGroup(
+              header: const _SectionHeader('设置'),
               children: [
                 const _ThemeTile(),
                 const _FeedbackTile(
@@ -184,11 +120,6 @@ class ProfilePage extends ConsumerWidget {
                   loadValue: _loadHaptics,
                   applyValue: _applyHaptics,
                 ),
-              ],
-            ),
-            _SectionGroup(
-              header: const _SectionHeader('偏好设置'),
-              children: [
                 ListTile(
                   leading: const _IconLeading(Icons.tune),
                   title: const Text('偏好设置'),
@@ -241,18 +172,10 @@ class ProfilePage extends ConsumerWidget {
 
   /// 清除自动备份失败标志（进入备份管理页时调用）
   static Future<void> _clearAutoBackupFailed(WidgetRef ref) async {
-    await ref.read(dbProvider).setSetting(BackupService.keyAutoBackupFailed, '');
+    await ref
+        .read(dbProvider)
+        .setSetting(BackupService.keyAutoBackupFailed, '');
     ref.invalidate(autoBackupFailedProvider);
-  }
-
-  /// WebDAV 上次同步时间的入口副标题文案（MM-dd HH:mm）
-  static String _fmtWebdavTime(String raw) {
-    final t = DateTime.tryParse(raw);
-    if (t == null) return '未知时间';
-    return '${t.month.toString().padLeft(2, '0')}-'
-        '${t.day.toString().padLeft(2, '0')} '
-        '${t.hour.toString().padLeft(2, '0')}:'
-        '${t.minute.toString().padLeft(2, '0')}';
   }
 
   void _showAbout(BuildContext context) {
@@ -277,119 +200,6 @@ class ProfilePage extends ConsumerWidget {
         ],
       ),
     );
-  }
-
-  Future<void> _export(BuildContext context, WidgetRef ref) async {
-    final service = ref.read(backupServiceProvider);
-    try {
-      // 方案 A：系统保存对话框（默认下载目录，文件名预填）——
-      // 备份存放在用户选定位置，卸载 App 不丢失
-      final path = await service.exportToUserLocation();
-      if (path == null) return; // 用户取消
-      if (context.mounted) {
-        // Android 返回展示路径（Download/着落/文件名），
-        // 其余平台为用户选择的完整路径
-        showAppSnackBar(context, '已导出到 $path', icon: Icons.backup_outlined);
-      }
-    } catch (e) {
-      if (context.mounted) {
-        showAppSnackBar(
-          context,
-          '导出失败：$e',
-          icon: Icons.error_outline,
-        );
-      }
-    }
-  }
-
-  Future<void> _import(BuildContext context, WidgetRef ref) async {
-    final service = ref.read(backupServiceProvider);
-    // 方案 A：系统打开对话框，从任意位置选择备份 JSON
-    // （分段 try：选择/读取失败与导入失败分开提示，便于定位）
-    String? json;
-    try {
-      json = await service.importFromUserFile();
-    } catch (e) {
-      if (context.mounted) {
-        showAppSnackBar(
-          context,
-          '选择或读取备份文件失败：$e',
-          icon: Icons.error_outline,
-        );
-      }
-      return;
-    }
-    if (json == null) return; // 用户取消
-    if (!context.mounted) return;
-    try {
-      // 校验并统计备份内容
-      final stats = service.parseBackupStats(json);
-      if (stats == null) {
-        showAppSnackBar(
-          context,
-          '不是有效的着落备份文件',
-          icon: Icons.error_outline,
-        );
-        return;
-      }
-      // 确认框：替换 / 合并两种导入方式（备份方案设计 3.4）
-      // 返回 'merge' 合并导入（按内容指纹去重），'replace' 全量替换
-      final choice = await showDialog<String>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('导入备份'),
-          content: Text(
-            '备份中有 ${stats.tasks} 个任务、${stats.lists} 个清单。\n\n'
-            '「合并导入」按内容指纹去重并入当前数据'
-            '（同名同内容才跳过，推荐，不丢失现有内容）；\n'
-            '「恢复并覆盖」以备份为准替换全部数据（恢复前会自动备份当前数据，'
-            '可在"备份管理"中回退）。',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c, null),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(c, 'merge'),
-              child: const Text('合并导入'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(c, 'replace'),
-              child: const Text('恢复并覆盖'),
-            ),
-          ],
-        ),
-      );
-      if (choice == null || !context.mounted) return;
-      // 导入与导入后的全量刷新/重排统一走共享编排
-      // （replace 模式由编排内部先自动安全备份当前数据）
-      await importBackupWithRefresh(
-        ref,
-        json,
-        merge: choice == 'merge',
-        safetyBackup: choice == 'replace',
-      );
-      if (context.mounted) {
-        // 冲突增强 ③：导入完成报告
-        showAppSnackBar(
-          context,
-          choice == 'merge'
-              ? '已合并导入（按内容指纹去重）'
-              : '已恢复 ${stats.tasks} 个任务、${stats.reminders} 条提醒、'
-                  '${stats.habits} 个习惯',
-          icon: Icons.restore,
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        showAppSnackBar(
-          context,
-          '恢复失败：$e',
-          icon: Icons.error_outline,
-        );
-      }
-    }
   }
 }
 
@@ -454,10 +264,7 @@ class _SectionHeader extends StatelessWidget {
               borderRadius: AppRadius.pill,
             ),
           ),
-          Text(
-            title,
-            style: AppTextStyles.sectionHeader(context),
-          ),
+          Text(title, style: AppTextStyles.sectionHeader(context)),
         ],
       ),
     );
@@ -490,42 +297,25 @@ class _IconLeading extends StatelessWidget {
   }
 }
 
-// ================= 通知权限中心 =================
-
-/// 通知权限中心：通知权限 / 精确闹钟 / 电池优化 / 自启动四项，
-/// 每项可一键跳对应系统设置（通知方案 A）
-class _NotificationPermissionTile extends ConsumerStatefulWidget {
-  const _NotificationPermissionTile();
+/// 提醒设置：自启动常驻，通知权限缺失时才提供修复入口。
+class _ReminderSettingsTile extends ConsumerStatefulWidget {
+  const _ReminderSettingsTile();
 
   @override
-  ConsumerState<_NotificationPermissionTile> createState() =>
-      _NotificationPermissionTileState();
+  ConsumerState<_ReminderSettingsTile> createState() =>
+      _ReminderSettingsTileState();
 }
 
-class _NotificationPermissionTileState
-    extends ConsumerState<_NotificationPermissionTile>
+class _ReminderSettingsTileState extends ConsumerState<_ReminderSettingsTile>
     with WidgetsBindingObserver {
-  bool? _exactOk;
-  bool? _notifOk;
-  bool? _batteryOk;
-
-  /// 跳转自启动设置后置位：回到应用（resumed）时提示用户确认
+  bool? _notificationsEnabled;
   bool _autoStartHintPending = false;
-
-  /// 提醒渠道设置状态（声音/悬浮/振动），按渠道 ID 缓存
-  final Map<String, ReminderChannelStatus?> _channelStatus = {};
-
-  /// 提醒渠道（任务/习惯）：状态展示 + 一键跳转系统渠道设置页
-  static const _reminderChannels = [
-    (id: NotificationService.reminderChannelId, name: '任务提醒'),
-    (id: NotificationService.habitReminderChannelId, name: '习惯提醒'),
-  ];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _check();
+    _checkNotificationPermission();
   }
 
   @override
@@ -536,252 +326,68 @@ class _NotificationPermissionTileState
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 从系统设置页返回即刷新权限状态——固定延时回读在用户于系统
-    // 设置停留超过延时时间时会显示旧值
-    if (state == AppLifecycleState.resumed) {
-      _check();
-      if (_autoStartHintPending) {
-        _autoStartHintPending = false;
-        showAppSnackBar(
-          context,
-          '已打开自启动设置，请确认已允许自启动',
-          icon: Icons.power_settings_new,
-        );
-      }
+    if (state != AppLifecycleState.resumed) return;
+    _checkNotificationPermission();
+    if (_autoStartHintPending) {
+      _autoStartHintPending = false;
+      showAppSnackBar(
+        context,
+        '已打开自启动设置，请确认已允许自启动',
+        icon: Icons.power_settings_new,
+      );
     }
   }
 
-  Future<void> _check() async {
-    final svc = ref.read(notificationServiceProvider);
-    final exact = await svc.canScheduleExactAlarms();
-    final notif = await svc.areNotificationsEnabled();
-    final battery = await svc.isIgnoringBatteryOptimizations();
-    // 提醒渠道状态：渠道属性在系统侧创建后固化，应用只能尽力默认开启，
-    // 未开启的选项在下方展示并引导一键跳转开启
-    final taskStatus = await svc.getReminderChannelStatus(
-      NotificationService.reminderChannelId,
-    );
-    final habitStatus = await svc.getReminderChannelStatus(
-      NotificationService.habitReminderChannelId,
-    );
-    // N-刷新调度权限缓存——用户从系统设置授权/拒绝后，
-    // 否则调度器按旧缓存短路，提醒一直静默跳过直到重启
-    await svc.refreshPermissionCache();
-    if (mounted) {
-      setState(() {
-        _exactOk = exact;
-        _notifOk = notif;
-        _batteryOk = battery;
-        _channelStatus[NotificationService.reminderChannelId] = taskStatus;
-        _channelStatus[NotificationService.habitReminderChannelId] = habitStatus;
-      });
-    }
+  Future<void> _checkNotificationPermission() async {
+    final enabled = await ref
+        .read(notificationServiceProvider)
+        .areNotificationsEnabled();
+    if (mounted) setState(() => _notificationsEnabled = enabled);
   }
 
   @override
   Widget build(BuildContext context) {
-    final exact = _exactOk;
-    final notif = _notifOk;
-    final battery = _batteryOk;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ListTile(
-          leading: const _IconLeading(Icons.alarm, size: 30),
-          title: const Text('通知权限中心'),
+          leading: const _IconLeading(Icons.power_settings_new),
+          title: const Text('自启动'),
           subtitle: Text(
-            '应用未运行时也会按时提醒（系统闹钟服务触发）',
-            style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          onTap: _check,
-        ),
-        // 通知权限（Android 13+）
-        ListTile(
-          dense: true,
-          leading: _IconLeading(
-            Icons.notifications_outlined,
-            size: 30,
-            color: notif == false
-                ? Colors.orange
-                : Theme.of(context).colorScheme.primary,
-          ),
-          title: const Text('通知权限', style: TextStyle(fontSize: 14)),
-          trailing: _statusIcon(notif),
-          onTap: () {
-            ref.read(notificationServiceProvider).openNotificationSettings();
-          },
-        ),
-        // 精确闹钟（Android 12+ 默认拒绝）
-        ListTile(
-          dense: true,
-          leading: _IconLeading(
-            Icons.timer_outlined,
-            size: 30,
-            color: exact == false
-                ? Colors.orange
-                : Theme.of(context).colorScheme.primary,
-          ),
-          title: const Text('精确闹钟权限', style: TextStyle(fontSize: 14)),
-          subtitle: const Text(
-            '小米等厂商需在"闹钟和提醒"中允许',
-            style: TextStyle(fontSize: 11),
-          ),
-          trailing: _statusIcon(exact),
-          onTap: () {
-            ref
-                .read(notificationServiceProvider)
-                .requestExactAlarmPermission();
-          },
-        ),
-        // 电池优化豁免
-        ListTile(
-          dense: true,
-          leading: _IconLeading(
-            Icons.battery_saver_outlined,
-            size: 30,
-            color: battery == false
-                ? Colors.orange
-                : Theme.of(context).colorScheme.primary,
-          ),
-          title: const Text('电池优化豁免', style: TextStyle(fontSize: 14)),
-          subtitle: const Text(
-            '豁免后通知更准时（建议允许）',
-            style: TextStyle(fontSize: 11),
-          ),
-          trailing: _statusIcon(battery),
-          onTap: () {
-            ref
-                .read(notificationServiceProvider)
-                .requestBatteryOptimizationExemption();
-          },
-        ),
-        // 自启动（HyperOS：进程被清理后系统才会恢复闹钟通知）
-        ListTile(
-          dense: true,
-          leading: _IconLeading(
-            Icons.power_settings_new,
-            size: 30,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-          title: const Text('自启动', style: TextStyle(fontSize: 14)),
-          subtitle: const Text(
-            'HyperOS 需允许自启动，进程被清理后系统才会恢复提醒',
-            style: TextStyle(fontSize: 11),
+            '允许自启动，以便系统在后台恢复提醒',
+            style: AppTextStyles.subtitle(context),
           ),
           trailing: const Icon(Icons.chevron_right),
           onTap: () {
-            // 无统一 API 查询自启动状态：跳转后靠 resumed 回调提示确认
             _autoStartHintPending = true;
             ref.read(notificationServiceProvider).openAutoStartSettings();
           },
         ),
-        // 提醒渠道设置：通知声音/悬浮通知/振动默认开启（渠道创建时已尽力断言）；
-        // 部分 ROM 可能未生效，此处展示真实状态并一键跳转系统对应渠道设置页
-        // 引导开启。锁屏显示按系统默认，不纳入引导范围。
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Text(
-            '提醒渠道',
-            style: AppTextStyles.hint(context),
+        if (_notificationsEnabled == false) ...[
+          Divider(
+            indent: 56,
+            color: Theme.of(
+              context,
+            ).colorScheme.outlineVariant.withValues(alpha: 0.5),
           ),
-        ),
-        if (_anyChannelNeedsAttention)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, size: 14, color: Colors.orange.shade700),
-                const SizedBox(width: 6),
-                const Expanded(
-                  child: Text(
-                    '声音/悬浮/振动未全部开启，点击下方渠道前往系统设置开启',
-                    style: TextStyle(fontSize: 11, color: Colors.orange),
-                  ),
-                ),
-              ],
+          ListTile(
+            leading: const _IconLeading(
+              Icons.notifications_off_outlined,
+              color: Colors.orange,
             ),
+            title: const Text('开启通知权限'),
+            subtitle: Text(
+              '当前无法发送任务和习惯提醒',
+              style: AppTextStyles.subtitle(context),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              ref.read(notificationServiceProvider).openNotificationSettings();
+            },
           ),
-        for (final c in _reminderChannels) _channelTile(c.id, c.name),
+        ],
       ],
     );
   }
-
-  /// 任一提醒渠道存在未开启的关键选项（提示条展示条件）
-  bool get _anyChannelNeedsAttention => _reminderChannels.any((c) {
-        final s = _channelStatus[c.id];
-        return s != null && s.exists && !s.allOn;
-      });
-
-  /// 提醒渠道行：状态位（声音/悬浮/振动）+ 点击跳系统渠道设置页
-  Widget _channelTile(String channelId, String name) {
-    final status = _channelStatus[channelId];
-    final needsAttention = status != null && status.exists && !status.allOn;
-    return ListTile(
-      dense: true,
-      leading: _IconLeading(
-        Icons.campaign_outlined,
-        size: 30,
-        color: needsAttention
-            ? Colors.orange
-            : Theme.of(context).colorScheme.primary,
-      ),
-      title: Text('$name渠道设置', style: const TextStyle(fontSize: 14)),
-      subtitle: Text(
-        _channelStatusText(status),
-        style: TextStyle(
-          fontSize: 11,
-          color: needsAttention
-            ? Colors.orange.shade800
-            : Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
-      ),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: () {
-        ref.read(notificationServiceProvider).openChannelSettings(channelId);
-      },
-    );
-  }
-
-  /// 渠道状态文案：null=检查中/读取失败；exists=false=无渠道机制
-  String _channelStatusText(ReminderChannelStatus? s) {
-    if (s == null) return '状态检查中…';
-    if (!s.exists) return '渠道不存在（Android 8.0 以下无渠道机制）';
-    final parts = [
-      '声音 ${s.soundEnabled ? '✓' : '✗'}',
-      '悬浮 ${s.floatingEnabled ? '✓' : '✗'}',
-      '振动 ${s.vibrationEnabled ? '✓' : '✗'}',
-    ];
-    return parts.join(' · ');
-  }
-
-  /// 状态图标：null=检查中 / true=已开启 / false=未开启
-  Widget _statusIcon(bool? ok) {
-    if (ok == null) {
-      return const SizedBox(
-        width: 20,
-        height: 20,
-        child: CircularProgressIndicator(strokeWidth: 2),
-      );
-    }
-    return ok
-        ? Icon(Icons.check_circle, color: Colors.green.shade400, size: 20)
-        : const Icon(Icons.chevron_right);
-  }
-}
-
-/// 发送测试通知（通知方案 A）
-Future<void> _sendTestNotification(BuildContext context, WidgetRef ref) async {
-  final svc = ref.read(notificationServiceProvider);
-  final ok = await svc.sendTestNotification();
-  if (!context.mounted) return;
-  showAppSnackBar(
-    context,
-    ok ? '测试通知已发送，1 秒后到达' : '通知发送失败：请检查上方权限状态',
-    icon: ok ? Icons.notifications_active_outlined : Icons.error_outline,
-  );
 }
 
 // ================= 音效 / 震动开关 =================
@@ -906,12 +512,11 @@ class _ThemeTileState extends ConsumerState<_ThemeTile> {
                   color: e.value,
                   selected: e.key == '默认蓝' ? _hex.isEmpty : e.value == _color,
                   onTap: () async {
-                    final hex =
-                        e.key == '默认蓝' ? '' : ThemePalette.toStore(e.value);
+                    final hex = e.key == '默认蓝'
+                        ? ''
+                        : ThemePalette.toStore(e.value);
                     setState(() => _hex = hex);
-                    await ref
-                        .read(settingsProvider)
-                        .set('themeColor', hex);
+                    await ref.read(settingsProvider).set('themeColor', hex);
                     ref.read(themeColorProvider.notifier).state = hex;
                     if (c.mounted) Navigator.pop(c);
                   },
@@ -960,10 +565,7 @@ class _ThemeTileState extends ConsumerState<_ThemeTile> {
                 decoration: BoxDecoration(
                   color: _color,
                   shape: BoxShape.circle,
-                  border: Border.all(
-                    color: scheme.outlineVariant,
-                    width: 1,
-                  ),
+                  border: Border.all(color: scheme.outlineVariant, width: 1),
                 ),
               ),
               const SizedBox(width: 4),

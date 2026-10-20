@@ -479,53 +479,43 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                               // E5：左侧时间刻度（跟随右侧滚动同步）
                               SizedBox(
                                 width: 44,
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    border: Border(
-                                      right: BorderSide(
-                                        color: scheme.outlineVariant.withValues(
-                                          alpha: 0.28,
-                                        ),
-                                      ),
-                                    ),
+                                child: ListView.builder(
+                                  controller: _timeBarController,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  // 上下各留半行高（与右侧内容对称），让首尾小时刻度完整显示
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: axisTopPadding,
                                   ),
-                                  child: ListView.builder(
-                                    controller: _timeBarController,
-                                    physics:
-                                        const NeverScrollableScrollPhysics(),
-                                    // 上下各留半行高（与右侧内容对称），让首尾标签（6:00/23:00）完整显示
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: axisTopPadding,
-                                    ),
-                                    itemCount: totalHours + 1,
-                                    itemBuilder: (context, i) {
-                                      final hour = startEff + i;
-                                      return SizedBox(
-                                        height: pp,
-                                        // 标签中心对齐小时线（文字上下各 5px，跨线居中）
-                                        child: Stack(
-                                          clipBehavior: Clip.none,
-                                          children: [
-                                            Positioned(
-                                              right: 6,
-                                              top: -5,
-                                              child: Text(
-                                                '${hour.toString().padLeft(2, '0')}:00',
-                                                textAlign: TextAlign.right,
-                                                style: TextStyle(
-                                                  fontSize: 10.5,
-                                                  height: 1,
-                                                  fontWeight: FontWeight.w500,
-                                                  color:
-                                                      scheme.onSurfaceVariant,
-                                                ),
+                                  itemCount: totalHours + 1,
+                                  itemBuilder: (context, i) {
+                                    final hour = startEff + i;
+                                    return SizedBox(
+                                      height: pp,
+                                      // 小时数字与对应的圆角小时格顶部对齐。
+                                      child: Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          Positioned(
+                                            left: 6,
+                                            top: 5,
+                                            child: Text(
+                                              hour.toString().padLeft(2, '0'),
+                                              key: ValueKey(
+                                                'calendar-hour-label-$hour',
+                                              ),
+                                              textAlign: TextAlign.right,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                height: 1,
+                                                fontWeight: FontWeight.w500,
+                                                color: scheme.onSurfaceVariant,
                                               ),
                                             ),
-                                          ],
-                                        ),
-                                      );
-                                    },
-                                  ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
                               // E5：右侧内容（同一滚动控制器）
@@ -533,40 +523,36 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                 child: ListView(
                                   controller: _scrollController,
                                   // 与左侧时间栏同步偏移，保持线对齐；
-                                  // 上下各留半行（32px），6:00 上方与 23:00 下方留白对称
+                                  // 上下各留半行（32px），首尾小时刻度留白对称
                                   padding: const EdgeInsets.symmetric(
                                     vertical: axisTopPadding,
                                   ),
                                   children: [
-                                    // 时间轴主体（6:00~23:00 线）
+                                    // 时间轴主体（每个日期 × 小时为一个圆角格）
                                     SizedBox(
                                       key: _axisKey,
                                       height: totalHours * pp,
                                       child: Stack(
                                         children: [
-                                          // 整点线轻量、实线、圆角端点；半点留白，
-                                          // 让时间位置清楚又不把日历切成密集方格。
-                                          for (var h = 0; h <= totalHours; h++)
-                                            Positioned(
-                                              top: h * pp - 0.5,
-                                              left: 4,
-                                              right: 4,
-                                              child: SizedBox(
-                                                height: 1,
-                                                child: DecoratedBox(
-                                                  decoration: BoxDecoration(
-                                                    color: scheme.outlineVariant
-                                                        .withValues(
-                                                          alpha: 0.38,
-                                                        ),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          1,
-                                                        ),
-                                                  ),
+                                          Positioned.fill(
+                                            child: IgnorePointer(
+                                              child: CustomPaint(
+                                                painter: _HourCellGridPainter(
+                                                  color: scheme.primaryContainer
+                                                      .withValues(
+                                                        alpha:
+                                                            scheme.brightness ==
+                                                                Brightness.dark
+                                                            ? 0.42
+                                                            : 0.56,
+                                                      ),
+                                                  dayCount: days.length,
+                                                  hourCount: totalHours,
+                                                  pixelPerHour: pp,
                                                 ),
                                               ),
                                             ),
+                                          ),
                                           // 日期列 + 任务块
                                           Row(
                                             crossAxisAlignment:
@@ -578,7 +564,7 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                                 var i = 0;
                                                 i < days.length;
                                                 i++
-                                              ) ...[
+                                              )
                                                 Expanded(
                                                   child: DayColumn(
                                                     day: days[i],
@@ -616,39 +602,13 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                                         .onDragStartTracking,
                                                     selectionRange:
                                                         widget.selectionRange,
-                                                    // A13：列在视口内的左偏移（含分隔线）
+                                                    // 日期列等宽，背景圆角格与落点同列对齐。
                                                     viewportLeft:
                                                         i *
-                                                        ((axisWidth - 44) /
-                                                                days.length +
-                                                            1),
+                                                        (axisWidth - 44) /
+                                                        days.length,
                                                   ),
                                                 ),
-                                                if (days[i] != days.last)
-                                                  SizedBox(
-                                                    width: 1,
-                                                    height: totalHours * pp,
-                                                    child: Padding(
-                                                      padding:
-                                                          const EdgeInsets.symmetric(
-                                                            vertical: 4,
-                                                          ),
-                                                      child: DecoratedBox(
-                                                        decoration: BoxDecoration(
-                                                          color: scheme
-                                                              .outlineVariant
-                                                              .withValues(
-                                                                alpha: 0.24,
-                                                              ),
-                                                          borderRadius:
-                                                              BorderRadius.circular(
-                                                                1,
-                                                              ),
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                              ],
                                             ],
                                           ),
                                           // E3+E4：当前时间线（仅今天列，平滑走秒）
@@ -1298,4 +1258,50 @@ class _ImmediateScaleRecognizer extends ScaleGestureRecognizer {
       resolve(GestureDisposition.accepted);
     }
   }
+}
+
+/// 装饰层：每个日期的每小时用独立圆角格表示，格间留白替代网格分割线。
+class _HourCellGridPainter extends CustomPainter {
+  const _HourCellGridPainter({
+    required this.color,
+    required this.dayCount,
+    required this.hourCount,
+    required this.pixelPerHour,
+  });
+
+  final Color color;
+  final int dayCount;
+  final int hourCount;
+  final double pixelPerHour;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (dayCount == 0 || hourCount == 0) return;
+    final columnWidth = size.width / dayCount;
+    final horizontalGap = dayCount == 1 ? 4.0 : 2.5;
+    final verticalGap = (pixelPerHour * 0.08).clamp(2.0, 4.0).toDouble();
+    final cellWidth = columnWidth - horizontalGap * 2;
+    final cellHeight = pixelPerHour - verticalGap * 2;
+    if (cellWidth <= 0 || cellHeight <= 0) return;
+    final radius = Radius.circular(dayCount == 1 ? 10 : 8);
+    final paint = Paint()..color = color;
+    for (var hour = 0; hour < hourCount; hour++) {
+      for (var day = 0; day < dayCount; day++) {
+        final rect = Rect.fromLTWH(
+          day * columnWidth + horizontalGap,
+          hour * pixelPerHour + verticalGap,
+          cellWidth,
+          cellHeight,
+        );
+        canvas.drawRRect(RRect.fromRectAndRadius(rect, radius), paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_HourCellGridPainter old) =>
+      old.color != color ||
+      old.dayCount != dayCount ||
+      old.hourCount != hourCount ||
+      old.pixelPerHour != pixelPerHour;
 }

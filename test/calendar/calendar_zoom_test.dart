@@ -97,8 +97,11 @@ void main() {
     testWidgets('缩到最小 → 06:00-23:00 整屏可见', (tester) async {
       final container = makeContainer();
       await pumpCalendar(tester, container);
-      // 默认缩放（64px/h）下时间轴高于视口：23:00 标签未进入构建区
-      expect(tester.any(find.text('23:00')), isFalse);
+      // 默认缩放（64px/h）下时间轴高于视口：23 小时标签未进入构建区
+      expect(
+        tester.any(find.byKey(const ValueKey('calendar-hour-label-23'))),
+        isFalse,
+      );
       const center = Offset(400, 400);
       // 连续捏合确保缩到底（clamp 到整屏下限）
       for (var i = 0; i < 4; i++) {
@@ -107,9 +110,15 @@ void main() {
       final pp = container.read(pixelPerHourProvider);
       expect(pp, greaterThan(0));
       expect(pp, lessThan(40.0));
-      // 缩到底后 06:00 与 23:00 首尾标签全部进入视口
-      expect(tester.any(find.text('06:00')), isTrue);
-      expect(tester.any(find.text('23:00')), isTrue);
+      // 缩到底后 06 与 23 首尾小时标签全部进入视口
+      expect(
+        tester.any(find.byKey(const ValueKey('calendar-hour-label-6'))),
+        isTrue,
+      );
+      expect(
+        tester.any(find.byKey(const ValueKey('calendar-hour-label-23'))),
+        isTrue,
+      );
     });
 
     testWidgets('单指拖动滚动时间轴不改变缩放级别', (tester) async {

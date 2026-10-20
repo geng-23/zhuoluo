@@ -443,8 +443,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      // 时间刻度 '06:00' 左缘应贴近屏幕左缘（<12px；收窄 24px 时为 18px+）
-      final left = tester.getTopLeft(find.text('06:00').first).dx;
+      // 小时刻度 '06' 左缘应贴近屏幕左缘。
+      final left = tester
+          .getTopLeft(find.byKey(const ValueKey('calendar-hour-label-6')).first)
+          .dx;
       expect(left, lessThan(12), reason: '左时间栏应贴屏幕左缘（实际 $left）');
     });
 
@@ -1246,7 +1248,7 @@ void main() {
       reason: '空周翻页跨缓存点不应显示 spinner（修复前整页替换销毁 WeekView State）',
     );
     expect(
-      find.text('06:00'),
+      find.byKey(const ValueKey('calendar-hour-label-6')),
       findsWidgets,
       reason: 'WeekView 应保持存活（时间轴刻度仍在，未被 spinner 替换）',
     );

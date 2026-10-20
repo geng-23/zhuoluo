@@ -432,7 +432,10 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                   ),
               ],
             ),
-            const Divider(height: 1),
+            Divider(
+              height: 1,
+              color: scheme.outlineVariant.withValues(alpha: 0.28),
+            ),
             Expanded(
               child: Column(
                 children: [
@@ -481,7 +484,7 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                     border: Border(
                                       right: BorderSide(
                                         color: scheme.outlineVariant.withValues(
-                                          alpha: 0.55,
+                                          alpha: 0.28,
                                         ),
                                       ),
                                     ),
@@ -504,13 +507,13 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                           clipBehavior: Clip.none,
                                           children: [
                                             Positioned(
-                                              right: 5,
+                                              right: 6,
                                               top: -5,
                                               child: Text(
                                                 '${hour.toString().padLeft(2, '0')}:00',
                                                 textAlign: TextAlign.right,
                                                 style: TextStyle(
-                                                  fontSize: 10,
+                                                  fontSize: 10.5,
                                                   height: 1,
                                                   fontWeight: FontWeight.w500,
                                                   color:
@@ -541,45 +544,29 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                       height: totalHours * pp,
                                       child: Stack(
                                         children: [
-                                          // 时间网格线（暗色适配）
-                                          for (
-                                            var h = 0;
-                                            h <= totalHours;
-                                            h++
-                                          ) ...[
+                                          // 整点线轻量、实线、圆角端点；半点留白，
+                                          // 让时间位置清楚又不把日历切成密集方格。
+                                          for (var h = 0; h <= totalHours; h++)
                                             Positioned(
                                               top: h * pp - 0.5,
-                                              left: 0,
-                                              right: 0,
-                                              child: Divider(
+                                              left: 4,
+                                              right: 4,
+                                              child: SizedBox(
                                                 height: 1,
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .outlineVariant
-                                                    .withValues(alpha: 0.5),
-                                              ),
-                                            ),
-                                            // 30 分钟虚刻线（谷歌日历风格）：
-                                            // 位于每个整点下方半格，更淡且分段虚线
-                                            if (h < totalHours)
-                                              Positioned(
-                                                top: h * pp + pp * 0.5 - 0.5,
-                                                left: 0,
-                                                right: 0,
-                                                child: CustomPaint(
-                                                  size: const Size(
-                                                    double.infinity,
-                                                    1,
-                                                  ),
-                                                  painter: _HalfHourLinePainter(
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .outlineVariant
-                                                        .withValues(alpha: 0.3),
+                                                child: DecoratedBox(
+                                                  decoration: BoxDecoration(
+                                                    color: scheme.outlineVariant
+                                                        .withValues(
+                                                          alpha: 0.38,
+                                                        ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          1,
+                                                        ),
                                                   ),
                                                 ),
                                               ),
-                                          ],
+                                            ),
                                           // 日期列 + 任务块
                                           Row(
                                             crossAxisAlignment:
@@ -638,12 +625,28 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                                   ),
                                                 ),
                                                 if (days[i] != days.last)
-                                                  Container(
+                                                  SizedBox(
                                                     width: 1,
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .outlineVariant
-                                                        .withValues(alpha: 0.5),
+                                                    height: totalHours * pp,
+                                                    child: Padding(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                            vertical: 4,
+                                                          ),
+                                                      child: DecoratedBox(
+                                                        decoration: BoxDecoration(
+                                                          color: scheme
+                                                              .outlineVariant
+                                                              .withValues(
+                                                                alpha: 0.24,
+                                                              ),
+                                                          borderRadius:
+                                                              BorderRadius.circular(
+                                                                1,
+                                                              ),
+                                                        ),
+                                                      ),
+                                                    ),
                                                   ),
                                               ],
                                             ],
@@ -856,7 +859,10 @@ class NowLineState extends ConsumerState<NowLine>
           width: widget.columnWidth,
           child: Container(
             height: 1.5,
-            color: lineColor,
+            decoration: BoxDecoration(
+              color: lineColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Container(
@@ -1256,7 +1262,7 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
             if (hasItems || draggingTopArea)
               Divider(
                 height: 1,
-                color: scheme.outlineVariant.withValues(alpha: 0.5),
+                color: scheme.outlineVariant.withValues(alpha: 0.28),
               ),
           ],
         );
@@ -1292,28 +1298,4 @@ class _ImmediateScaleRecognizer extends ScaleGestureRecognizer {
       resolve(GestureDisposition.accepted);
     }
   }
-}
-
-/// 30 分钟虚刻线绘制：等距短划线，淡色不干扰主网格
-class _HalfHourLinePainter extends CustomPainter {
-  _HalfHourLinePainter({required this.color});
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 1;
-    const dash = 4.0;
-    const gap = 3.0;
-    var x = 0.0;
-    while (x < size.width) {
-      canvas.drawLine(Offset(x, 0), Offset(x + dash, 0), paint);
-      x += dash + gap;
-    }
-  }
-
-  @override
-  bool shouldRepaint(_HalfHourLinePainter old) => old.color != color;
 }

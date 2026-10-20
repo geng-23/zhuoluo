@@ -66,7 +66,7 @@ void main() {
     expect(find.text('周视图'), findsWidgets);
     expect(find.text('日视图'), findsOneWidget);
     expect(find.byTooltip('今天'), findsOneWidget);
-    expect(find.byTooltip('添加任务'), findsNothing);
+    expect(find.byTooltip('添加任务'), findsOneWidget);
     await tester.tapAt(const Offset(700, 100));
     await tester.pumpAndSettle();
 

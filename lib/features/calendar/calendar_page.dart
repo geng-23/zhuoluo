@@ -46,58 +46,8 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       },
       child: Scaffold(
         appBar: AppBar(
-          leadingWidth: 100,
-          titleSpacing: 4,
-          leading: Padding(
-            padding: const EdgeInsets.only(left: 12, right: 4),
-            child: PopupMenuButton<String>(
-              key: const ValueKey('calendar-view-menu'),
-              tooltip: '切换视图',
-              initialValue: state.view,
-              onSelected: (view) {
-                _closeMiniMonth();
-                notifier.setView(view);
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'month', child: Text('月视图')),
-                PopupMenuItem(value: 'week', child: Text('周视图')),
-                PopupMenuItem(value: 'day', child: Text('日视图')),
-              ],
-              child: Center(
-                child: Container(
-                  height: 40,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  decoration: BoxDecoration(
-                    color: scheme.primaryContainer,
-                    borderRadius: AppRadius.pill,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        switch (state.view) {
-                          'month' => '月视图',
-                          'day' => '日视图',
-                          _ => '周视图',
-                        },
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.onPrimaryContainer,
-                        ),
-                      ),
-                      Icon(
-                        Icons.arrow_drop_down,
-                        size: 18,
-                        color: scheme.onPrimaryContainer,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
+          automaticallyImplyLeading: false,
+          titleSpacing: 16,
           title: InkWell(
             key: const ValueKey('calendar-date-title'),
             borderRadius: AppRadius.tile,
@@ -120,8 +70,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.4,
                     ),
                   ),
                 ),
@@ -143,7 +94,65 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
               icon: const Icon(Icons.today_outlined),
               tooltip: '今天',
             ),
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: PopupMenuButton<String>(
+                key: const ValueKey('calendar-view-menu'),
+                tooltip: '切换视图',
+                initialValue: state.view,
+                onSelected: (view) {
+                  _closeMiniMonth();
+                  notifier.setView(view);
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'month', child: Text('月视图')),
+                  PopupMenuItem(value: 'week', child: Text('周视图')),
+                  PopupMenuItem(value: 'day', child: Text('日视图')),
+                ],
+                child: Container(
+                  height: 40,
+                  constraints: const BoxConstraints(minWidth: 82),
+                  padding: const EdgeInsets.only(left: 12, right: 7),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerLow,
+                    borderRadius: AppRadius.pill,
+                    border: Border.all(color: scheme.outlineVariant),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        switch (state.view) {
+                          'month' => '月视图',
+                          'day' => '日视图',
+                          _ => '周视图',
+                        },
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurface,
+                        ),
+                      ),
+                      Icon(
+                        Icons.arrow_drop_down,
+                        size: 18,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ],
+        ),
+        floatingActionButton: FloatingActionButton(
+          key: const ValueKey('calendar-add-button'),
+          tooltip: '添加任务',
+          onPressed: () {
+            _closeMiniMonth();
+            _openQuickAdd(context, state.selectedDay);
+          },
+          child: const Icon(Icons.add_rounded, size: 30),
         ),
         body: Stack(
           children: [
@@ -223,7 +232,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _closeMiniMonth,
-                  child: const ColoredBox(color: Colors.transparent),
+                  child: ColoredBox(
+                    color: scheme.scrim.withValues(alpha: 0.08),
+                  ),
                 ),
               ),
             Positioned(

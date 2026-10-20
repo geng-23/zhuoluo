@@ -377,23 +377,27 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                               }
                             },
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: const EdgeInsets.symmetric(vertical: 9),
                         child: Column(
                           children: [
                             Text(
                               DateUtilsEx.weekdayCn[d.weekday - 1],
                               style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.2,
                                 color: DateUtilsEx.sameDay(d, today)
                                     ? scheme.primary
                                     : scheme.onSurfaceVariant,
                               ),
                             ),
-                            const SizedBox(height: 3),
+                            const SizedBox(height: 5),
                             Container(
-                              width: 32,
-                              height: 32,
+                              key: DateUtilsEx.sameDay(d, today)
+                                  ? const ValueKey('calendar-today-header')
+                                  : null,
+                              width: 36,
+                              height: 36,
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
@@ -406,8 +410,10 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                               child: Text(
                                 '${d.day}',
                                 style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
+                                  fontSize: 17,
+                                  fontWeight: DateUtilsEx.sameDay(d, today)
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
                                   color: DateUtilsEx.sameDay(d, today)
                                       ? scheme.onPrimary
                                       : DateUtilsEx.sameDay(
@@ -470,41 +476,53 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                               // E5：左侧时间刻度（跟随右侧滚动同步）
                               SizedBox(
                                 width: 44,
-                                child: ListView.builder(
-                                  controller: _timeBarController,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  // 上下各留半行高（与右侧内容对称），让首尾标签（6:00/23:00）完整显示
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: axisTopPadding,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    border: Border(
+                                      right: BorderSide(
+                                        color: scheme.outlineVariant.withValues(
+                                          alpha: 0.55,
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                  itemCount: totalHours + 1,
-                                  itemBuilder: (context, i) {
-                                    final hour = startEff + i;
-                                    return SizedBox(
-                                      height: pp,
-                                      // 标签中心对齐小时线（文字上下各 5px，跨线居中）
-                                      child: Stack(
-                                        clipBehavior: Clip.none,
-                                        children: [
-                                          Positioned(
-                                            right: 0,
-                                            top: -5,
-                                            child: Text(
-                                              '${hour.toString().padLeft(2, '0')}:00',
-                                              textAlign: TextAlign.right,
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                height: 1,
-                                                color: Theme.of(
-                                                  context,
-                                                ).colorScheme.onSurfaceVariant,
+                                  child: ListView.builder(
+                                    controller: _timeBarController,
+                                    physics:
+                                        const NeverScrollableScrollPhysics(),
+                                    // 上下各留半行高（与右侧内容对称），让首尾标签（6:00/23:00）完整显示
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: axisTopPadding,
+                                    ),
+                                    itemCount: totalHours + 1,
+                                    itemBuilder: (context, i) {
+                                      final hour = startEff + i;
+                                      return SizedBox(
+                                        height: pp,
+                                        // 标签中心对齐小时线（文字上下各 5px，跨线居中）
+                                        child: Stack(
+                                          clipBehavior: Clip.none,
+                                          children: [
+                                            Positioned(
+                                              right: 5,
+                                              top: -5,
+                                              child: Text(
+                                                '${hour.toString().padLeft(2, '0')}:00',
+                                                textAlign: TextAlign.right,
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  height: 1,
+                                                  fontWeight: FontWeight.w500,
+                                                  color:
+                                                      scheme.onSurfaceVariant,
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  },
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
                                 ),
                               ),
                               // E5：右侧内容（同一滚动控制器）
@@ -1074,7 +1092,23 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
           children: [
             Row(
               children: [
-                const SizedBox(width: 44),
+                SizedBox(
+                  width: 44,
+                  child: hasItems
+                      ? Padding(
+                          padding: const EdgeInsets.only(left: 5, top: 5),
+                          child: Text(
+                            '全天',
+                            key: const ValueKey('calendar-all-day-label'),
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        )
+                      : null,
+                ),
                 SizedBox(
                   key: _contentKey,
                   width: contentWidth,

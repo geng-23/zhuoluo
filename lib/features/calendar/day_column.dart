@@ -1712,7 +1712,6 @@ class TaskBlock extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final notifier = ref.read(calendarControllerProvider.notifier);
     final done = item.completed;
     final brightness = Theme.of(context).brightness;
     // 主体色：任务色优先，未设置回退清单色（D1 决策）
@@ -1720,7 +1719,7 @@ class TaskBlock extends ConsumerWidget {
         TaskColors.colorOf(item.task.color, brightness) ??
         colorFromHex(item.listColor);
     final color = done ? Theme.of(context).colorScheme.outline : baseColor;
-    final block = _blockBody(context, color, done, notifier, ref);
+    final block = _blockBody(context, color, done);
     // 全天任务同样可长按拖动：拖到置顶区另一天=改期保持全天（AllDayBar
     // DragTarget 处理），拖进时间轴=转 1 小时时段任务（本列 onAccept 处理）
     // 共享状态驱动的"拖动中"半透明：跨页翻走再返回原页时 Draggable
@@ -1765,13 +1764,7 @@ class TaskBlock extends ConsumerWidget {
     );
   }
 
-  Widget _blockBody(
-    BuildContext context,
-    Color color,
-    bool done,
-    dynamic notifier,
-    WidgetRef ref,
-  ) {
+  Widget _blockBody(BuildContext context, Color color, bool done) {
     final t = item.task;
     final listColor = colorFromHex(item.listColor);
     final onColor = TaskColors.textOn(color);
@@ -1782,7 +1775,7 @@ class TaskBlock extends ConsumerWidget {
     final bgColor = done ? scheme.surfaceContainerHighest : color;
     final textColor = done ? scheme.onSurfaceVariant : onColor;
     final accentColor = done ? scheme.outline : listColor;
-    const radius = 6.0;
+    const radius = 8.0;
     return Material(
       color: bgColor,
       borderRadius: BorderRadius.circular(radius),
@@ -1795,88 +1788,75 @@ class TaskBlock extends ConsumerWidget {
           );
         },
         // 长按交给 LongPressDraggable 拖动改期，不弹菜单
-        child: Stack(
-          children: [
-            // 清单色线：紧贴块左边缘，上下避开圆角（与左边直边同高）
-            Positioned(
-              left: 0,
-              top: radius,
-              bottom: radius,
-              child: Container(width: 1, color: accentColor),
-            ),
-            Padding(
-              // 左侧让出 4px 给色线
-              padding: const EdgeInsets.only(
-                left: 4,
-                right: 2,
-                top: 2,
-                bottom: 2,
-              ),
-              child: Row(
-                children: [
-                  // 文字按块高自适应换行（10px 字约 14dp 行高），只显示标题
-                  Expanded(
-                    // C3-4：跨天定时任务（置顶区）显示起止时刻小字
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // 标题按块高自适应换行（10px 字约 14dp 行高）
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 80;
+            final short =
+                constraints.maxHeight.isFinite && constraints.maxHeight < 38;
+            final verticalPadding = short ? 2.0 : 5.0;
+            final lineHeight = compact ? 13.0 : 16.0;
+            final availableHeight = constraints.maxHeight.isFinite
+                ? constraints.maxHeight - verticalPadding * 2
+                : 44.0;
+            final titleLines = allDay
+                ? 2
+                : ((availableHeight - (showTime ? lineHeight : 0)) / lineHeight)
+                      .floor()
+                      .clamp(1, 4);
+            return Stack(
+              children: [
+                Positioned(
+                  left: 0,
+                  top: radius,
+                  bottom: radius,
+                  child: Container(width: 3, color: accentColor),
+                ),
+                Padding(
+                  padding: EdgeInsets.only(
+                    left: compact ? 6 : 10,
+                    right: compact ? 2 : 7,
+                    top: verticalPadding,
+                    bottom: verticalPadding,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        t.title,
+                        maxLines: titleLines,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: compact ? 10.5 : 12,
+                          height: 1.15,
+                          fontWeight: FontWeight.w600,
+                          decoration: done ? TextDecoration.lineThrough : null,
+                          color: textColor,
+                        ),
+                      ),
+                      if (showTime && t.planStart != null)
                         Text(
-                          t.title,
-                          maxLines: allDay
-                              ? 2
-                              : _blockLineCount(ref.read(pixelPerHourProvider)),
+                          DateUtilsEx.timeRangeText(
+                            t.planStart!,
+                            t.planEnd ??
+                                t.planStart!.add(const Duration(hours: 1)),
+                          ),
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                            decoration: done
-                                ? TextDecoration.lineThrough
-                                : null,
-                            color: textColor,
+                            fontSize: compact ? 8 : 10,
+                            color: textColor.withValues(alpha: 0.9),
                           ),
                         ),
-                        // 仅置顶区跨天定时任务显示起止时刻小字
-                        // （时间轴内定时任务用户要求不显示时间，标题占满全块）
-                        if (showTime && t.planStart != null)
-                          Text(
-                            // 跨天任务：起止两端都带日期（"8月10日 22:00 到
-                            // 8月11日 06:00"），避免只显示时分产生跨天歧义
-                            DateUtilsEx.timeRangeText(
-                              t.planStart!,
-                              t.planEnd ??
-                                  t.planStart!.add(const Duration(hours: 1)),
-                            ),
-                            style: TextStyle(
-                              fontSize: 8,
-                              color: textColor.withValues(alpha: 0.85),
-                            ),
-                          ),
-                      ],
-                    ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          ],
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
-  }
-
-  /// 按块高计算可显示的文字行数（10px 字约 14dp 行高）
-  /// 上限 4：标题尽量显示完全（用户要求，超出显示省略号）
-  int _blockLineCount(double pp) {
-    final ps = item.task.planStart;
-    final pe = item.task.planEnd;
-    if (ps == null) return 2;
-    final durMinutes = pe == null
-        ? 60
-        : pe.difference(ps).inMinutes.clamp(1, 1440);
-    final heightDp = durMinutes / 60 * pp;
-    final lines = (heightDp / 14).floor();
-    return lines.clamp(1, 4);
   }
 }
 

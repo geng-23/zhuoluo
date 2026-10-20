@@ -228,7 +228,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('2027年3月'), findsOneWidget);
     expect(find.text('周视图'), findsOneWidget);
-    expect(find.byTooltip('添加任务'), findsNothing);
+    expect(find.byTooltip('添加任务'), findsOneWidget);
     final menuSize = tester.getSize(
       find.byKey(const ValueKey('calendar-view-menu')),
     );
@@ -238,6 +238,80 @@ void main() {
     await tester.tap(find.text('日视图'));
     await tester.pumpAndSettle();
     expect(find.text('2027年3月'), findsOneWidget);
+  });
+
+  testWidgets('日历添加入口使用当前选中日期并打开快速添加', (tester) async {
+    await pumpApp(tester);
+    await tester.tap(find.text('日历'));
+    await tester.pumpAndSettle();
+    final scope = ProviderScope.containerOf(
+      tester.element(find.byKey(const ValueKey('calendar-date-title'))),
+    );
+    scope
+        .read(calendarControllerProvider.notifier)
+        .setSelectedDay(DateTime(2027, 3, 18));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-add-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('输入任务，如：下午3点交报告'), findsOneWidget);
+    expect(find.textContaining('2027年3月18日'), findsWidgets);
+  });
+
+  testWidgets('周视图突出今天并标记全天任务区域', (tester) async {
+    await db.ensureDefaultList();
+    final list = await db.getDefaultList();
+    final now = DateTime.now();
+    final day = DateTime(now.year, now.month, now.day);
+    await db.insertTask(
+      TasksCompanion.insert(
+        listId: list.id,
+        title: '全天安排',
+        planStart: Value(day),
+        planEnd: Value(day.add(const Duration(days: 1))),
+        isAllDay: const Value(true),
+        createdAt: now,
+      ),
+    );
+    await pumpApp(tester);
+    await tester.tap(find.text('日历'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('calendar-today-header')), findsWidgets);
+    expect(find.byKey(const ValueKey('calendar-all-day-label')), findsWidgets);
+    expect(find.text('全天安排'), findsWidgets);
+  });
+
+  testWidgets('窄屏日视图的定时任务可读且仍可点按', (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await db.ensureDefaultList();
+    final list = await db.getDefaultList();
+    final now = DateTime.now();
+    final day = DateTime(now.year, now.month, now.day);
+    await db.insertTask(
+      TasksCompanion.insert(
+        listId: list.id,
+        title: '定时安排',
+        planStart: Value(day.add(const Duration(hours: 9))),
+        planEnd: Value(day.add(const Duration(hours: 10))),
+        createdAt: now,
+      ),
+    );
+    await pumpApp(tester);
+    await tester.tap(find.text('日历'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('calendar-view-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('日视图'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    final task = find.text('定时安排');
+    expect(task, findsOneWidget);
+    await tester.ensureVisible(task);
+    await tester.tap(task);
+    await tester.pumpAndSettle();
+    expect(find.text('完成本次'), findsOneWidget);
   });
 
   testWidgets('窄屏上仍可切换视图且顶部不溢出', (tester) async {
@@ -253,7 +327,7 @@ void main() {
     await tester.tap(find.text('月视图'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.byTooltip('添加任务'), findsNothing);
+    expect(find.byTooltip('添加任务'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

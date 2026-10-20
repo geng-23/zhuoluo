@@ -80,6 +80,10 @@ class NotificationService {
   /// 与 debugOverrideScheduler 同属测试通道，生产代码永不设置。
   bool? debugOverridePermission;
 
+  /// 测试替身：强制精确闹钟权限结果（null=未设置，走真实平台）。
+  /// 与 debugOverridePermission 同属测试通道，生产代码永不设置。
+  bool? debugOverrideExactAlarm;
+
   /// 当前缓存的权限结果（供 resume 流程判断"此前被拒 → 现已授权"）
   bool? get permissionCache => _permissionGranted;
 
@@ -424,6 +428,7 @@ class NotificationService {
 
   /// 精确闹钟权限（Android 12+/小米等厂商默认拒绝；未授予时精确调度会失败）
   Future<bool> canScheduleExactAlarms() async {
+    if (debugOverrideExactAlarm != null) return debugOverrideExactAlarm!;
     try {
       final android = _plugin
           .resolvePlatformSpecificImplementation<

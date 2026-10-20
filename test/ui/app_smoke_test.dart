@@ -66,7 +66,8 @@ void main() {
     expect(find.text('周视图'), findsWidgets);
     expect(find.text('日视图'), findsOneWidget);
     expect(find.byTooltip('今天'), findsOneWidget);
-    expect(find.byTooltip('添加任务'), findsOneWidget);
+    // 日历顶栏已精简（de1f236）：添加任务改为长按日期入口
+    expect(find.byTooltip('添加任务'), findsNothing);
     await tester.tapAt(const Offset(700, 100));
     await tester.pumpAndSettle();
 

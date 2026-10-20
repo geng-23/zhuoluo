@@ -25,6 +25,7 @@ void main() {
 
   tearDown(() async {
     NotificationService.instance.debugOverridePermission = null;
+    NotificationService.instance.debugOverrideExactAlarm = null;
     await db.close();
   });
 
@@ -60,24 +61,30 @@ void main() {
     expect(find.text('本地备份'), findsOneWidget);
   });
 
-  testWidgets('通知权限缺失时才显示修复入口', (tester) async {
-    NotificationService.instance.debugOverridePermission = false;
+  testWidgets('提醒设置常驻精确闹钟与自启动入口并显示权限状态', (tester) async {
+    NotificationService.instance.debugOverrideExactAlarm = false;
     await showProfile(tester);
 
     await tester.scrollUntilVisible(
-      find.text('开启通知权限'),
+      find.text('精确闹钟'),
       200,
       scrollable: find.byType(Scrollable).first,
     );
-    expect(find.text('自启动'), findsOneWidget);
-    expect(find.text('开启通知权限'), findsOneWidget);
+    // 旧版通知权限修复入口已移除（8fe9ab1）
+    expect(find.text('开启通知权限'), findsNothing);
     expect(find.text('发送测试通知'), findsNothing);
+    // 常驻入口：精确闹钟 + 自启动，缺失时副标题提示打开系统设置
+    expect(find.text('精确闹钟'), findsOneWidget);
+    expect(find.text('自启动'), findsOneWidget);
+    expect(find.text('未开启，点此打开系统设置'), findsOneWidget);
 
-    NotificationService.instance.debugOverridePermission = true;
+    // 系统设置中授权后回前台 → 重新检测并显示已开启
+    NotificationService.instance.debugOverrideExactAlarm = true;
     tester.binding.handleAppLifecycleStateChanged(
       AppLifecycleState.resumed,
     );
     await tester.pumpAndSettle();
-    expect(find.text('开启通知权限'), findsNothing);
+    expect(find.text('未开启，点此打开系统设置'), findsNothing);
+    expect(find.text('已开启'), findsOneWidget);
   });
 }

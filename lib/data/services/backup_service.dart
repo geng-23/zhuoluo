@@ -82,10 +82,9 @@ class BackupService {
     return exportToFileImpl(json, toDownloads: toDownloads);
   }
 
-  /// 自动备份写盘（应用私有目录）。独立成方法供测试替身拦截，
-  /// 生产路径直接走 [exportToFileImpl]。
+  /// 自动备份写盘（Android 公共下载目录）。独立成方法供测试替身拦截。
   Future<String> writeAutoBackupFile(String json) =>
-      exportToFileImpl(json, toDownloads: false);
+      writeAutoBackupFileImpl(json);
 
   /// 读取备份文件内容
   Future<String> readFile(String path) => readFileImpl(path);
@@ -110,7 +109,7 @@ class BackupService {
   /// H2：备份文件详情（路径 + 文件名 + 修改时间）
   Future<List<BackupFileInfo>> listBackupInfos() => listBackupInfosImpl();
 
-  /// 自动备份域（应用私有目录）内的备份文件列表——"保留最近 N 份"
+  /// 自动备份域（公共下载目录的独立子目录）内的备份文件列表。
   /// 清理的唯一基准；与 [listBackupInfos] 的全量视图刻意分离，
   /// 防止用户手动导出的备份被自动清理误删。
   Future<List<BackupFileInfo>> listAutoBackupInfos() =>
@@ -271,8 +270,8 @@ class BackupService {
 
   /// 每天首次打开/回到前台自动备份（备份方案设计 3.2）：
   /// 1) Settings 读 lastAutoBackupAt；距现在 <24h → 直接返回
-  /// 2) exportJson → 写应用文档目录（私有目录，规避 Android 11+ 作用域存储限制）
-  /// 3) 清理：**仅私有自动备份域内**的文件按修改时间降序，删除第 11 份及更旧
+  /// 2) 迁移旧私有备份；exportJson → 写公共下载目录
+  /// 3) 清理：**仅自动备份子目录内**的文件按修改时间降序，删除第 11 份及更旧
   ///   （不得用全量视图计数——用户手动导出到下载目录的旧备份会被误删）
   /// 4) 成功 → 写 lastAutoBackupAt；失败 → 写 autoBackupFailed（角标提示）
   Future<bool> autoBackup() {
@@ -287,19 +286,20 @@ class BackupService {
 
   Future<bool> _autoBackupImpl() async {
     if (!autoBackupSupportedImpl()) return false;
-    final last = await _db.getSetting(keyLastAutoBackupAt);
-    if (last != null && last.isNotEmpty) {
-      final t = DateTime.tryParse(last);
-      if (t != null && AppClock.now().difference(t).inHours < 24) {
-        debugPrint('自动备份：距上次（$last）不足 24h，跳过');
-        return true;
-      }
-    }
-    debugPrint('自动备份：执行写盘');
     try {
+      await migrateLegacyAutoBackupsImpl();
+      final last = await _db.getSetting(keyLastAutoBackupAt);
+      if (last != null && last.isNotEmpty) {
+        final t = DateTime.tryParse(last);
+        if (t != null && AppClock.now().difference(t).inHours < 24) {
+          debugPrint('自动备份：距上次（$last）不足 24h，跳过');
+          return true;
+        }
+      }
+      debugPrint('自动备份：执行写盘');
       final json = await exportJson();
       await writeAutoBackupFile(json);
-      // 清理基准 = 自动备份私有目录内的文件（隔离手动导出的备份，防误删）
+      // 清理基准 = 自动备份子目录内的文件（隔离手动导出的备份）
       final infos = await listAutoBackupInfos();
       if (infos.length > keepBackupCount) {
         await deleteBackupFiles(

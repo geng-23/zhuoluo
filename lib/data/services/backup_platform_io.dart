@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -62,8 +62,8 @@ Future<String?> pickBackupFileImpl() async {
   return utf8.decode(await file.readAsBytes());
 }
 
-/// 获取导出目录：
-/// - 下载目录（Android 10+ 的 MediaStore 映射 / iOS / 桌面）
+/// 获取非 Android 平台的导出目录：
+/// - 下载目录（iOS / 桌面）
 /// - 不可用时回退应用文档目录
 /// 此前硬编码 /storage/emulated/0/Download——Android 9 及以下
 /// 无 WRITE_EXTERNAL_STORAGE 权限必失败，iOS/桌面会建在错误位置。
@@ -73,11 +73,14 @@ Future<Directory> _exportBase() async {
   return getApplicationDocumentsDirectory();
 }
 
-/// 导出备份 JSON 到文件（下载目录或应用文档目录），返回文件路径
+/// 导出备份 JSON 到文件，Android 下载目录通过 MediaStore 写入。
 Future<String> exportToFileImpl(
   String json, {
   required bool toDownloads,
 }) async {
+  if (Platform.isAndroid && toDownloads) {
+    return (await exportToUserLocationImpl(json))!;
+  }
   final base = toDownloads
       ? await _exportBase()
       : await getApplicationDocumentsDirectory();
@@ -88,13 +91,57 @@ Future<String> exportToFileImpl(
   return file.path;
 }
 
+/// 自动备份写入公共下载目录的独立子目录，避免卸载应用时一起删除。
+Future<String> writeAutoBackupFileImpl(String json) async {
+  if (!Platform.isAndroid) {
+    return exportToFileImpl(json, toDownloads: false);
+  }
+  final path = await _androidBackupChannel.invokeMethod<String>(
+    'saveAutoBackupToDownloads',
+    {'json': json, 'name': _backupFileName()},
+  );
+  if (path == null) throw StateError('无法保存自动备份到下载目录');
+  return path;
+}
+
+/// 旧版自动备份位于应用私有目录。启动时迁移，避免升级后卸载仍丢失旧文件。
+Future<void> migrateLegacyAutoBackupsImpl() async {
+  if (!Platform.isAndroid) return;
+  final files = await _scanBackupDir(await getApplicationDocumentsDirectory());
+  for (final info in files) {
+    final json = await File(info.path).readAsString();
+    final saved = await _androidBackupChannel.invokeMethod<String>(
+      'saveAutoBackupToDownloads',
+      {'json': json, 'name': info.name},
+    );
+    if (saved == null) throw StateError('旧备份迁移失败：${info.name}');
+    await File(info.path).delete();
+  }
+}
+
 /// 读取备份文件内容
-Future<String> readFileImpl(String path) => File(path).readAsString();
+Future<String> readFileImpl(String path) async {
+  if (Platform.isAndroid && path.startsWith('content://')) {
+    final json = await _androidBackupChannel.invokeMethod<String>(
+      'readBackupUri',
+      {'uri': path},
+    );
+    if (json == null) throw StateError('无法读取备份文件');
+    return json;
+  }
+  return File(path).readAsString();
+}
 
 /// 删除备份文件
 Future<void> deleteBackupFilesImpl(List<String> paths) async {
   for (final p in paths) {
     try {
+      if (Platform.isAndroid && p.startsWith('content://')) {
+        await _androidBackupChannel.invokeMethod<bool>('deleteBackupUri', {
+          'uri': p,
+        });
+        continue;
+      }
       final f = File(p);
       if (await f.exists()) {
         await f.delete();
@@ -103,10 +150,18 @@ Future<void> deleteBackupFilesImpl(List<String> paths) async {
   }
 }
 
-/// 备份文件详情（路径 + 文件名 + 修改时间，仅 zhuoluo_backup_ 前缀）。
-/// 全量视图（下载目录 + 应用文档目录等），供备份管理页展示/恢复用。
+/// 备份文件详情（路径/内容 URI + 文件名 + 修改时间）。
+/// Android 下载目录通过 MediaStore 查询，同时包含旧版应用私有备份。
 Future<List<BackupFileInfo>> listBackupInfosImpl() async {
   final files = <BackupFileInfo>[];
+  if (Platform.isAndroid) {
+    files.addAll(await _listAndroidBackups('listDownloadBackups'));
+    files.addAll(
+      await _scanBackupDir(await getApplicationDocumentsDirectory()),
+    );
+    files.sort((a, b) => b.modified.compareTo(a.modified));
+    return files;
+  }
   for (final dir in await _backupDirs()) {
     files.addAll(await _scanBackupDir(dir));
   }
@@ -114,15 +169,29 @@ Future<List<BackupFileInfo>> listBackupInfosImpl() async {
   return files;
 }
 
-/// 自动备份文件列表：**只扫描应用文档目录**（自动备份的写入域）。
+/// 自动备份文件列表：只查询 Downloads/着落/自动备份。
 ///
 /// 自动备份"保留最近 N 份"的清理必须以本列表为基准——若用全量视图
-/// [listBackupInfosImpl] 计数，用户手动导出到下载目录的旧备份会被一并
+/// [listBackupInfosImpl] 计数，用户手动导出到下载目录的备份会被一并
 /// 计入"第 N+1 份及更旧"而遭误删。
 Future<List<BackupFileInfo>> listAutoBackupInfosImpl() async {
-  final files = await _scanBackupDir(await getApplicationDocumentsDirectory());
+  final files = Platform.isAndroid
+      ? await _listAndroidBackups('listAutoBackups')
+      : await _scanBackupDir(await getApplicationDocumentsDirectory());
   files.sort((a, b) => b.modified.compareTo(a.modified));
   return files;
+}
+
+Future<List<BackupFileInfo>> _listAndroidBackups(String method) async {
+  final rows = await _androidBackupChannel.invokeListMethod<Map>(method);
+  return (rows ?? const <Map>[]).map((row) {
+    return BackupFileInfo(
+      path: row['path'] as String,
+      name: row['name'] as String,
+      modified: DateTime.fromMillisecondsSinceEpoch(row['modified'] as int),
+      size: row['size'] as int,
+    );
+  }).toList();
 }
 
 /// 扫描单个目录下的备份文件（zhuoluo_backup_ 前缀 + .json），目录不存在
@@ -150,18 +219,12 @@ Future<List<BackupFileInfo>> _scanBackupDir(Directory dir) async {
   return files;
 }
 
-/// 自动备份是否可用（native：可写应用私有目录）
+/// 自动备份是否可用（native）
 bool autoBackupSupportedImpl() => true;
 
-/// 备份搜索目录（下载目录 + 应用文档目录 + Android 公共下载位置，失败静默跳过）
+/// 非 Android 平台的备份搜索目录。
 Future<List<Directory>> _backupDirs() async {
   final dirs = <Directory>[];
-  if (Platform.isAndroid) {
-    // 方案 A：MediaStore 导出位置（API29+ 为 Download/着落，
-    // API≤28 为 Download 根目录）；自己导出的备份文件可直接读取
-    dirs.add(Directory('/storage/emulated/0/Download/着落'));
-    dirs.add(Directory('/storage/emulated/0/Download'));
-  }
   final downloads = await getDownloadsDirectory();
   if (downloads != null && !dirs.contains(downloads)) dirs.add(downloads);
   dirs.add(await getApplicationDocumentsDirectory());

@@ -16,6 +16,7 @@ import 'package:zhuoluo/data/services/chinese_date_parser.dart' hide TimeOfDay;
 import 'package:zhuoluo/data/services/rrule_expander.dart';
 import 'package:zhuoluo/features/task/providers.dart';
 import 'package:zhuoluo/features/task/task_detail_page.dart';
+import 'package:zhuoluo/shell/tab_swipe_detector.dart';
 import 'package:zhuoluo/features/trash/trash_page.dart';
 import 'package:zhuoluo/core/utils/app_clock.dart';
 import 'package:zhuoluo/core/widgets/app_empty_view.dart';
@@ -37,8 +38,6 @@ class _TaskPageState extends ConsumerState<TaskPage> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   bool _multiSelect = false;
   final Set<int> _selected = {};
-  /// 5.5：空白区导航手势累计位移（防快速轻扫误触）
-  double _navDragDx = 0;
   /// 搜索模式（AppBar 内嵌搜索框）
   bool _searchMode = false;
   final _searchController = TextEditingController();
@@ -347,27 +346,10 @@ class _TaskPageState extends ConsumerState<TaskPage> {
       // 系统返回手势区，Scaffold 默认边缘拖拽会与系统手势竞争导致
       // "左滑想开抽屉却退出 App"（与日历页 drawerEdgeDragWidth: 0 对齐）
       drawerEdgeDragWidth: 0,
-      // 空白处左右滑导航：从左向右滑打开抽屉、从右向左滑切日历（翻页式：下一个 tab）
-      // 5.5 手势优先级：任务卡片上的水平滑动由 Dismissible 赢得（完成/更多操作），
-      // 空白/列表间隙处由本 GestureDetector 接管（切 tab/开抽屉），区域天然隔离。
-      // 加累计位移门槛（>40px）避免快速轻扫误触发。
-      body: GestureDetector(
-        // opaque：空状态/空白区域也能命中手势（否则空任务时滑动无效）
-        behavior: HitTestBehavior.opaque,
-        // 手势开始/取消时重置累计位移（此前只在结束归零，
-        // 手势被取消会残留位移叠加到下一次拖动）
-        onHorizontalDragStart: (_) => _navDragDx = 0,
-        onHorizontalDragUpdate: (d) => _navDragDx += d.delta.dx,
-        onHorizontalDragCancel: () => _navDragDx = 0,
-        onHorizontalDragEnd: (details) {
-          final v = details.primaryVelocity ?? 0;
-          if (v > 300 && _navDragDx > 40) {
-            _scaffoldKey.currentState?.openDrawer();
-          } else if (v < -300 && _navDragDx < -40) {
-            widget.onNavigateNext?.call();
-          }
-          _navDragDx = 0;
-        },
+      // 空白处左右滑导航；明显横向移动才触发，避免上下滚动误切页面。
+      body: TabSwipeDetector(
+        onSwipeRight: () => _scaffoldKey.currentState?.openDrawer(),
+        onSwipeLeft: widget.onNavigateNext,
         child: state.loading
             ? const Center(child: CircularProgressIndicator())
             : _buildBody(state),

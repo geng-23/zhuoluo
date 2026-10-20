@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:zhuoluo/shell/tab_swipe_detector.dart';
 import 'package:zhuoluo/core/providers/db_provider.dart';
 import 'package:zhuoluo/core/services/haptics_service.dart';
 import 'package:zhuoluo/core/services/sound_service.dart';
@@ -142,17 +143,9 @@ class _QuadrantPageState extends ConsumerState<QuadrantPage> {
       // 空白处左右滑导航（翻页式：从左向右滑=上一个 tab=日历，从右向左滑=下一个 tab=我的）
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : GestureDetector(
-              // opaque：空象限（无任务）时空白区域也能触发切 tab
-              behavior: HitTestBehavior.opaque,
-              onHorizontalDragEnd: (details) {
-                final v = details.primaryVelocity ?? 0;
-                if (v > 300) {
-                  widget.onNavigateLeft?.call();
-                } else if (v < -300) {
-                  widget.onNavigateRight?.call();
-                }
-              },
+          : TabSwipeDetector(
+              onSwipeRight: widget.onNavigateLeft,
+              onSwipeLeft: widget.onNavigateRight,
               child: Padding(
                 padding: const EdgeInsets.all(8),
                 child: Column(

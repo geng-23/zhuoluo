@@ -1,14 +1,18 @@
 package com.zhuoluo.zhuoluo
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.ActivityNotFoundException
 import android.content.ContentValues
+import android.content.ContentUris
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.PowerManager
 import android.provider.MediaStore
 import android.provider.Settings
@@ -23,6 +27,16 @@ import java.io.File
 import java.io.FileOutputStream
 
 class MainActivity : FlutterActivity() {
+
+    private data class PendingBackupWrite(
+        val json: String,
+        val name: String,
+        val auto: Boolean,
+        val result: MethodChannel.Result,
+    )
+
+    private var pendingBackupWrite: PendingBackupWrite? = null
+    private val backupStoragePermissionRequest = 2147
 
     companion object {
         /** 番茄钟桥通道（进程存活时非空；供 [PomodoroActionReceiver] 转发动作到 Dart 主隔离区） */
@@ -279,11 +293,49 @@ class MainActivity : FlutterActivity() {
                         result.error("bad_args", "参数缺失", null)
                         return@setMethodCallHandler
                     }
+                    saveBackupWithPermission(json, name, auto = false, result)
+                }
+                "saveAutoBackupToDownloads" -> {
+                    val json = call.argument<String>("json")
+                    val name = call.argument<String>("name")
+                    if (json == null || name == null) {
+                        result.error("bad_args", "参数缺失", null)
+                        return@setMethodCallHandler
+                    }
+                    saveBackupWithPermission(json, name, auto = true, result)
+                }
+                "listDownloadBackups", "listAutoBackups" -> {
                     try {
-                        val path = saveBackup(json, name)
-                        result.success(path)
+                        result.success(listDownloadBackups(call.method == "listAutoBackups"))
                     } catch (e: Exception) {
-                        result.error("save_failed", e.message ?: "保存失败", null)
+                        result.error("list_failed", e.message ?: "读取备份列表失败", null)
+                    }
+                }
+                "readBackupUri" -> {
+                    val uri = call.argument<String>("uri")
+                    if (uri == null) {
+                        result.error("bad_args", "文件地址缺失", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val text = contentResolver.openInputStream(Uri.parse(uri))
+                            ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                            ?: throw IllegalStateException("无法读取备份文件")
+                        result.success(text)
+                    } catch (e: Exception) {
+                        result.error("read_failed", e.message ?: "读取备份失败", null)
+                    }
+                }
+                "deleteBackupUri" -> {
+                    val uri = call.argument<String>("uri")
+                    if (uri == null) {
+                        result.error("bad_args", "文件地址缺失", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        result.success(contentResolver.delete(Uri.parse(uri), null, null) > 0)
+                    } catch (e: Exception) {
+                        result.error("delete_failed", e.message ?: "删除备份失败", null)
                     }
                 }
                 // 返回当前系统时区 IANA ID（如 Asia/Shanghai、America/Los_Angeles）。
@@ -334,35 +386,157 @@ class MainActivity : FlutterActivity() {
     }
 
     /** 写入公共下载目录，返回展示路径。 */
-    private fun saveBackup(json: String, name: String): String {
+    private fun saveBackupWithPermission(
+        json: String,
+        name: String,
+        auto: Boolean,
+        result: MethodChannel.Result,
+    ) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+        ) {
+            if (pendingBackupWrite != null) {
+                result.error("save_busy", "正在等待存储权限", null)
+                return
+            }
+            pendingBackupWrite = PendingBackupWrite(json, name, auto, result)
+            requestPermissions(
+                arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                backupStoragePermissionRequest,
+            )
+            return
+        }
+        try {
+            result.success(saveBackup(json, name, auto))
+        } catch (e: Exception) {
+            result.error("save_failed", e.message ?: "保存失败", null)
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != backupStoragePermissionRequest) return
+        val pending = pendingBackupWrite ?: return
+        pendingBackupWrite = null
+        if (grantResults.firstOrNull() != PackageManager.PERMISSION_GRANTED) {
+            pending.result.error("permission_denied", "未获得下载目录写入权限", null)
+            return
+        }
+        try {
+            pending.result.success(saveBackup(pending.json, pending.name, pending.auto))
+        } catch (e: Exception) {
+            pending.result.error("save_failed", e.message ?: "保存失败", null)
+        }
+    }
+
+    private fun saveBackup(json: String, name: String, auto: Boolean = false): String {
+        val relativeDir = if (auto) "Download/着落/自动备份" else "Download/着落"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                 put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/着落")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, relativeDir)
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             val resolver = contentResolver
             val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 ?: throw IllegalStateException("无法创建下载文件")
-            resolver.openOutputStream(uri)?.use { out ->
-                out.write(json.toByteArray(Charsets.UTF_8))
-            } ?: throw IllegalStateException("无法写入下载文件")
-            values.clear()
-            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-            // 返回展示路径（备份管理据此扫描）
-            return "Download/着落/$name"
+            try {
+                resolver.openOutputStream(uri)?.use { out ->
+                    out.write(json.toByteArray(Charsets.UTF_8))
+                } ?: throw IllegalStateException("无法写入下载文件")
+                values.clear()
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                if (resolver.update(uri, values, null, null) == 0) {
+                    throw IllegalStateException("无法完成下载文件写入")
+                }
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null)
+                throw e
+            }
+            return "$relativeDir/$name"
         }
-        // Android 9 及以下：直接写公共下载目录（需 WRITE_EXTERNAL_STORAGE，已在 Manifest 声明）
-        val dir = File("/storage/emulated/0/Download")
+        // Android 9 及以下：直接写公共下载目录（需存储权限）。
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val dir = if (auto) File(downloads, "着落/自动备份") else downloads
         if (!dir.exists()) {
-            dir.mkdirs()
+            if (!dir.mkdirs()) throw IllegalStateException("无法创建下载目录")
         }
         val file = File(dir, name)
         FileOutputStream(file).use { out ->
             out.write(json.toByteArray(Charsets.UTF_8))
         }
         return file.absolutePath
+    }
+
+    /** 查询本应用写入的公共下载目录备份；自动备份与手动导出各有独立目录。 */
+    private fun listDownloadBackups(autoOnly: Boolean): List<Map<String, Any>> {
+        val result = mutableListOf<Map<String, Any>>()
+        val autoPath = "Download/着落/自动备份/"
+        val manualPath = "Download/着落/"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val projection = arrayOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.DATE_MODIFIED,
+                MediaStore.MediaColumns.RELATIVE_PATH,
+            )
+            val selection = if (autoOnly) {
+                "${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
+            } else {
+                "${MediaStore.MediaColumns.RELATIVE_PATH} IN (?, ?)"
+            }
+            val args = if (autoOnly) arrayOf(autoPath) else arrayOf(autoPath, manualPath)
+            contentResolver.query(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                args,
+                null,
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+                val timeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(nameColumn) ?: continue
+                    if (!name.startsWith("zhuoluo_backup_") || !name.endsWith(".json")) continue
+                    val uri = ContentUris.withAppendedId(
+                        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        cursor.getLong(idColumn),
+                    )
+                    result.add(mapOf(
+                        "path" to uri.toString(),
+                        "name" to name,
+                        "size" to cursor.getLong(sizeColumn).toInt(),
+                        "modified" to cursor.getLong(timeColumn) * 1000,
+                    ))
+                }
+            }
+            return result
+        }
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val dirs = if (autoOnly) {
+            listOf(File(downloads, "着落/自动备份"))
+        } else {
+            listOf(File(downloads, "着落/自动备份"), File(downloads, "着落"), downloads)
+        }
+        for (dir in dirs) {
+            for (file in dir.listFiles().orEmpty()) {
+                if (!file.isFile || !file.name.startsWith("zhuoluo_backup_") || !file.name.endsWith(".json")) continue
+                result.add(mapOf(
+                    "path" to file.absolutePath,
+                    "name" to file.name,
+                    "size" to file.length().toInt(),
+                    "modified" to file.lastModified(),
+                ))
+            }
+        }
+        return result
     }
 }

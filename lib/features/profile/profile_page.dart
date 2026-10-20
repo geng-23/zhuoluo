@@ -14,6 +14,7 @@ import 'package:zhuoluo/features/profile/habit_page.dart';
 import 'package:zhuoluo/features/profile/pomodoro_page.dart';
 import 'package:zhuoluo/features/profile/preferences_page.dart';
 import 'package:zhuoluo/features/statistics/statistics_page.dart';
+import 'package:zhuoluo/shell/tab_swipe_detector.dart';
 
 /// 我的页：工具入口 + 设置
 class ProfilePage extends ConsumerWidget {
@@ -32,13 +33,8 @@ class ProfilePage extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('我的')),
       // 空白处从左向右滑切四象限（翻页式：上一个 tab；列表垂直滚动不冲突）
-      body: GestureDetector(
-        onHorizontalDragEnd: (details) {
-          final v = details.primaryVelocity ?? 0;
-          if (v > 300) {
-            onNavigateLeft?.call();
-          }
-        },
+      body: TabSwipeDetector(
+        onSwipeRight: onNavigateLeft,
         child: ListView(
           // 截图③：底部留足 Tab Bar 高度，列表项/副标题不被遮挡
           padding: const EdgeInsets.only(bottom: 140),

@@ -32,12 +32,19 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
 
   Future<void> _load() async {
     final service = ref.read(backupServiceProvider);
-    final files = await service.listBackupInfos();
-    if (mounted) {
-      setState(() {
-        _files = files;
-        _loading = false;
-      });
+    try {
+      final files = await service.listBackupInfos();
+      if (mounted) {
+        setState(() {
+          _files = files;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        showAppSnackBar(context, '读取备份列表失败：$e', icon: Icons.error_outline);
+      }
     }
   }
 
@@ -130,7 +137,17 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
             alignment: Alignment.centerLeft,
             child: Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text('本地备份'),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('本地备份'),
+                  SizedBox(height: 3),
+                  Text(
+                    '每日备份保存在 Downloads/着落/自动备份',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
             ),
           ),
           Expanded(
@@ -140,7 +157,7 @@ class _BackupManagePageState extends ConsumerState<BackupManagePage> {
                 ? const AppEmptyView(
                     icon: Icons.inventory_2_outlined,
                     title: '暂无备份文件',
-                    subtitle: '换机或重装前，请先导出备份文件',
+                    subtitle: '重装后可从 Downloads/着落 中选择备份导入',
                   )
                 : Column(
                     children: [

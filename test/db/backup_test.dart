@@ -319,15 +319,15 @@ void main() {
   });
 
   group('自动备份清理域隔离', () {
-    test('保留份数清理只删私有域文件，手动导出的旧备份不被误删', () async {
+    test('保留份数只清理 Downloads 自动备份目录，手动导出不被误删', () async {
       await db.ensureDefaultList();
       final base = DateTime.now();
       final service = _IsolationBackupService(db);
-      // 私有域：11 份自动备份（新 → 旧）
+      // Downloads 独立子目录：11 份自动备份（新 → 旧）
       for (var i = 0; i < 11; i++) {
         service.autoDir.add(
           BackupFileInfo(
-            path: '/private/zhuoluo_backup_$i.json',
+            path: '/Download/着落/自动备份/zhuoluo_backup_$i.json',
             name: 'zhuoluo_backup_$i.json',
             modified: base.subtract(Duration(minutes: i)),
             size: 10,
@@ -349,19 +349,19 @@ void main() {
       expect(service.wroteAutoBackup, isTrue);
       // 只删私有域内最旧一份；手动导出文件不在删除列表
       expect(service.deletedPaths, [
-        '/private/zhuoluo_backup_10.json',
-      ], reason: '清理只作用于自动备份私有目录（保留 10 份）');
+        '/Download/着落/自动备份/zhuoluo_backup_10.json',
+      ], reason: '清理只作用于自动备份子目录（保留 10 份）');
     });
   });
 }
 
-/// 隔离测试替身：私有域/全量视图分离注入，拦截写盘与删除动作。
+/// 隔离测试替身：自动备份域/全量视图分离注入，拦截写盘与删除动作。
 /// [listBackupInfos] 故意返回"私有域 + 手动导出域"的并集——若实现回退为
 /// 用全量视图做清理计数，manual 文件会被误删导致用例失败。
 class _IsolationBackupService extends BackupService {
   _IsolationBackupService(super.db);
 
-  /// 自动备份私有目录内容（listAutoBackupInfos 的返回基准）
+  /// 自动备份子目录内容（listAutoBackupInfos 的返回基准）
   final List<BackupFileInfo> autoDir = [];
 
   /// 用户手动导出的备份（只出现在全量视图中）
@@ -382,7 +382,7 @@ class _IsolationBackupService extends BackupService {
   @override
   Future<String> writeAutoBackupFile(String json) async {
     wroteAutoBackup = true;
-    return '/private/fake.json';
+    return '/Download/着落/自动备份/fake.json';
   }
 
   @override

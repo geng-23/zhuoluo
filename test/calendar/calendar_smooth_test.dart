@@ -433,7 +433,7 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets('小时刻度在左侧栏居中并与小时色块纵向对齐', (tester) async {
+    testWidgets('小时刻度在左侧栏居中并与色块间隙纵向对齐', (tester) async {
       await db.ensureDefaultList();
       final container = makeContainer();
       await tester.pumpWidget(
@@ -446,6 +446,10 @@ void main() {
       final label = find.byKey(const ValueKey('calendar-hour-label-6')).first;
       final center = tester.getCenter(label);
       expect(center.dx, closeTo(22, 2), reason: '小时数字应位于 44px 刻度栏中央');
+      final gridTop = tester
+          .getTopLeft(find.byKey(const ValueKey('calendar-hour-grid')).first)
+          .dy;
+      expect(center.dy, closeTo(gridTop, 1), reason: '整点数字应位于小时格上方的空隙中央');
       final nextCenter = tester.getCenter(
         find.byKey(const ValueKey('calendar-hour-label-7')).first,
       );

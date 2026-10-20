@@ -228,7 +228,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('2027年3月'), findsOneWidget);
     expect(find.text('周视图'), findsOneWidget);
-    expect(find.byTooltip('添加任务'), findsOneWidget);
+    expect(find.byKey(const ValueKey('calendar-add-button')), findsNothing);
     final menuSize = tester.getSize(
       find.byKey(const ValueKey('calendar-view-menu')),
     );
@@ -240,21 +240,16 @@ void main() {
     expect(find.text('2027年3月'), findsOneWidget);
   });
 
-  testWidgets('日历添加入口使用当前选中日期并打开快速添加', (tester) async {
+  testWidgets('日历周日视图没有悬浮添加按钮', (tester) async {
     await pumpApp(tester);
     await tester.tap(find.text('日历'));
     await tester.pumpAndSettle();
-    final scope = ProviderScope.containerOf(
-      tester.element(find.byKey(const ValueKey('calendar-date-title'))),
-    );
-    scope
-        .read(calendarControllerProvider.notifier)
-        .setSelectedDay(DateTime(2027, 3, 18));
+    expect(find.byType(FloatingActionButton), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('calendar-view-menu')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('calendar-add-button')));
+    await tester.tap(find.text('日视图'));
     await tester.pumpAndSettle();
-    expect(find.text('输入任务，如：下午3点交报告'), findsOneWidget);
-    expect(find.textContaining('2027年3月18日'), findsWidgets);
+    expect(find.byType(FloatingActionButton), findsNothing);
   });
 
   testWidgets('周视图突出今天并标记全天任务区域', (tester) async {
@@ -276,7 +271,7 @@ void main() {
     await tester.tap(find.text('日历'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('calendar-today-header')), findsWidgets);
-    expect(find.byKey(const ValueKey('calendar-all-day-label')), findsWidgets);
+    expect(find.byKey(const ValueKey('calendar-all-day-label')), findsNothing);
     expect(find.text('全天安排'), findsWidgets);
   });
 
@@ -327,7 +322,7 @@ void main() {
     await tester.tap(find.text('月视图'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.byTooltip('添加任务'), findsOneWidget);
+    expect(find.byType(FloatingActionButton), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

@@ -493,21 +493,22 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                     final hour = startEff + i;
                                     return SizedBox(
                                       height: pp,
-                                      // 小时数字位于对应色块中心；末尾 23 是结束刻度。
+                                      // 整点数字居于相邻小时格的空隙中。
                                       child: Align(
-                                        alignment: hour == endHour
-                                            ? Alignment.topCenter
-                                            : Alignment.center,
-                                        child: Text(
-                                          hour.toString().padLeft(2, '0'),
-                                          key: ValueKey(
-                                            'calendar-hour-label-$hour',
-                                          ),
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            height: 1,
-                                            fontWeight: FontWeight.w500,
-                                            color: scheme.onSurfaceVariant,
+                                        alignment: Alignment.topCenter,
+                                        child: FractionalTranslation(
+                                          translation: const Offset(0, -0.5),
+                                          child: Text(
+                                            hour.toString().padLeft(2, '0'),
+                                            key: ValueKey(
+                                              'calendar-hour-label-$hour',
+                                            ),
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              height: 1,
+                                              fontWeight: FontWeight.w500,
+                                              color: scheme.onSurfaceVariant,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -534,6 +535,9 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                           Positioned.fill(
                                             child: IgnorePointer(
                                               child: CustomPaint(
+                                                key: const ValueKey(
+                                                  'calendar-hour-grid',
+                                                ),
                                                 painter: _HourCellGridPainter(
                                                   color: scheme.primaryContainer
                                                       .withValues(
@@ -1055,23 +1059,7 @@ class AllDayBarState extends ConsumerState<AllDayBar> {
           children: [
             Row(
               children: [
-                SizedBox(
-                  width: 44,
-                  child: hasItems
-                      ? Padding(
-                          padding: const EdgeInsets.only(left: 5, top: 5),
-                          child: Text(
-                            '全天',
-                            key: const ValueKey('calendar-all-day-label'),
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        )
-                      : null,
-                ),
+                const SizedBox(width: 44),
                 SizedBox(
                   key: _contentKey,
                   width: contentWidth,

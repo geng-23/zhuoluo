@@ -145,15 +145,6 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
             ),
           ],
         ),
-        floatingActionButton: FloatingActionButton(
-          key: const ValueKey('calendar-add-button'),
-          tooltip: '添加任务',
-          onPressed: () {
-            _closeMiniMonth();
-            _openQuickAdd(context, state.selectedDay);
-          },
-          child: const Icon(Icons.add_rounded, size: 30),
-        ),
         body: Stack(
           children: [
             // 视图铺满全屏

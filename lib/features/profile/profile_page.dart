@@ -293,7 +293,7 @@ class _IconLeading extends StatelessWidget {
   }
 }
 
-/// 提醒设置：自启动常驻，通知权限缺失时才提供修复入口。
+/// 提醒设置：精确闹钟与自启动。
 class _ReminderSettingsTile extends ConsumerStatefulWidget {
   const _ReminderSettingsTile();
 
@@ -304,14 +304,14 @@ class _ReminderSettingsTile extends ConsumerStatefulWidget {
 
 class _ReminderSettingsTileState extends ConsumerState<_ReminderSettingsTile>
     with WidgetsBindingObserver {
-  bool? _notificationsEnabled;
+  bool? _exactAlarmEnabled;
   bool _autoStartHintPending = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _checkNotificationPermission();
+    _checkExactAlarmPermission();
   }
 
   @override
@@ -323,7 +323,7 @@ class _ReminderSettingsTileState extends ConsumerState<_ReminderSettingsTile>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
-    _checkNotificationPermission();
+    _checkExactAlarmPermission();
     if (_autoStartHintPending) {
       _autoStartHintPending = false;
       showAppSnackBar(
@@ -334,17 +334,26 @@ class _ReminderSettingsTileState extends ConsumerState<_ReminderSettingsTile>
     }
   }
 
-  Future<void> _checkNotificationPermission() async {
+  Future<void> _checkExactAlarmPermission() async {
     final enabled = await ref
         .read(notificationServiceProvider)
-        .areNotificationsEnabled();
-    if (mounted) setState(() => _notificationsEnabled = enabled);
+        .canScheduleExactAlarms();
+    if (mounted) setState(() => _exactAlarmEnabled = enabled);
   }
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
+        ListTile(
+          leading: const _IconLeading(Icons.alarm_outlined),
+          title: const Text('精确闹钟'),
+          subtitle: Text(_statusText(_exactAlarmEnabled)),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => ref
+              .read(notificationServiceProvider)
+              .requestExactAlarmPermission(),
+        ),
         ListTile(
           leading: const _IconLeading(Icons.power_settings_new),
           title: const Text('自启动'),
@@ -358,32 +367,15 @@ class _ReminderSettingsTileState extends ConsumerState<_ReminderSettingsTile>
             ref.read(notificationServiceProvider).openAutoStartSettings();
           },
         ),
-        if (_notificationsEnabled == false) ...[
-          Divider(
-            indent: 56,
-            color: Theme.of(
-              context,
-            ).colorScheme.outlineVariant.withValues(alpha: 0.5),
-          ),
-          ListTile(
-            leading: const _IconLeading(
-              Icons.notifications_off_outlined,
-              color: Colors.orange,
-            ),
-            title: const Text('开启通知权限'),
-            subtitle: Text(
-              '当前无法发送任务和习惯提醒',
-              style: AppTextStyles.subtitle(context),
-            ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              ref.read(notificationServiceProvider).openNotificationSettings();
-            },
-          ),
-        ],
       ],
     );
   }
+
+  String _statusText(bool? enabled) => switch (enabled) {
+    true => '已开启',
+    false => '未开启，点此打开系统设置',
+    null => '检查中…',
+  };
 }
 
 // ================= 音效 / 震动开关 =================

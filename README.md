@@ -28,7 +28,7 @@ WebDAV 仅接受 **HTTPS** 地址。WebDAV 账号密码只保存在本机，不�
 flutter pub get
 flutter analyze
 flutter test
-flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64
+flutter build apk --release
 ```
 
 ## 许可

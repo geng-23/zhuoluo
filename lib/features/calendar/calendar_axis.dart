@@ -8,9 +8,10 @@ const endHour = 23;
 /// 双指缩放动态调整，下限由视口高度决定（整屏显示全部时段）
 const defaultPixelPerHour = 64.0;
 
-/// 时间轴 ListView 上下留白（半行高），轴顶部在视口内的偏移基准。
+/// 时间轴顶部紧贴日期/全天区，底部保留结束刻度的显示空间。
 /// 虚影/落点换算需用它从「视口顶部」推算轴顶部 offset=0 的全局 y。
-const axisTopPadding = 32.0;
+const axisTopPadding = 8.0;
+const axisBottomPadding = 32.0;
 
 /// 按天索引 key（与 CalendarController 的 byDay 同口径； 统一按应用时区）
 int dayKey(DateTime d) {

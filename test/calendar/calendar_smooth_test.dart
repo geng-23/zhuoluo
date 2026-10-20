@@ -433,7 +433,7 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets('左时间栏贴屏幕左缘（左侧 0 收窄）', (tester) async {
+    testWidgets('小时刻度在左侧栏居中并与小时色块纵向对齐', (tester) async {
       await db.ensureDefaultList();
       final container = makeContainer();
       await tester.pumpWidget(
@@ -443,11 +443,13 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      // 小时刻度 '06' 左缘应贴近屏幕左缘。
-      final left = tester
-          .getTopLeft(find.byKey(const ValueKey('calendar-hour-label-6')).first)
-          .dx;
-      expect(left, lessThan(12), reason: '左时间栏应贴屏幕左缘（实际 $left）');
+      final label = find.byKey(const ValueKey('calendar-hour-label-6')).first;
+      final center = tester.getCenter(label);
+      expect(center.dx, closeTo(22, 2), reason: '小时数字应位于 44px 刻度栏中央');
+      final nextCenter = tester.getCenter(
+        find.byKey(const ValueKey('calendar-hour-label-7')).first,
+      );
+      expect(nextCenter.dy - center.dy, closeTo(64, 1), reason: '刻度应与每小时格等距');
     });
 
     testWidgets('左缘手势区（44px 覆盖时间栏）不挡任务块点击', (tester) async {

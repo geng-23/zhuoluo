@@ -457,10 +457,12 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                   Expanded(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        // 缩放最小值：整屏显示全部时段（含轴上下各半行留白），
+                        // 缩放最小值：整屏显示全部时段（含首尾留白），
                         // 缩到最小时 6-23 点全部可见、零滚动
                         final minPp =
-                            (constraints.maxHeight - axisTopPadding * 2) /
+                            (constraints.maxHeight -
+                                axisTopPadding -
+                                axisBottomPadding) /
                             totalHours;
                         return RawGestureDetector(
                           gestures: <Type, GestureRecognizerFactory>{
@@ -482,37 +484,32 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                 child: ListView.builder(
                                   controller: _timeBarController,
                                   physics: const NeverScrollableScrollPhysics(),
-                                  // 上下各留半行高（与右侧内容对称），让首尾小时刻度完整显示
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: axisTopPadding,
+                                  padding: const EdgeInsets.only(
+                                    top: axisTopPadding,
+                                    bottom: axisBottomPadding,
                                   ),
                                   itemCount: totalHours + 1,
                                   itemBuilder: (context, i) {
                                     final hour = startEff + i;
                                     return SizedBox(
                                       height: pp,
-                                      // 小时数字与对应的圆角小时格顶部对齐。
-                                      child: Stack(
-                                        clipBehavior: Clip.none,
-                                        children: [
-                                          Positioned(
-                                            left: 6,
-                                            top: 5,
-                                            child: Text(
-                                              hour.toString().padLeft(2, '0'),
-                                              key: ValueKey(
-                                                'calendar-hour-label-$hour',
-                                              ),
-                                              textAlign: TextAlign.right,
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                height: 1,
-                                                fontWeight: FontWeight.w500,
-                                                color: scheme.onSurfaceVariant,
-                                              ),
-                                            ),
+                                      // 小时数字位于对应色块中心；末尾 23 是结束刻度。
+                                      child: Align(
+                                        alignment: hour == endHour
+                                            ? Alignment.topCenter
+                                            : Alignment.center,
+                                        child: Text(
+                                          hour.toString().padLeft(2, '0'),
+                                          key: ValueKey(
+                                            'calendar-hour-label-$hour',
                                           ),
-                                        ],
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            height: 1,
+                                            fontWeight: FontWeight.w500,
+                                            color: scheme.onSurfaceVariant,
+                                          ),
+                                        ),
                                       ),
                                     );
                                   },
@@ -523,9 +520,9 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                 child: ListView(
                                   controller: _scrollController,
                                   // 与左侧时间栏同步偏移，保持线对齐；
-                                  // 上下各留半行（32px），首尾小时刻度留白对称
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: axisTopPadding,
+                                  padding: const EdgeInsets.only(
+                                    top: axisTopPadding,
+                                    bottom: axisBottomPadding,
                                   ),
                                   children: [
                                     // 时间轴主体（每个日期 × 小时为一个圆角格）
@@ -543,8 +540,8 @@ class TimeAxisViewState extends ConsumerState<TimeAxisView> {
                                                         alpha:
                                                             scheme.brightness ==
                                                                 Brightness.dark
-                                                            ? 0.42
-                                                            : 0.56,
+                                                            ? 0.28
+                                                            : 0.36,
                                                       ),
                                                   dayCount: days.length,
                                                   hourCount: totalHours,
